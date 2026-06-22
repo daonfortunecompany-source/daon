@@ -18,7 +18,10 @@ loadEnv(path.join(ROOT_DIR, '.env'));
 const PORT = Number(process.env.PORT || 3000);
 const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
 const PREMIUM_PRICE = Number(process.env.PREMIUM_PRICE || 19000);
-const SAJU_PROVIDER = (process.env.SAJU_PROVIDER || 'fortuneteller').toLowerCase();
+const SAJU_PROVIDER = (process.env.SAJU_PROVIDER || 'luckyloveme').toLowerCase();
+const LUCKYLOVEME_API_BASE = process.env.LUCKYLOVEME_API_BASE || 'https://luckyloveme.com';
+const LUCKYLOVEME_MANSAE_URL = process.env.LUCKYLOVEME_MANSAE_URL || `${LUCKYLOVEME_API_BASE}/api/mansae`;
+const LUCKYLOVEME_API_KEY = process.env.LUCKYLOVEME_API_KEY || process.env.X_SAJU_BOOK_API_KEY || '';
 const KST_STANDARD_MERIDIAN = 135;
 const SEOUL_LONGITUDE = 126.9780;
 const SEOUL_LOCAL_SOLAR_OFFSET_MINUTES = Math.round((SEOUL_LONGITUDE - KST_STANDARD_MERIDIAN) * 4);
@@ -122,11 +125,11 @@ async function handleSajuSummary(res, body) {
     }
   } else {
     try {
-      result = await analyzeWithFortuneteller(payload);
+      result = await analyzeWithLuckyLovemeMansae(payload);
     } catch (error) {
-      console.error('fortuneteller error:', error);
+      console.error('luckyloveme mansae error:', error);
       result = buildMockSummary(payload, { provider: 'mock-fallback' });
-      result.notice = 'fortuneteller 계산 중 오류가 발생해 임시 요약으로 대체되었습니다.';
+      result.notice = '만세력 API 계산 중 오류가 발생해 임시 요약으로 대체되었습니다.';
     }
   }
 
@@ -222,6 +225,101 @@ async function handlePayFeedback(res, form) {
   });
 
   return sendText(res, 200, 'SUCCESS');
+}
+
+async function analyzeWithLuckyLovemeMansae(payload) {
+  const [birthYear, birthMonth, birthDay] = String(payload.birthDate || '').split('-');
+  const [birthHour, birthMinute] = String(payload.birthTime || '00:00').split(':');
+
+  const requestBody = {
+    year: String(Number(birthYear || 0)),
+    month: String(Number(birthMonth || 0)),
+    day: String(Number(birthDay || 0)),
+    birthHour: String(Number(birthHour || 0)),
+    birthMinute: String(Number(birthMinute || 0)),
+    calendarType: payload.calendar === 'lunar' ? '음력' : '양력',
+    isLeapMonth: Boolean(payload.isLeapMonth)
+  };
+
+  const headers = { 'content-type': 'application/json' };
+  if (LUCKYLOVEME_API_KEY) headers['X-SAJU-BOOK-API-KEY'] = LUCKYLOVEME_API_KEY;
+
+  const response = await fetch(LUCKYLOVEME_MANSAE_URL, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(requestBody)
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.message === 'Invalid API key') {
+    throw new Error(data?.message || `HTTP ${response.status}`);
+  }
+
+  return normalizeLuckyLovemeMansaeResult(data, payload);
+}
+
+function normalizeLuckyLovemeMansaeResult(apiData, payload) {
+  const fallback = buildMockSummary(payload, { provider: 'mock-fallback' });
+  const name = payload?.name || '사용자';
+  const fullData = apiData?.fullData || {};
+
+  const pillarDetails = {
+    year: normalizeLuckyLovemePillar(fullData?.year),
+    month: normalizeLuckyLovemePillar(fullData?.month),
+    day: normalizeLuckyLovemePillar(fullData?.day),
+    hour: normalizeLuckyLovemePillar(apiData?.hourGanji)
+  };
+
+  const dayPillar = pillarDetails.day;
+  const monthPillar = pillarDetails.month;
+  const yearPillar = pillarDetails.year;
+  const hourPillar = pillarDetails.hour;
+
+  const tags = [
+    dayPillar?.ohaeng?.gan ? `${dayPillar.ohaeng.gan} 기운` : '',
+    monthPillar?.ohaeng?.ji ? `${monthPillar.ohaeng.ji} 기운` : '',
+    dayPillar?.sipseong?.ji ? `${dayPillar.sipseong.ji} 관계 포인트` : '',
+    apiData?.birthInfo?.calendarType || ''
+  ].filter(Boolean).slice(0, 4);
+
+  const result = {
+    provider: 'luckyloveme',
+    year: pillarDetails.year?.hangul || fallback.year,
+    month: pillarDetails.month?.hangul || fallback.month,
+    day: pillarDetails.day?.hangul || fallback.day,
+    hour: pillarDetails.hour?.hangul || '',
+    pillarDetails,
+    tags: tags.length ? tags : fallback.tags,
+    summary: `${name}님의 일주는 ${dayPillar?.hangul || fallback.day}(${dayPillar?.hanja || pillarToHanja(dayPillar?.hangul || fallback.day)})이며, ${dayPillar?.ohaeng?.gan || '핵심'} 기운이 중심으로 읽힙니다. ${monthPillar?.hangul || fallback.month}의 흐름이 함께 작용해 전체적으로 ${monthPillar?.ohaeng?.ji || '보조'} 기운의 현실감과 ${dayPillar?.eumyang?.gan || '기본'}의 리듬이 드러납니다.`,
+    trait: `${dayPillar?.sipseong?.gan || '일간'}과 ${dayPillar?.sipseong?.ji || '지지'}의 조합상, 처음에는 신중하게 상황을 살피지만 방향을 정하면 꾸준히 밀고 가는 힘이 있는 타입으로 볼 수 있습니다.`,
+    love: `관계에서는 ${dayPillar?.eumyang?.gan || '기본'} 성향과 ${dayPillar?.sipseong?.ji || '관계'} 포인트가 함께 드러납니다. 편안함과 신뢰를 쌓을수록 본래의 매력이 더 자연스럽게 표현됩니다.`,
+    work: `일과 재물에서는 ${monthPillar?.ohaeng?.gan || '월주'}와 ${yearPillar?.ohaeng?.ji || '연주'} 흐름이 같이 작동합니다. 급하게 넓히기보다 기준을 세우고 구조를 쌓아갈수록 안정감이 커집니다.`,
+    mansaeMeta: {
+      ganji: apiData?.ganji || '',
+      solar: fullData?.양력 || '',
+      lunar: fullData?.음력 || '',
+      dayOfWeek: fullData?.dayOfWeek || '',
+      julianDate: fullData?.julianDate || '',
+      jasiType: apiData?.jasiType || 'none'
+    }
+  };
+
+  result.ui = buildUiModel(result, payload, {
+    intro: `${name}님의 만세력 API 결과를 바탕으로 네 기둥의 천간·지지, 음양, 오행, 십성을 한 화면에서 볼 수 있게 정리했습니다.`,
+    advice: `${dayPillar?.ohaeng?.gan || '핵심'} 기운이 살아나는 선택과 ${monthPillar?.sipseong?.gan || '흐름'}의 장점을 살리는 방향으로 리듬을 잡아보세요.`
+  });
+  return result;
+}
+
+function normalizeLuckyLovemePillar(pillar) {
+  if (!pillar) return null;
+  return {
+    hangul: pillar.hangul || '',
+    hanja: pillar.hanja || '',
+    eumyang: pillar.eumyang || { gan: '', ji: '' },
+    ohaeng: pillar.ohaeng || { gan: '', ji: '' },
+    sipseong: pillar.sipseong || { gan: '', ji: '' }
+  };
 }
 
 async function analyzeWithFortuneteller(payload) {
@@ -356,6 +454,7 @@ function analyzeWithManseryeok(payload) {
     trait: `${dayElement?.stem || '핵심'} 기운과 ${dayElement?.branch || '보조'} 기운이 같이 작동해, 처음에는 신중하게 상황을 살피지만 방향이 정해지면 꾸준히 밀고 가는 성향으로 읽힙니다.`,
     love: `관계에서는 ${dayYinYang?.stem || '기본'} 성향이 뚜렷해 감정 표현의 속도와 거리 조절이 중요합니다. 편안함과 신뢰가 쌓일수록 본래의 매력이 더 자연스럽게 드러나는 타입입니다.`,
     work: `일과 재물에서는 ${pillars?.month || '월주'}와 ${pillars?.year || '연주'}의 흐름이 함께 작동해, 급하게 확장하기보다 기준을 세우고 구조를 쌓아갈수록 안정감이 커집니다.`,
+    pillarDetails: buildFallbackPillarDetails({ year: pillars?.year || '', month: pillars?.month || '', day: pillars?.day || '', hour: pillars?.hour || '' }),
     localSolar: {
       standardMeridian: KST_STANDARD_MERIDIAN,
       longitude: SEOUL_LONGITUDE,
@@ -436,6 +535,39 @@ function buildManseryeokTags({ pillars, pillarsHanja, dayElement, dayYinYang, pa
   return [...new Set(pool.filter(Boolean))].slice(0, 4);
 }
 
+function pillarToHanja(pillar) {
+  const stemMap = { 갑: '甲', 을: '乙', 병: '丙', 정: '丁', 무: '戊', 기: '己', 경: '庚', 신: '辛', 임: '壬', 계: '癸' };
+  const branchMap = { 자: '子', 축: '丑', 인: '寅', 묘: '卯', 진: '辰', 사: '巳', 오: '午', 미: '未', 신: '申', 유: '酉', 술: '戌', 해: '亥' };
+  const text = String(pillar || '').trim();
+  if (text.length < 2) return '-';
+  return `${stemMap[text[0]] || ''}${branchMap[text[1]] || ''}` || '-';
+}
+
+function buildFallbackPillarDetails(pillars = {}) {
+  const yinYangStemMap = { 갑: '양', 을: '음', 병: '양', 정: '음', 무: '양', 기: '음', 경: '양', 신: '음', 임: '양', 계: '음' };
+  const yinYangBranchMap = { 자: '양', 축: '음', 인: '양', 묘: '음', 진: '양', 사: '음', 오: '양', 미: '음', 신: '양', 유: '음', 술: '양', 해: '음' };
+  const ohaengStemMap = { 갑: '목', 을: '목', 병: '화', 정: '화', 무: '토', 기: '토', 경: '금', 신: '금', 임: '수', 계: '수' };
+  const ohaengBranchMap = { 자: '수', 축: '토', 인: '목', 묘: '목', 진: '토', 사: '화', 오: '화', 미: '토', 신: '금', 유: '금', 술: '토', 해: '수' };
+  const make = (pillar, label) => {
+    const text = String(pillar || '');
+    const gan = text[0] || '';
+    const ji = text[1] || '';
+    return {
+      hangul: text,
+      hanja: pillarToHanja(text),
+      eumyang: { gan: yinYangStemMap[gan] || '-', ji: yinYangBranchMap[ji] || '-' },
+      ohaeng: { gan: ohaengStemMap[gan] || '-', ji: ohaengBranchMap[ji] || '-' },
+      sipseong: { gan: label === 'day' ? '일간' : '-', ji: '-' }
+    };
+  };
+  return {
+    year: make(pillars.year, 'year'),
+    month: make(pillars.month, 'month'),
+    day: make(pillars.day, 'day'),
+    hour: make(pillars.hour, 'hour')
+  };
+}
+
 function buildMockSummary(payload, meta = {}) {
   const stems = ['갑', '을', '병', '정', '무', '기', '경', '신', '임', '계'];
   const branches = ['자', '축', '인', '묘', '진', '사', '오', '미', '신', '유', '술', '해'];
@@ -466,7 +598,13 @@ function buildMockSummary(payload, meta = {}) {
     summary: `${elementTags[base % 5][1]} 전체적으로는 부드럽고 섬세한 감각 안에 자신만의 기준이 있는 편으로 보여요. 중요한 순간에는 감정과 현실을 함께 살피며, 서두르기보다 리듬을 만들 때 더 좋은 성과가 납니다.`,
     trait: '처음에는 조심스럽지만 한 번 방향을 정하면 꾸준히 밀고 가는 힘이 있습니다. 주변 분위기를 잘 읽고, 나만의 속도를 지킬 때 안정감이 커집니다.',
     love: '관계에서는 편안함과 신뢰를 중요하게 여기는 편입니다. 감정 표현을 조금 더 자주 해주면 오해가 줄고, 상대와의 온도가 더 잘 맞아갑니다.',
-    work: '일과 재물에서는 급하게 크게 벌리기보다, 잘하는 영역을 반복해서 쌓는 방식이 유리합니다. 장기전에서 강점이 살아나는 타입입니다.'
+    work: '일과 재물에서는 급하게 크게 벌리기보다, 잘하는 영역을 반복해서 쌓는 방식이 유리합니다. 장기전에서 강점이 살아나는 타입입니다.',
+    pillarDetails: buildFallbackPillarDetails({
+      year: makePillar(base + 1),
+      month: makePillar(base + 5),
+      day: makePillar(base + 9),
+      hour: makePillar(base + 13)
+    })
   };
   result.ui = buildUiModel(result, payload);
   return result;
