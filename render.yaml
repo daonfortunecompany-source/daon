@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: daon-saju
+    runtime: node
+    plan: free
+    buildCommand: npm install --no-audit --no-fund
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: SAJU_PROVIDER
+        value: fortuneteller
