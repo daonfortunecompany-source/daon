@@ -3,10 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "scripts": {
-    "start": "node server.mjs",
-    "postinstall": "cd fortuneteller_repo && npm install --no-audit --no-fund"
-  },
+ "scripts": {
+  "start": "node server.mjs"
+}
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.13.3",
     "manseryeok": "^2.0.0"
