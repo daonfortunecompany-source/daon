@@ -282,6 +282,15 @@ function normalizeLuckyLovemeMansaeResult(apiData, payload) {
     apiData?.birthInfo?.calendarType || ''
   ].filter(Boolean).slice(0, 4);
 
+  const interpretation = buildLuckyLovemeInterpretation({
+    name,
+    dayPillar,
+    monthPillar,
+    yearPillar,
+    hourPillar,
+    fallback
+  });
+
   const result = {
     provider: 'luckyloveme',
     year: pillarDetails.year?.hangul || fallback.year,
@@ -290,10 +299,10 @@ function normalizeLuckyLovemeMansaeResult(apiData, payload) {
     hour: pillarDetails.hour?.hangul || '',
     pillarDetails,
     tags: tags.length ? tags : fallback.tags,
-    summary: `${name}님의 일주는 ${dayPillar?.hangul || fallback.day}(${dayPillar?.hanja || pillarToHanja(dayPillar?.hangul || fallback.day)})이며, ${dayPillar?.ohaeng?.gan || '핵심'} 기운이 중심으로 읽힙니다. ${monthPillar?.hangul || fallback.month}의 흐름이 함께 작용해 전체적으로 ${monthPillar?.ohaeng?.ji || '보조'} 기운의 현실감과 ${dayPillar?.eumyang?.gan || '기본'}의 리듬이 드러납니다.`,
-    trait: `${dayPillar?.sipseong?.gan || '일간'}과 ${dayPillar?.sipseong?.ji || '지지'}의 조합상, 처음에는 신중하게 상황을 살피지만 방향을 정하면 꾸준히 밀고 가는 힘이 있는 타입으로 볼 수 있습니다.`,
-    love: `관계에서는 ${dayPillar?.eumyang?.gan || '기본'} 성향과 ${dayPillar?.sipseong?.ji || '관계'} 포인트가 함께 드러납니다. 편안함과 신뢰를 쌓을수록 본래의 매력이 더 자연스럽게 표현됩니다.`,
-    work: `일과 재물에서는 ${monthPillar?.ohaeng?.gan || '월주'}와 ${yearPillar?.ohaeng?.ji || '연주'} 흐름이 같이 작동합니다. 급하게 넓히기보다 기준을 세우고 구조를 쌓아갈수록 안정감이 커집니다.`,
+    summary: interpretation.summary,
+    trait: interpretation.trait,
+    love: interpretation.love,
+    work: interpretation.work,
     mansaeMeta: {
       ganji: apiData?.ganji || '',
       solar: fullData?.양력 || '',
@@ -306,7 +315,7 @@ function normalizeLuckyLovemeMansaeResult(apiData, payload) {
 
   result.ui = buildUiModel(result, payload, {
     intro: `${name}님의 만세력 API 결과를 바탕으로 네 기둥의 천간·지지, 음양, 오행, 십성을 한 화면에서 볼 수 있게 정리했습니다.`,
-    advice: `${dayPillar?.ohaeng?.gan || '핵심'} 기운이 살아나는 선택과 ${monthPillar?.sipseong?.gan || '흐름'}의 장점을 살리는 방향으로 리듬을 잡아보세요.`
+    advice: interpretation.advice
   });
   return result;
 }
@@ -320,6 +329,99 @@ function normalizeLuckyLovemePillar(pillar) {
     ohaeng: pillar.ohaeng || { gan: '', ji: '' },
     sipseong: pillar.sipseong || { gan: '', ji: '' }
   };
+}
+
+function buildLuckyLovemeInterpretation({ name, dayPillar, monthPillar, yearPillar, hourPillar, fallback }) {
+  const dayHangul = dayPillar?.hangul || fallback.day;
+  const dayHanja = dayPillar?.hanja || pillarToHanja(dayHangul);
+  const dayElement = dayPillar?.ohaeng?.gan || '';
+  const monthElement = monthPillar?.ohaeng?.ji || monthPillar?.ohaeng?.gan || '';
+  const yearElement = yearPillar?.ohaeng?.ji || yearPillar?.ohaeng?.gan || '';
+  const relationStar = dayPillar?.sipseong?.ji || '';
+  const monthStar = monthPillar?.sipseong?.gan || monthPillar?.sipseong?.ji || '';
+  const hourStar = hourPillar?.sipseong?.ji || hourPillar?.sipseong?.gan || '';
+  const yinYang = dayPillar?.eumyang?.gan || '';
+
+  const elementSummaryMap = {
+    목: '성장과 확장의 결이 강해 새로운 흐름을 만들려는 성향이 도드라집니다.',
+    화: '표현력과 추진력이 살아 있어 분위기를 움직이는 힘이 비교적 분명하게 드러납니다.',
+    토: '안정감과 현실 감각이 중심축을 이루어 쉽게 흔들리기보다 균형을 잡으려는 면이 강합니다.',
+    금: '기준과 판단력이 뚜렷해 무엇을 남기고 정리할지 비교적 분명하게 보는 편입니다.',
+    수: '관찰력과 유연성이 살아 있어 상황을 읽고 흐름에 맞춰 조정하는 힘이 좋습니다.'
+  };
+  const elementTraitMap = {
+    목: '타고난 기질에서는 자라나게 하고 연결하는 역할을 잘 맡는 편입니다. 새로운 일에도 의미를 찾으면 추진력이 붙습니다.',
+    화: '타고난 기질에서는 표현과 반응 속도가 빠른 편입니다. 마음이 움직이면 실행도 비교적 빠르게 이어집니다.',
+    토: '타고난 기질에서는 안정과 조율을 우선하는 면이 강합니다. 주변을 정리하고 중심을 잡는 역할에 강점이 있습니다.',
+    금: '타고난 기질에서는 기준과 원칙을 세우는 힘이 돋보입니다. 애매한 상태를 오래 두기보다 정리하는 쪽에 가깝습니다.',
+    수: '타고난 기질에서는 상황을 읽고 완급을 조절하는 감각이 좋습니다. 단번에 밀기보다 흐름을 보며 움직이는 타입입니다.'
+  };
+  const elementWorkMap = {
+    목: '일에서는 기획·확장·개선처럼 판을 넓히거나 다음 단계를 설계하는 방식에서 강점이 살아납니다.',
+    화: '일에서는 표현·홍보·설득처럼 사람과 에너지를 움직이는 역할에서 성과가 잘 납니다.',
+    토: '일에서는 운영·관리·조율처럼 구조를 안정시키는 역할에서 신뢰를 얻기 쉽습니다.',
+    금: '일에서는 판단·정리·분석처럼 기준을 세우고 결과물을 다듬는 업무와 잘 맞습니다.',
+    수: '일에서는 정보·상담·기획보조처럼 흐름을 읽고 연결하는 역할에서 강점이 나타납니다.'
+  };
+  const yinYangMap = {
+    양: '겉으로는 비교적 분명하고 직선적인 방식으로 반응하는 편이라 결정을 내리면 속도가 붙는 편입니다.',
+    음: '겉으로 강하게 드러내기보다 한 번 더 생각하고 움직이는 편이라 신중함과 세밀함이 장점으로 작용합니다.'
+  };
+  const relationMap = {
+    비견: '관계에서는 대등함과 자율성을 중요하게 여겨 서로의 영역을 존중해 줄 때 편안함이 커집니다.',
+    겁재: '관계에서는 감정의 온도가 빠르게 올라갈 수 있어 친밀함은 빠르지만 경계 조절이 중요합니다.',
+    식신: '관계에서는 편안하게 챙기고 꾸준히 표현하는 방식이 매력으로 작동합니다.',
+    상관: '관계에서는 솔직한 표현이 강점이지만 말의 강약을 조절할수록 오해를 줄이기 좋습니다.',
+    편재: '관계에서는 분위기를 풀고 기회를 만드는 재치가 강점으로 드러나기 쉽습니다.',
+    정재: '관계에서는 안정감과 책임 있는 태도가 신뢰로 이어지기 쉽습니다.',
+    편관: '관계에서는 긴장감과 기준의식이 함께 작동해 신뢰가 쌓이면 깊이가 빨라집니다.',
+    정관: '관계에서는 예의와 책임감이 분명해 오래 갈수록 신뢰가 커지는 타입에 가깝습니다.',
+    편인: '관계에서는 감정을 천천히 열지만 마음이 맞으면 깊게 이해하려는 태도가 강합니다.',
+    정인: '관계에서는 배려와 보호 본능이 강해 상대를 편안하게 만들어 주는 힘이 있습니다.',
+    일간: '관계에서는 자기 페이스를 지키는 것이 안정감으로 이어집니다.'
+  };
+  const starTraitMap = {
+    비견: '주도권을 스스로 잡고 싶어 하는 성향이 있어 자기 기준이 분명합니다.',
+    겁재: '경쟁심과 돌파력이 있어 답답한 흐름을 오래 견디지 않는 편입니다.',
+    식신: '한 번 흐름을 잡으면 꾸준히 결과를 쌓아 가는 힘이 좋습니다.',
+    상관: '관찰한 것을 말과 행동으로 빠르게 풀어내는 재능이 있습니다.',
+    편재: '현실 감각과 기회 포착 능력이 좋아 사람과 자원을 연결하는 감이 있습니다.',
+    정재: '안정적인 축적과 계획적인 운영에 강점이 있습니다.',
+    편관: '압박이 있을수록 책임감이 올라가고 스스로를 다잡는 힘이 강합니다.',
+    정관: '규칙과 책임을 중시하며 신뢰를 쌓아 가는 방식이 분명합니다.',
+    편인: '직관과 해석력이 살아 있어 남들이 지나치는 포인트를 읽어내는 편입니다.',
+    정인: '배우고 이해한 뒤 자기 것으로 만드는 안정적인 학습력이 강합니다.',
+    일간: '자기 중심축을 세우는 것이 전체 운용의 핵심으로 보입니다.'
+  };
+  const adviceMap = {
+    목: '새로운 일을 너무 넓게 벌리기보다 한두 가지 성장축에 집중할수록 흐름이 좋아집니다.',
+    화: '좋은 에너지가 빠르게 타오르는 타입이라 속도보다 지속성을 의식하면 강점이 오래 갑니다.',
+    토: '안정감이 장점인 만큼 결정을 미루기보다 기준을 세운 뒤 실행으로 이어가는 것이 중요합니다.',
+    금: '판단력이 강한 만큼 스스로의 기준을 너무 엄격하게만 쓰지 않으면 관계와 일 모두가 부드러워집니다.',
+    수: '상황 적응력이 좋은 대신 방향이 분산될 수 있어 우선순위를 수시로 점검하는 것이 도움이 됩니다.'
+  };
+  const monthElementMap = {
+    목: '주변 환경은 확장과 변화의 요구가 들어오는 쪽이라 새로운 제안을 받아들이는 유연함이 중요합니다.',
+    화: '주변 환경은 속도와 반응을 요구하는 편이라 타이밍을 놓치지 않는 감각이 강점이 됩니다.',
+    토: '주변 환경은 안정과 지속성을 요구하는 쪽이라 루틴과 구조를 갖추면 결과가 좋아집니다.',
+    금: '주변 환경은 기준과 결과물을 분명히 보여주길 요구하는 흐름이라 정리력과 정확성이 힘이 됩니다.',
+    수: '주변 환경은 정보와 변화가 자주 오가는 편이라 상황 파악과 조정 능력이 중요합니다.'
+  };
+  const yearElementMap = {
+    목: '기본 바탕에는 성장 지향성이 있어 장기적으로는 계속 발전하는 방향을 선호하는 편입니다.',
+    화: '기본 바탕에는 활동성과 표현력이 있어 사람을 만나며 운이 열리는 경우가 많습니다.',
+    토: '기본 바탕에는 현실성과 책임감이 있어 무너지지 않는 기반을 만드는 힘이 있습니다.',
+    금: '기본 바탕에는 원칙과 완성도 의식이 있어 결과의 질을 챙기려는 성향이 깔려 있습니다.',
+    수: '기본 바탕에는 유연성과 적응력이 있어 상황 변화 속에서도 방향을 조정하는 힘이 있습니다.'
+  };
+
+  const summary = `${name}님의 일주는 ${dayHangul}(${dayHanja})이며, ${dayElement || '핵심'} 일간으로 읽힙니다. ${elementSummaryMap[dayElement] || '핵심 기운이 비교적 또렷하게 드러납니다.'} ${monthElementMap[monthElement] || '월주의 흐름도 함께 읽어야 전체 성향이 더 선명해집니다.'}`;
+  const trait = `${elementTraitMap[dayElement] || '기질적으로는 자기 흐름을 지키려는 힘이 있습니다.'} ${starTraitMap[relationStar] || ''} ${yinYangMap[yinYang] || ''}`.replace(/\s+/g, ' ').trim();
+  const love = `${relationMap[relationStar] || '관계에서는 편안함과 신뢰를 쌓아 갈수록 본래의 장점이 잘 드러납니다.'} ${yinYang === '양' ? '마음을 표현할 때는 속도 조절을 해주면 상대가 더 편안하게 받아들이기 쉽습니다.' : '감정을 속으로만 정리하지 말고 필요한 순간에는 표현을 조금 더 선명하게 해주는 것이 좋습니다.'}`.replace(/\s+/g, ' ').trim();
+  const work = `${elementWorkMap[dayElement] || '일에서는 자기 강점을 구조적으로 쌓아 가는 방식이 잘 맞습니다.'} ${monthElementMap[monthElement] || ''} ${yearElementMap[yearElement] || ''}`.replace(/\s+/g, ' ').trim();
+  const advice = `${adviceMap[dayElement] || '강점이 분산되지 않도록 우선순위를 세워 움직여 보세요.'} ${monthStar ? `${monthStar} 성향이 작동하는 시기에는 주변의 요구를 기회로 바꿔 해석하는 연습이 도움이 됩니다.` : ''} ${hourStar ? `${hourStar} 기운은 후반 실행력과 생활 리듬에 영향을 주니, 하루 루틴을 일정하게 잡는 것이 유리합니다.` : ''}`.replace(/\s+/g, ' ').trim();
+
+  return { summary, trait, love, work, advice };
 }
 
 async function analyzeWithFortuneteller(payload) {
