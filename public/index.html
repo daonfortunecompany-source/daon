@@ -29,6 +29,13 @@
 
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body {
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+
     body {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif;
@@ -476,6 +483,330 @@
       margin-top: 6px;
       font-size: 10px;
       color: var(--muted);
+    }
+
+    .pillar-meta {
+      margin-top: 10px;
+      display: grid;
+      gap: 6px;
+      text-align: left;
+    }
+
+    .pillar-meta-row {
+      display: grid;
+      grid-template-columns: 44px 1fr;
+      gap: 8px;
+      align-items: start;
+      font-size: 11px;
+      line-height: 1.45;
+      color: #6c5b51;
+    }
+
+    .pillar-meta-row b {
+      color: #9b7b68;
+      font-weight: 800;
+    }
+
+    .pillar-meta-row span {
+      font-size: 11px;
+      font-weight: 600;
+      color: #6c5b51;
+      letter-spacing: normal;
+    }
+
+    .result-card-v2 {
+      display: grid;
+      gap: 18px;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      justify-items: stretch;
+      margin-inline: auto;
+    }
+
+    .result-card-v2 > * {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .result-header-v2 {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .result-summary-v2 {
+      background: linear-gradient(135deg, #fffaf5, #ffffff);
+      border: 1px solid #efe2d4;
+      border-radius: 24px;
+      padding: 18px;
+    }
+
+    .reference-panel {
+      background: #fffdfb;
+      border: 1px solid #eadfd3;
+      border-radius: 22px;
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      margin-inline: auto;
+    }
+
+    .panel-title-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .panel-title-row h3 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: -0.03em;
+    }
+
+    .panel-note {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .pillar-matrix-wrap {
+      border: 1px solid #d8ccc0;
+      border-radius: 18px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      background: #fff;
+      width: 100%;
+      max-width: 100%;
+    }
+
+    .pillar-matrix {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .pillar-matrix th, .pillar-matrix td {
+      border-right: 1px solid #e7ddd2;
+      border-bottom: 1px solid #e7ddd2;
+      padding: 10px 6px;
+      text-align: center;
+      vertical-align: middle;
+    }
+
+    .pillar-matrix tr:last-child td, .pillar-matrix tr:last-child th { border-bottom: none; }
+    .pillar-matrix th:last-child, .pillar-matrix td:last-child { border-right: none; }
+
+    .pillar-matrix thead th {
+      background: #fbf6f0;
+      font-size: 13px;
+      font-weight: 800;
+      color: #6f5b50;
+    }
+
+    .pillar-matrix .row-head {
+      width: 70px;
+      background: #f9f4ee;
+      font-size: 12px;
+      font-weight: 800;
+      color: #856d5f;
+    }
+
+    .pillar-main {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .pillar-main strong {
+      font-size: 28px;
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .pillar-main small {
+      font-size: 13px;
+      color: #8b776b;
+      font-weight: 700;
+    }
+
+    .mini-cell {
+      font-size: 12px;
+      line-height: 1.45;
+      color: #59493f;
+      font-weight: 700;
+      word-break: keep-all;
+    }
+
+    .analysis-grid-v2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      align-items: start;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+    }
+
+    .analysis-box-v2 {
+      background: #fff;
+      border: 1px solid #e9dfd3;
+      border-radius: 18px;
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow: hidden;
+      align-content: start;
+    }
+
+    .analysis-box-head {
+      font-size: 14px;
+      font-weight: 900;
+      color: #6b5649;
+    }
+
+    .donut-shell-v2 {
+      width: min(188px, 100%);
+      aspect-ratio: 1 / 1;
+      height: auto;
+      margin: 0 auto;
+      position: relative;
+      display: grid;
+      place-items: center;
+    }
+
+    .donut-chart-v2 {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: #ece6df;
+      position: relative;
+    }
+
+    .donut-chart-v2::after {
+      content: '';
+      position: absolute;
+      inset: 26px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: inset 0 0 0 1px #efe4d9;
+    }
+
+    .donut-center-v2 {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-align: center;
+      z-index: 1;
+      padding: 0 34px;
+      pointer-events: none;
+    }
+
+    .donut-center-v2 strong {
+      display: block;
+      max-width: 100%;
+      font-size: clamp(22px, 5vw, 24px);
+      line-height: 1.1;
+      color: #4f433c;
+      word-break: keep-all;
+    }
+
+    .donut-center-v2 span {
+      display: block;
+      max-width: 100%;
+      font-size: 12px;
+      line-height: 1.35;
+      color: #857265;
+      font-weight: 700;
+      margin-top: 0;
+      word-break: keep-all;
+    }
+
+    .stats-table-v2 {
+      display: grid;
+      gap: 8px;
+      width: 100%;
+      max-width: 100%;
+    }
+
+    .stats-row-v2 {
+      display: grid;
+      grid-template-columns: minmax(0,1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: #faf6f1;
+      font-size: 13px;
+    }
+
+    .stats-row-v2 strong { font-size: 13px; }
+    .stats-row-v2 span { color: #6d5c52; font-weight: 700; }
+
+    .reading-grid-v2 {
+      display: grid;
+      gap: 12px;
+    }
+
+    .reading-card-v2 {
+      border: 1px solid #eadfd2;
+      background: linear-gradient(180deg, #ffffff, #fff9f2);
+      border-radius: 18px;
+      padding: 14px 15px;
+    }
+
+    .reading-kicker {
+      font-size: 13px;
+      font-weight: 900;
+      color: #8f6f5b;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .reading-card-v2 p {
+      margin: 0;
+      line-height: 1.7;
+      color: #544740;
+      font-size: 14px;
+      word-break: keep-all;
+    }
+
+    .wood { color: #4e8fb4; }
+    .fire { color: #e67a7a; }
+    .earth { color: #c89a52; }
+    .metal { color: #6f7287; }
+    .water { color: #394b66; }
+
+    @media (max-width: 920px) {
+      .analysis-grid-v2 { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 720px) {
+      .reference-panel { padding: 14px; }
+      .analysis-box-v2 { padding: 13px; }
+      .pillar-matrix .row-head { width: 58px; }
+      .pillar-main strong { font-size: 24px; }
+      .pillar-matrix th, .pillar-matrix td { padding: 8px 4px; }
+      .donut-shell-v2 { width: min(170px, 100%); }
+      .donut-chart-v2::after { inset: 24px; }
     }
 
     .summary-box {
@@ -1103,6 +1434,21 @@
       .floating-face { width: 56px; }
       .floating-face.sm { width: 44px; }
       .floating-face.lg { width: 66px; }
+
+      .result-card-v2 { gap: 14px; }
+      .result-summary-v2, .reference-panel { padding: 12px; border-radius: 18px; }
+      .panel-title-row h3 { font-size: 18px; }
+      .panel-note { font-size: 11px; }
+      .pillar-matrix .row-head { width: 52px; font-size: 11px; }
+      .pillar-matrix thead th { font-size: 12px; }
+      .pillar-matrix th, .pillar-matrix td { padding: 7px 3px; }
+      .pillar-main strong { font-size: 20px; }
+      .pillar-main small, .mini-cell { font-size: 11px; }
+      .analysis-box-head { font-size: 13px; }
+      .donut-shell-v2 { width: min(148px, 100%); }
+      .donut-center-v2 { padding: 0 20px; gap: 6px; }
+      .donut-center-v2 strong { font-size: 18px; }
+      .donut-center-v2 span, .stats-row-v2 span, .stats-row-v2 strong { font-size: 11px; }
     }
 
     @media (max-width: 360px) {
@@ -1206,37 +1552,87 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     
 
     <section class="section">
-      <div class="card hidden" id="resultCard">
-        <h2>무료 분석 결과</h2>
-        <p class="sub" id="resultIntro">입력한 생년월일시를 바탕으로 바로 확인할 수 있는 핵심 분석을 한 화면에 정리했습니다.</p>
-        <div class="result-shell">
+      <div class="card hidden result-card-v2" id="resultCard">
+        <div class="result-header-v2">
+          <div>
+            <h2>무료 분석 결과</h2>
+            <p class="sub" id="resultIntro">입력한 생년월일시를 바탕으로 네 기둥 구조와 핵심 해석을 한 화면에 정리했습니다.</p>
+          </div>
+          <span class="source-badge" id="sourceBadge">만세력 API</span>
+        </div>
+
+        <div class="result-summary-v2">
           <div class="result-hero">
             <div class="result-hero-top">
-              <span class="eyebrow">A. 기본 분석</span>
-              <span class="source-badge" id="sourceBadge">실시간 요약</span>
+              <span class="eyebrow">FREE SUMMARY</span>
             </div>
             <h3 id="summaryHeadline">사주의 중심 흐름</h3>
             <p id="summaryText"></p>
             <div class="tag-row" id="tagRow"></div>
           </div>
-
-          <div class="pillars" id="pillarsGrid"></div>
-
-          <div class="insight-list">
-            <div class="insight"><div class="icon-ball">🌿</div><div><strong id="traitTitle">기질 요약</strong><div id="traitText" style="margin-top:6px;color:var(--muted);line-height:1.6;font-size:14px;"></div></div></div>
-            <div class="insight"><div class="icon-ball">💞</div><div><strong id="loveTitle">관계 포인트</strong><div id="loveText" style="margin-top:6px;color:var(--muted);line-height:1.6;font-size:14px;"></div></div></div>
-            <div class="insight"><div class="icon-ball">💼</div><div><strong id="workTitle">일·재물 포인트</strong><div id="workText" style="margin-top:6px;color:var(--muted);line-height:1.6;font-size:14px;"></div></div></div>
-          </div>
-
-          <div>
-            <div class="result-section-title">기본 운세</div>
-            <p class="section-mini-copy">무료 분석에서도 성향, 애정운, 직업운, 재물운, 건강운을 바로 확인할 수 있게 구성했습니다.</p>
-            <div class="score-grid" id="fortuneCards" style="margin-top:12px;"></div>
-          </div>
-
-
-          <div class="notice" id="premiumHint"></div>
         </div>
+
+        <section class="reference-panel">
+          <div class="panel-title-row">
+            <h3>사주 원국 구조</h3>
+            <span class="panel-note">참고 이미지를 바탕으로 재구성한 표 형식</span>
+          </div>
+          <div id="pillarMatrix"></div>
+        </section>
+
+        <section class="reference-panel">
+          <div class="panel-title-row">
+            <h3>오행 · 십성 분포</h3>
+            <span class="panel-note">무료 결과용 간단 비중 분석</span>
+          </div>
+          <div class="analysis-grid-v2">
+            <div class="analysis-box-v2">
+              <div class="analysis-box-head">오행 중심</div>
+              <div class="donut-shell-v2">
+                <div class="donut-chart-v2" id="elementRing"></div>
+                <div class="donut-center-v2">
+                  <strong id="elementCoreLabel">-</strong>
+                  <span id="elementCorePct">-</span>
+                </div>
+              </div>
+              <div class="stats-table-v2" id="elementTable"></div>
+            </div>
+
+            <div class="analysis-box-v2">
+              <div class="analysis-box-head">십성 중심</div>
+              <div class="donut-shell-v2">
+                <div class="donut-chart-v2" id="starRing"></div>
+                <div class="donut-center-v2">
+                  <strong id="starCoreLabel">-</strong>
+                  <span id="starCorePct">-</span>
+                </div>
+              </div>
+              <div class="stats-table-v2" id="starTable"></div>
+            </div>
+          </div>
+          <div class="notice" id="premiumHint"></div>
+        </section>
+
+        <section class="reference-panel">
+          <div class="panel-title-row">
+            <h3>핵심 해석 메모</h3>
+            <span class="panel-note">기존 카드형 대신 문서형 요약으로 정리</span>
+          </div>
+          <div class="reading-grid-v2">
+            <article class="reading-card-v2">
+              <div class="reading-kicker" id="traitTitle">타고난 기질</div>
+              <p id="traitText"></p>
+            </article>
+            <article class="reading-card-v2">
+              <div class="reading-kicker" id="loveTitle">관계 포인트</div>
+              <p id="loveText"></p>
+            </article>
+            <article class="reading-card-v2">
+              <div class="reading-kicker" id="workTitle">일·재물 포인트</div>
+              <p id="workText"></p>
+            </article>
+          </div>
+        </section>
       </div>
     </section>
 
@@ -1278,6 +1674,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     const form = document.getElementById('fortuneForm');
     const resultCard = document.getElementById('resultCard');
     const pillarsGrid = document.getElementById('pillarsGrid');
+    const pillarMatrix = document.getElementById('pillarMatrix');
     const tagRow = document.getElementById('tagRow');
     const resultIntro = document.getElementById('resultIntro');
     const sourceBadge = document.getElementById('sourceBadge');
@@ -1386,6 +1783,44 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       return `${stemMap[text[0]] || ''}${branchMap[text[1]] || ''}` || '-';
     }
 
+    function buildFallbackPillarDetails(pillars = {}) {
+      const yinYangStemMap = { 갑: '양', 을: '음', 병: '양', 정: '음', 무: '양', 기: '음', 경: '양', 신: '음', 임: '양', 계: '음' };
+      const yinYangBranchMap = { 자: '양', 축: '음', 인: '양', 묘: '음', 진: '양', 사: '음', 오: '양', 미: '음', 신: '양', 유: '음', 술: '양', 해: '음' };
+      const ohaengStemMap = { 갑: '목', 을: '목', 병: '화', 정: '화', 무: '토', 기: '토', 경: '금', 신: '금', 임: '수', 계: '수' };
+      const ohaengBranchMap = { 자: '수', 축: '토', 인: '목', 묘: '목', 진: '토', 사: '화', 오: '화', 미: '토', 신: '금', 유: '금', 술: '토', 해: '수' };
+      const make = (pillar, label) => {
+        const text = String(pillar || '');
+        const gan = text[0] || '';
+        const ji = text[1] || '';
+        return {
+          hangul: text,
+          hanja: pillarToHanja(text),
+          eumyang: { gan: yinYangStemMap[gan] || '-', ji: yinYangBranchMap[ji] || '-' },
+          ohaeng: { gan: ohaengStemMap[gan] || '-', ji: ohaengBranchMap[ji] || '-' },
+          sipseong: { gan: label === 'day' ? '일간' : '-', ji: '-' }
+        };
+      };
+      return {
+        year: make(pillars.year, 'year'),
+        month: make(pillars.month, 'month'),
+        day: make(pillars.day, 'day'),
+        hour: make(pillars.hour, 'hour')
+      };
+    }
+
+    function formatPillarMeta(detail) {
+      if (!detail) return '';
+      const gan = (detail.hangul || '')[0] || '-';
+      const ji = (detail.hangul || '')[1] || '-';
+      return `
+        <div class="pillar-meta">
+          <div class="pillar-meta-row"><b>천간/지지</b><span>${gan} / ${ji}</span></div>
+          <div class="pillar-meta-row"><b>음양</b><span>${detail.eumyang?.gan || '-'} / ${detail.eumyang?.ji || '-'}</span></div>
+          <div class="pillar-meta-row"><b>오행</b><span>${detail.ohaeng?.gan || '-'} / ${detail.ohaeng?.ji || '-'}</span></div>
+          <div class="pillar-meta-row"><b>십성</b><span>${detail.sipseong?.gan || '-'} / ${detail.sipseong?.ji || '-'}</span></div>
+        </div>`;
+    }
+
     function buildDemoResult(payload) {
       const [y, m, d] = String(payload.birthDate || '1994-08-21').split('-').map(Number);
       const hour = Number(String(payload.birthTime || '00:00').split(':')[0] || 0);
@@ -1400,12 +1835,17 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       const primary = energyPool[base % energyPool.length];
       const secondary = energyPool[(base + 1) % energyPool.length];
       const tags = [primary[0], secondary[0], '차분한 집중형', '관계 균형 중시'];
+      const yearPillar = makePillar(base + 1);
+      const monthPillar = makePillar(base + 5);
+      const dayPillar = makePillar(base + 9);
+      const hourPillar = makePillar(base + 13);
       return {
         provider: 'demo-preview',
-        year: makePillar(base + 1),
-        month: makePillar(base + 5),
-        day: makePillar(base + 9),
-        hour: makePillar(base + 13),
+        year: yearPillar,
+        month: monthPillar,
+        day: dayPillar,
+        hour: hourPillar,
+        pillarDetails: buildFallbackPillarDetails({ year: yearPillar, month: monthPillar, day: dayPillar, hour: hourPillar }),
         tags,
         summary: `${primary[1]} 전체적으로는 섬세한 감각과 현실적인 기준을 함께 가진 흐름으로 읽힙니다. 중요한 선택일수록 속도를 조절하고 리듬을 만들 때 장점이 더 안정적으로 드러납니다.`,
         trait: '처음에는 신중하게 분위기를 살피지만, 한 번 방향을 정하면 꾸준히 밀고 가는 힘이 있습니다. 무리해서 맞추기보다 내 기준을 지킬 때 매력이 더 분명해집니다.',
@@ -1426,154 +1866,140 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       };
     }
 
-    function buildVisualModel(payload, result) {
-      const [y, m, d] = String(payload.birthDate || '1994-08-21').split('-').map(Number);
-      const hour = Number(String(payload.birthTime || '00:00').split(':')[0] || 0);
-      const base = (y || 0) + (m || 0) + (d || 0) + hour;
-      const tags = Array.isArray(result.tags) ? result.tags : [];
-      const coreTag = tags[0] || '균형 기운';
-      const accentTag = tags[1] || '안정 흐름';
+    function getElementClass(element) {
+      return ({ 목: 'wood', 화: 'fire', 토: 'earth', 금: 'metal', 수: 'water' })[element] || '';
+    }
 
-      const scores = {
-        trait: 72 + (base % 18),
-        love: 61 + ((base + 2) % 18),
-        work: 68 + ((base + 4) % 18),
-        wealth: 64 + ((base + 1) % 18),
-        health: 60 + ((base + 5) % 18)
-      };
-
-      const cards = [
-        { key: 'trait', label: '성향', headline: `${coreTag} 중심형`, score: scores.trait, body: shorten(result.trait, 68), note: `핵심 태그: ${coreTag}` },
-        { key: 'love', label: '애정운', headline: '관계의 온도와 균형', score: scores.love, body: shorten(result.love, 68), note: '감정 표현과 신뢰 리듬을 함께 봅니다.' },
-        { key: 'work', label: '직업운', headline: '실리·성과 흐름', score: scores.work, body: shorten(result.work, 68), note: `보조 태그: ${accentTag}` },
-        { key: 'wealth', label: '재물운', headline: '안정형 자산 흐름', score: scores.wealth, body: shorten(result.work, 62), note: '무리한 확장보다 구조 만들기에 강점이 있습니다.' },
-        { key: 'health', label: '건강운', headline: '리듬 관리가 중요', score: scores.health, body: `${coreTag}이 강할수록 무리한 과속보다 수면·식사·스트레스 리듬 관리가 중요합니다.`, note: '컨디션은 누적 피로 관리를 중심으로 봅니다.' }
-      ];
-
-      const elementColors = ['#6cc6ee', '#f28d97', '#f5c65a', '#b7bcc8', '#7fc5c0'];
-      const elementLabels = ['목(木)', '화(火)', '토(土)', '금(金)', '수(水)'];
-      const elementRaw = [
-        ((base + 1) % 5) + 2,
-        ((base + 3) % 5) + 2,
-        ((base + 5) % 5) + 2,
-        ((base + 2) % 4) + 1,
-        ((base + 4) % 4) + 1
-      ];
-      const elementPercents = normalizePercent(elementRaw);
-      const elementStats = elementLabels.map((label, index) => ({ label, value: elementPercents[index], color: elementColors[index] }));
-      const elementCore = elementStats.slice().sort((a, b) => b.value - a.value)[0];
-
-      const starLabels = ['인성', '비겁', '식상', '재성', '관성'];
-      const starColors = ['#8ec9f0', '#c9ced8', '#ffd27a', '#8fd4c5', '#f4a1a1'];
-      const starRaw = [
-        ((base + 2) % 4) + 2,
-        ((base + 5) % 4) + 1,
-        ((base + 1) % 4) + 2,
-        ((base + 4) % 4) + 2,
-        ((base + 6) % 4) + 1
-      ];
-      const starPercents = normalizePercent(starRaw);
-      const starStats = starLabels.map((label, index) => ({ label, value: starPercents[index], color: starColors[index] }));
-      const starCore = starStats.slice().sort((a, b) => b.value - a.value)[0];
-
-      const currentYear = new Date().getFullYear();
-      const currentMonth = new Date().getMonth() + 1;
-      const buildItems = (count, labelBuilder, seedOffset) => Array.from({ length: count }).map((_, index) => ({
-        caption: labelBuilder(index),
-        pillar: makePillar(base + seedOffset + index * 3),
-        sub: index === 0 ? '현재 흐름' : '변화 포인트'
-      }));
-
+    function getElementPalette() {
       return {
-        cards,
-        elementStats,
-        elementCore,
-        starStats,
-        starCore,
-        rows: [
-          { label: '월운', items: buildItems(5, (index) => `${((currentMonth + index - 1) % 12) + 1}월`, 27) }
-        ]
+        '목(木)': '#6daed6',
+        '화(火)': '#ee8a8a',
+        '토(土)': '#e2b766',
+        '금(金)': '#8c91a3',
+        '수(水)': '#556b8a'
       };
     }
 
+    function getTenGodPalette() {
+      return {
+        '비견': '#7b8798', '겁재': '#8f99a8',
+        '식신': '#6e84b8', '상관': '#8090c7',
+        '편재': '#74b9d6', '정재': '#5aa5c6',
+        '편관': '#ef8b83', '정관': '#e27474',
+        '편인': '#d8b36b', '정인': '#c89e57',
+        '일간': '#5f6777'
+      };
+    }
+
+    function countBy(list, order, palette) {
+      const counts = Object.fromEntries(order.map((key) => [key, 0]));
+      list.filter(Boolean).forEach((item) => { if (counts[item] !== undefined) counts[item] += 1; });
+      const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+      return order.map((label) => ({
+        label,
+        value: Number(((counts[label] / total) * 100).toFixed(1)),
+        color: palette[label],
+        count: counts[label]
+      }));
+    }
+
+    function buildAnalysisStats(result) {
+      const details = result.pillarDetails || buildFallbackPillarDetails({ year: result.year, month: result.month, day: result.day, hour: result.hour });
+      const detailList = [details.year, details.month, details.day, details.hour].filter(Boolean);
+      const elementItems = [];
+      const tenGodItems = [];
+      detailList.forEach((detail) => {
+        if (detail?.ohaeng?.gan) elementItems.push(detail.ohaeng.gan);
+        if (detail?.ohaeng?.ji) elementItems.push(detail.ohaeng.ji);
+        if (detail?.sipseong?.gan) tenGodItems.push(detail.sipseong.gan);
+        if (detail?.sipseong?.ji) tenGodItems.push(detail.sipseong.ji);
+      });
+
+      const elementOrder = ['목(木)', '화(火)', '토(土)', '금(金)', '수(水)'];
+      const elementMap = { 목: '목(木)', 화: '화(火)', 토: '토(土)', 금: '금(金)', 수: '수(水)' };
+      const elementStats = countBy(elementItems.map((item) => elementMap[item] || item), elementOrder, getElementPalette());
+
+      const tenGodOrder = ['비견', '겁재', '식신', '상관', '편재', '정재', '편관', '정관', '편인', '정인', '일간'];
+      const tenGodStats = countBy(tenGodItems, tenGodOrder, getTenGodPalette()).filter((item) => item.count > 0);
+
+      const elementCore = elementStats.slice().sort((a, b) => b.value - a.value)[0] || { label: '-', value: 0 };
+      const starCore = tenGodStats.slice().sort((a, b) => b.value - a.value)[0] || { label: '-', value: 0 };
+      return { elementStats, tenGodStats, elementCore, starCore, details };
+    }
+
     function renderRing(target, stats) {
-      const stops = [];
+      if (!target) return;
+      const valid = stats.filter((stat) => stat.value > 0);
+      if (!valid.length) {
+        target.style.background = '#ece6df';
+        return;
+      }
       let current = 0;
-      stats.forEach((stat) => {
-        const next = current + stat.value;
+      const stops = [];
+      valid.forEach((stat, index) => {
+        const next = index === valid.length - 1 ? 100 : Number((current + stat.value).toFixed(1));
         stops.push(`${stat.color} ${current}% ${next}%`);
         current = next;
       });
       target.style.background = `conic-gradient(${stops.join(', ')})`;
     }
 
-    function renderStatList(target, stats) {
-      target.innerHTML = stats.map((stat) => `
-        <div class="stat-row">
-          <strong style="color:${stat.color}">${stat.label}</strong>
-          <span>${stat.value}%</span>
-        </div>
-      `).join('');
+    function renderStatsTable(target, stats, type) {
+      if (!target) return;
+      target.innerHTML = stats.filter((item) => item.value > 0).map((item) => {
+        const labelClass = type === 'element' ? getElementClass(item.label[0]) : '';
+        return `<div class="stats-row-v2"><strong class="${labelClass}" style="color:${item.color}">${item.label}</strong><span>${item.value.toFixed(1)}%</span></div>`;
+      }).join('');
     }
 
-    function renderFortuneCards(items) {
-      fortuneCards.innerHTML = items.map((item) => `
-        <div class="score-card ${item.key}">
-          <div class="score-card-top">
-            <div>
-              <strong>${item.label}</strong>
-              <h4>${item.headline}</h4>
-            </div>
-            <div class="score-badge">${item.score}<br/>점</div>
-          </div>
-          <div class="score-meter"><span style="width:${item.score}%"></span></div>
-          <p>${item.body}</p>
-          <div class="score-note">${item.note}</div>
-        </div>
-      `).join('');
-    }
+    function buildPillarMatrixHtml(result) {
+      const details = result.pillarDetails || buildFallbackPillarDetails({ year: result.year, month: result.month, day: result.day, hour: result.hour });
+      const columns = [
+        { key: 'hour', title: '생시', detail: details.hour },
+        { key: 'day', title: '생일', detail: details.day },
+        { key: 'month', title: '생월', detail: details.month },
+        { key: 'year', title: '생년', detail: details.year }
+      ];
 
-    function renderTimeline(rows) {
-      luckTimeline.innerHTML = rows.map((row) => `
-        <div>
-          <div class="period-label">${row.label}</div>
-          <div class="period-items">
-            ${row.items.map((item) => `
-              <div class="period-item">
-                <em>${item.caption}</em>
-                <strong>${item.pillar}</strong>
-                <span>${item.sub}</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      `).join('');
+      const mainCell = (detail, part) => {
+        if (!detail) return '<div class="mini-cell">-</div>';
+        const hangul = part === 'gan' ? (detail.hangul || '')[0] || '-' : (detail.hangul || '')[1] || '-';
+        const hanja = part === 'gan' ? (detail.hanja || '')[0] || '-' : (detail.hanja || '')[1] || '-';
+        const element = part === 'gan' ? detail.ohaeng?.gan : detail.ohaeng?.ji;
+        return `<div class="pillar-main"><strong class="${getElementClass(element)}">${hangul}</strong><small>${hanja}</small></div>`;
+      };
+
+      const row = (label, renderer) => `<tr><th class="row-head">${label}</th>${columns.map((col) => `<td>${renderer(col.detail)}</td>`).join('')}</tr>`;
+
+      return `
+        <div class="pillar-matrix-wrap">
+          <table class="pillar-matrix">
+            <thead><tr><th class="row-head"></th>${columns.map((col) => `<th>${col.title}</th>`).join('')}</tr></thead>
+            <tbody>
+              ${row('천간', (detail) => mainCell(detail, 'gan'))}
+              ${row('천간 십성', (detail) => `<div class="mini-cell">${detail?.sipseong?.gan || '-'}</div>`)}
+              ${row('지지', (detail) => mainCell(detail, 'ji'))}
+              ${row('지지 십성', (detail) => `<div class="mini-cell">${detail?.sipseong?.ji || '-'}</div>`)}
+              ${row('음양', (detail) => `<div class="mini-cell">${detail?.eumyang?.gan || '-'} / ${detail?.eumyang?.ji || '-'}</div>`)}
+              ${row('오행', (detail) => `<div class="mini-cell">${detail?.ohaeng?.gan || '-'} / ${detail?.ohaeng?.ji || '-'}</div>`)}
+            </tbody>
+          </table>
+        </div>`;
     }
 
     function renderSummary(name, payload, result) {
       const ui = result.ui || {};
-      const visuals = buildVisualModel(payload, result);
+      const analysis = buildAnalysisStats(result);
 
-      pillarsGrid.innerHTML = '';
-      [
-        ['년주', result.year],
-        ['월주', result.month],
-        ['일주', result.day],
-        ['시주', result.hour]
-      ].forEach(([label, value]) => {
-        const div = document.createElement('div');
-        div.className = 'pillar';
-        div.innerHTML = `<em>${label}</em><strong>${value || '-'}</strong><span>${pillarToHanja(value)}</span>${ui.sourceLabel ? `<small>${ui.sourceLabel}</small>` : ''}`;
-        pillarsGrid.appendChild(div);
-      });
+      if (pillarMatrix) pillarMatrix.innerHTML = buildPillarMatrixHtml(result);
 
-      sourceBadge.textContent = ui.sourceLabel || '';
-      sourceBadge.style.display = ui.sourceLabel ? 'inline-flex' : 'none';
+      sourceBadge.textContent = ui.sourceLabel || '만세력 API';
+      sourceBadge.style.display = 'inline-flex';
       tagRow.innerHTML = (result.tags || []).map((tag) => `<div class="tag">${tag}</div>`).join('');
-      resultIntro.textContent = ui.intro || `${name}님의 기본 흐름을 한 화면에서 바로 읽을 수 있게 정리했습니다.`;
+      resultIntro.textContent = ui.intro || `${name}님의 네 기둥을 중심으로 요약한 무료 결과입니다.`;
       summaryHeadline.textContent = ui.summaryTitle || '사주의 중심 흐름';
       summaryText.textContent = ui.summaryBody || `${name}님의 사주는 ${result.summary || ''}`;
-      premiumHint.textContent = '상세 사주풀이에서는 타고난 기질, 인간관계, 재물·직업 흐름, 연애·결혼운, 향후 10년 대운 변화와 주의 포인트를 더 길고 정밀하게 풀어드립니다.';
+      premiumHint.textContent = '현재 무료 결과는 만세력 API에서 제공되는 네 기둥·오행·십성 데이터를 중심으로 보여드립니다. 상세 풀이는 프리미엄 리포트에서 더 깊게 이어집니다.';
 
       traitTitle.textContent = ui.traitTitle || '타고난 기질';
       traitText.textContent = ui.traitBody || result.trait || '';
@@ -1582,22 +2008,15 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       workTitle.textContent = ui.workTitle || '일·재물 포인트';
       workText.textContent = ui.workBody || result.work || '';
 
-      renderFortuneCards(visuals.cards);
-      if (elementRing && elementTable && elementCoreLabel && elementCorePct && elementCopy) {
-        renderRing(elementRing, visuals.elementStats);
-        renderStatList(elementTable, visuals.elementStats);
-        elementCoreLabel.textContent = visuals.elementCore.label;
-        elementCorePct.textContent = `${visuals.elementCore.value}% · 핵심 오행`;
-        elementCopy.textContent = `${visuals.elementCore.label} 기운이 비교적 또렷하게 보여 ${name}님의 장점이 어디에서 자연스럽게 드러나는지 감각적으로 읽을 수 있습니다.`;
-      }
+      renderRing(elementRing, analysis.elementStats);
+      renderStatsTable(elementTable, analysis.elementStats, 'element');
+      elementCoreLabel.textContent = analysis.elementCore.label;
+      elementCorePct.textContent = `${analysis.elementCore.value.toFixed(1)}% · 중심 오행`;
 
-      if (starRing && starTable && starCoreLabel && starCorePct && starCopy) {
-        renderRing(starRing, visuals.starStats);
-        renderStatList(starTable, visuals.starStats);
-        starCoreLabel.textContent = visuals.starCore.label;
-        starCorePct.textContent = `${visuals.starCore.value}% · 반복 테마`;
-        starCopy.textContent = `${visuals.starCore.label} 흐름을 중심으로 성향, 관계, 일의 방식에서 반복되는 패턴을 정리했습니다.`;
-      }
+      renderRing(starRing, analysis.tenGodStats);
+      renderStatsTable(starTable, analysis.tenGodStats, 'star');
+      starCoreLabel.textContent = analysis.starCore.label;
+      starCorePct.textContent = `${analysis.starCore.value.toFixed(1)}% · 중심 십성`;
 
       resultCard.classList.remove('hidden');
       resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1646,5 +2065,6 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       latestSummary = null;
     });
   </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
