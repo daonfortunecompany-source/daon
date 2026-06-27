@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>리포트 생성 상태 | 다온사주</title>
+  <style>
+    :root {
+      --bg: #f8f5f0;
+      --card: #fffdf9;
+      --line: #eadfd2;
+      --text: #352c29;
+      --muted: #6f625b;
+      --primary: #cf8f7a;
+      --shadow: 0 20px 40px rgba(95, 72, 56, .08);
+      --radius: 26px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(180deg, #f7f3ee 0%, #fdfaf6 100%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif;
+      padding: 18px;
+    }
+    .card {
+      width: min(100%, 430px);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px 20px;
+    }
+    h1, h2, p { margin: 0; }
+    h1 { font-size: 26px; letter-spacing: -.04em; }
+    .sub { margin-top: 10px; color: var(--muted); line-height: 1.7; font-size: 14px; }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 18px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: #fff5f0;
+      border: 1px solid #f0ddd1;
+      color: #8b5d53;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .timeline {
+      margin-top: 22px;
+      display: grid;
+      gap: 12px;
+    }
+    .timeline-item {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: #fff;
+      padding: 14px 14px;
+    }
+    .timeline-item strong { display: block; font-size: 14px; margin-bottom: 6px; }
+    .timeline-item span { color: var(--muted); font-size: 13px; line-height: 1.65; }
+    .actions {
+      margin-top: 22px;
+      display: grid;
+      gap: 10px;
+    }
+    .btn {
+      appearance: none;
+      border: 0;
+      border-radius: 18px;
+      min-height: 52px;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), #e2a38e);
+      color: white;
+      box-shadow: 0 12px 24px rgba(207,143,122,.22);
+    }
+    .btn-soft {
+      background: rgba(255,255,255,.86);
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    .detail {
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: 18px;
+      background: #f8f3ee;
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 13px;
+      white-space: pre-line;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>리포트 생성 상태</h1>
+    <p class="sub">결제 완료 확인 후 만세력 계산, 사주 해설 생성, PDF 리포트 정리 순서로 진행됩니다.</p>
+    <div class="status-badge" id="statusBadge">상태 확인 중...</div>
+
+    <section class="timeline">
+      <article class="timeline-item">
+        <strong>1. 결제 확인</strong>
+        <span id="paymentStep">결제 승인 여부를 확인하고 있습니다.</span>
+      </article>
+      <article class="timeline-item">
+        <strong>2. 리포트 생성</strong>
+        <span id="generationStep">필요한 데이터와 해설을 정리할 준비 중입니다.</span>
+      </article>
+      <article class="timeline-item">
+        <strong>3. PDF 결과물 전달</strong>
+        <span id="downloadStep">다운로드 링크가 준비되면 이 화면에서 바로 받을 수 있습니다.</span>
+      </article>
+    </section>
+
+    <div class="detail" id="detailBox">주문 정보를 불러오는 중입니다.</div>
+
+    <div class="actions" id="actions">
+      <a class="btn btn-soft" href="/">메인으로 돌아가기</a>
+    </div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const orderId = params.get('order');
+    const statusBadge = document.getElementById('statusBadge');
+    const paymentStep = document.getElementById('paymentStep');
+    const generationStep = document.getElementById('generationStep');
+    const downloadStep = document.getElementById('downloadStep');
+    const detailBox = document.getElementById('detailBox');
+    const actions = document.getElementById('actions');
+
+    function renderStatus(data) {
+      const statusMap = {
+        created: '결제창 준비 완료',
+        payment_pending: '결제 대기 중',
+        payment_success: '결제 완료',
+        generating: '리포트 생성 중',
+        ready: '리포트 준비 완료',
+        payment_cancelled: '결제 취소',
+        failed: '처리 실패'
+      };
+      statusBadge.textContent = statusMap[data.status] || data.status || '상태 확인 중';
+
+      if (data.status === 'payment_success' || data.status === 'generating' || data.status === 'ready') {
+        paymentStep.textContent = '결제 성공이 확인되었습니다.';
+      } else if (data.status === 'payment_cancelled') {
+        paymentStep.textContent = '결제가 취소되어 리포트 생성이 진행되지 않았습니다.';
+      } else {
+        paymentStep.textContent = '결제 승인 여부를 확인하고 있습니다.';
+      }
+
+      if (data.status === 'generating') {
+        generationStep.textContent = '사주 데이터와 해설을 바탕으로 PDF를 생성하고 있습니다.';
+        downloadStep.textContent = '완료되면 다운로드 버튼이 자동으로 표시됩니다.';
+      } else if (data.status === 'ready') {
+        generationStep.textContent = '리포트 생성이 완료되었습니다.';
+        downloadStep.textContent = '지금 바로 PDF를 내려받을 수 있습니다.';
+      } else if (data.status === 'failed') {
+        generationStep.textContent = '리포트 생성 중 문제가 발생했습니다.';
+        downloadStep.textContent = '관리자가 확인할 수 있도록 로그를 남겼습니다.';
+      }
+
+      detailBox.textContent = data.message || '리포트 상태를 계속 확인하고 있습니다.';
+
+      const existingDownload = document.getElementById('downloadButton');
+      if (existingDownload) existingDownload.remove();
+      if (data.downloadUrl) {
+        const a = document.createElement('a');
+        a.id = 'downloadButton';
+        a.className = 'btn btn-primary';
+        a.href = data.downloadUrl;
+        a.textContent = 'PDF 리포트 다운로드';
+        actions.prepend(a);
+      }
+    }
+
+    async function poll() {
+      if (!orderId) {
+        statusBadge.textContent = '주문번호 없음';
+        detailBox.textContent = '유효한 주문번호가 없어 상태를 확인할 수 없습니다.';
+        return;
+      }
+      try {
+        const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}/status`);
+        const data = await res.json();
+        renderStatus(data);
+        if (!['ready', 'failed', 'payment_cancelled'].includes(data.status)) {
+          setTimeout(poll, 4000);
+        }
+      } catch (error) {
+        detailBox.textContent = '상태를 확인하는 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도합니다.';
+        setTimeout(poll, 5000);
+      }
+    }
+
+    poll();
+  </script>
+</body>
+</html>

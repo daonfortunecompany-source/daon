@@ -1467,6 +1467,382 @@
       .pillars { grid-template-columns: repeat(4, minmax(0, 1fr)); }
       .ring-wrap { grid-template-columns: 1fr; justify-items: center; text-align: center; }
     }
+  
+
+    .review-section .card,
+    .faq-section .card {
+      overflow: hidden;
+    }
+
+    .review-slider-shell {
+      position: relative;
+      margin-top: 8px;
+      padding: 2px 0 8px;
+    }
+
+    .review-slider-viewport {
+      overflow: hidden;
+      margin: 0 -4px;
+    }
+
+    .review-slider-track {
+      display: flex;
+      gap: 14px;
+      transition: transform .45s ease;
+      will-change: transform;
+      padding: 4px;
+    }
+
+    .review-slide {
+      min-width: calc(100% - 8px);
+      flex: 0 0 calc(100% - 8px);
+      background: linear-gradient(180deg, #fffefd, #fff8f4);
+      border: 1px solid #efe0d5;
+      border-radius: 24px;
+      padding: 10px;
+      box-shadow: 0 12px 24px rgba(70, 53, 44, .06);
+    }
+
+    .review-slide img {
+      width: 100%;
+      height: auto;
+      border-radius: 18px;
+      border: 1px solid #f0e6dd;
+      background: #fff;
+      object-fit: contain;
+    }
+
+    .review-slider-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .review-arrow-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .review-arrow {
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      border: 1px solid #eadfd2;
+      background: rgba(255,255,255,.94);
+      color: #5d514a;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      cursor: pointer;
+      box-shadow: 0 6px 16px rgba(70,53,44,.06);
+    }
+
+    .review-arrow:disabled {
+      opacity: .45;
+      cursor: default;
+    }
+
+    .review-dots {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      flex: 1;
+    }
+
+    .review-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #dfd2c6;
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+      transition: transform .2s ease, background .2s ease, width .2s ease;
+    }
+
+    .review-dot.active {
+      width: 22px;
+      background: var(--primary);
+    }
+
+    .trust-note {
+      margin-top: 10px;
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .faq-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .faq-item {
+      border: 1px solid #eadfd2;
+      border-radius: 18px;
+      background: rgba(255,255,255,.9);
+      overflow: hidden;
+    }
+
+    .faq-question {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+      font-weight: 800;
+      text-align: left;
+      padding: 18px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      cursor: pointer;
+    }
+
+    .faq-question span:last-child {
+      color: var(--primary-deep);
+      font-size: 18px;
+      transition: transform .25s ease;
+    }
+
+    .faq-item.open .faq-question span:last-child {
+      transform: rotate(45deg);
+    }
+
+    .faq-answer-wrap {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows .3s ease;
+    }
+
+    .faq-item.open .faq-answer-wrap {
+      grid-template-rows: 1fr;
+    }
+
+    .faq-answer {
+      overflow: hidden;
+    }
+
+    .faq-answer p {
+      margin: 0;
+      padding: 0 18px 18px;
+      color: var(--muted);
+      line-height: 1.75;
+      font-size: 14px;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(31, 25, 23, .58);
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 120;
+      padding: 16px;
+      backdrop-filter: blur(8px);
+    }
+
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .modal-card {
+      width: min(100%, 430px);
+      max-height: min(88vh, 920px);
+      overflow: auto;
+      border-radius: 28px;
+      background: #fffdfb;
+      border: 1px solid #efe1d5;
+      box-shadow: 0 30px 60px rgba(40, 31, 28, .18);
+      padding: 20px;
+      position: relative;
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .modal-head h3 {
+      font-size: 22px;
+      letter-spacing: -.04em;
+    }
+
+    .modal-head p {
+      margin-top: 6px;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 14px;
+    }
+
+    .modal-close {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      border: 1px solid #eadfd2;
+      background: rgba(255,255,255,.9);
+      font-size: 20px;
+      cursor: pointer;
+      color: #5a4d46;
+      flex: 0 0 auto;
+    }
+
+    .premium-form {
+      display: grid;
+      gap: 14px;
+    }
+
+    textarea {
+      width: 100%;
+      border: 1px solid #e9ddcf;
+      background: rgba(255,255,255,.98);
+      border-radius: 16px;
+      min-height: 120px;
+      padding: 14px 14px;
+      font-size: 15px;
+      color: var(--text);
+      outline: none;
+      resize: vertical;
+      font-family: inherit;
+      line-height: 1.6;
+    }
+
+    textarea:focus {
+      border-color: #dfa18f;
+      box-shadow: 0 0 0 4px rgba(233,154,141,.16);
+    }
+
+    .helper-text {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+      margin-top: 6px;
+    }
+
+    .section-title-mini {
+      font-size: 13px;
+      font-weight: 800;
+      color: #6b5c55;
+      margin-bottom: 8px;
+    }
+
+    .toggle-box {
+      border: 1px solid #eadfd2;
+      border-radius: 18px;
+      background: #fff;
+      padding: 14px 14px;
+    }
+
+    .toggle-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .toggle-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #4f433d;
+    }
+
+    .switch {
+      position: relative;
+      width: 52px;
+      height: 31px;
+      border-radius: 999px;
+      background: #e6ddd4;
+      transition: background .2s ease;
+      flex: 0 0 auto;
+    }
+
+    .switch::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 25px;
+      height: 25px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 3px 8px rgba(0,0,0,.14);
+      transition: transform .2s ease;
+    }
+
+    .switch.active {
+      background: #dba08e;
+    }
+
+    .switch.active::after {
+      transform: translateX(21px);
+    }
+
+    .collapsible-fields {
+      display: none;
+      margin-top: 14px;
+    }
+
+    .collapsible-fields.open {
+      display: grid;
+      gap: 12px;
+    }
+
+    .order-summary {
+      border: 1px solid #ecdccf;
+      border-radius: 20px;
+      padding: 14px;
+      background: linear-gradient(180deg, #fffefc, #fff7f1);
+      display: grid;
+      gap: 8px;
+    }
+
+    .order-summary-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 14px;
+    }
+
+    .order-summary-row strong {
+      font-size: 16px;
+      color: #352c29;
+    }
+
+    .status-inline {
+      margin-top: 8px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: #f8f3ee;
+      color: #6f625b;
+      font-size: 13px;
+      line-height: 1.65;
+      display: none;
+    }
+
+    .status-inline.show {
+      display: block;
+    }
+
+    @media (min-width: 480px) {
+      .review-slide {
+        min-width: calc(100% - 8px);
+        flex-basis: calc(100% - 8px);
+      }
+    }
+
   </style>
 </head>
 <body>
@@ -1636,6 +2012,34 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       </div>
     </section>
 
+    
+
+    <section class="section review-section" id="premium-reviews">
+      <div class="card">
+        <h2>많은 사람들이 만족한 프리미엄 리포트</h2>
+        <p class="sub">실제 후기 이미지를 한눈에 볼 수 있도록 자동 슬라이드로 정리했습니다.</p>
+        <div class="review-slider-shell" data-review-slider>
+          <div class="review-slider-viewport">
+            <div class="review-slider-track" id="reviewSliderTrack">
+              <article class="review-slide"><img src="./reviews/review-1.jpg" alt="프리미엄 리포트 후기 1" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-2.jpg" alt="프리미엄 리포트 후기 2" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-3.jpg" alt="프리미엄 리포트 후기 3" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-4.jpg" alt="프리미엄 리포트 후기 4" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-5.jpg" alt="프리미엄 리포트 후기 5" loading="lazy" /></article>
+            </div>
+          </div>
+          <div class="review-slider-nav">
+            <div class="review-arrow-group">
+              <button class="review-arrow" id="reviewPrev" type="button" aria-label="이전 후기">‹</button>
+              <button class="review-arrow" id="reviewNext" type="button" aria-label="다음 후기">›</button>
+            </div>
+            <div class="review-dots" id="reviewDots" aria-label="후기 슬라이드 페이지"></div>
+          </div>
+          <p class="trust-note">후기 이미지는 읽기 쉬운 크기로 유지하고, 모바일 화면에서도 자연스럽게 넘겨볼 수 있도록 구성했습니다.</p>
+        </div>
+      </div>
+    </section>
+
     <section class="section" id="pricing">
       <div class="card">
         <h2>상세 사주 보고서</h2>
@@ -1652,7 +2056,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
               <li>건강운</li>
               <li>향후 10년의 대운 흐름</li>
               <li>고민에 대한 조언</li>
-              <li>평생 보관 가능한 100P 이상의 PDF파일 제공</li>
+              <li>평생 보관 가능한 40P 이상의 PDF파일 제공</li>
             </ul>
             <button class="btn btn-pay" id="payButton">상세 사주풀이 신청하기</button>
           </div>
@@ -1660,12 +2064,42 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       </div>
     </section>
 
+    <section class="section faq-section" id="faq">
+      <div class="card">
+        <h2>자주 묻는 질문</h2>
+        <p class="sub">신청 전 가장 많이 궁금해하시는 내용을 정리했습니다.</p>
+        <div class="faq-list" id="faqList">
+          <article class="faq-item">
+            <button type="button" class="faq-question" aria-expanded="false">
+              <span>프리미엄 리포트는 어떤 방식으로 나오나요?</span>
+              <span>+</span>
+            </button>
+            <div class="faq-answer-wrap">
+              <div class="faq-answer">
+                <p>프리미엄 사주 리포트는 보통의 AI가 아닌 전문 명리학자의 자문으로 설계하고 50만명이 검증한 알고리즘을 사용하여 PDF형식의 결과지를 전달드리고 있습니다.</p>
+              </div>
+            </div>
+          </article>
+          <article class="faq-item">
+            <button type="button" class="faq-question" aria-expanded="false">
+              <span>환불이 가능한가요?</span>
+              <span>+</span>
+            </button>
+            <div class="faq-answer-wrap">
+              <div class="faq-answer">
+                <p>콘텐츠 서비스의 특성상 결과를 받아보신 후 환불은 어렵습니다. 오류로 인해 결과물을 받아보지 못하셨다면 daon.fortune.company@gmail.com 으로 문의해주세요.</p>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
 
 
   </div>
 
   <div class="bottom-cta">
-    <button onclick="window.location.href='http://pf.kakao.com/_dhIxfX/chat'">상세 사주풀이 신청하기</button>
+    <button id="bottomApplyButton" type="button">상세 사주풀이 신청하기</button>
   </div>
 
   <script>
@@ -2057,7 +2491,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       if (!latestSummary) {
         alert('무료 분석 결과를 먼저 확인한 뒤 상세 풀이로 이어가면 더 자연스럽게 상담을 받을 수 있어요.');
       }
-      window.location.href = KAKAO_CHANNEL_URL;
+      openPremiumModal();
     });
 
     window.addEventListener('DOMContentLoaded', () => {
@@ -2066,5 +2500,156 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     });
   </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+
+
+  <div class="modal-overlay" id="premiumModal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="premiumModalTitle">
+      <div class="modal-head">
+        <div>
+          <h3 id="premiumModalTitle">프리미엄 리포트 신청</h3>
+          <p>필요한 정보를 입력한 뒤 결제를 진행하면 결제 완료 확인 후 리포트 생성이 시작됩니다.</p>
+        </div>
+        <button type="button" class="modal-close" id="premiumModalClose" aria-label="닫기">×</button>
+      </div>
+
+      <form id="premiumRequestForm" class="premium-form">
+        <div class="order-summary">
+          <div class="order-summary-row"><span>기본 상품</span><strong id="orderProductName">프리미엄 사주 리포트</strong></div>
+          <div class="order-summary-row"><span>결제 금액</span><strong id="orderProductPrice">18,900원</strong></div>
+          <div class="helper-text">상대 정보가 입력되면 궁합 포함 2인 리포트로 자동 전환됩니다.</div>
+        </div>
+
+        <div>
+          <div class="section-title-mini">신청자 정보</div>
+          <div class="form-grid">
+            <div>
+              <label for="premiumName">이름</label>
+              <input id="premiumName" name="name" required placeholder="예: 김다온" />
+            </div>
+            <div class="inline-2">
+              <div>
+                <label>성별</label>
+                <div class="gender-choice" role="radiogroup" aria-label="프리미엄 성별 선택">
+                  <label class="gender-option"><input type="radio" name="premiumGender" value="female" required /><span>여성</span></label>
+                  <label class="gender-option"><input type="radio" name="premiumGender" value="male" required /><span>남성</span></label>
+                </div>
+              </div>
+              <div>
+                <label for="premiumCalendarType">양력 / 음력</label>
+                <select id="premiumCalendarType" name="calendarType">
+                  <option value="solar">양력</option>
+                  <option value="lunar">음력</option>
+                </select>
+              </div>
+            </div>
+            <div class="inline-3">
+              <div>
+                <label for="premiumYear">생년</label>
+                <input id="premiumYear" name="year" inputmode="numeric" required placeholder="1994" />
+              </div>
+              <div>
+                <label for="premiumMonth">월</label>
+                <input id="premiumMonth" name="month" inputmode="numeric" required placeholder="08" />
+              </div>
+              <div>
+                <label for="premiumDay">일</label>
+                <input id="premiumDay" name="day" inputmode="numeric" required placeholder="21" />
+              </div>
+            </div>
+            <div class="inline-2">
+              <div>
+                <label for="premiumTime">태어난 시간</label>
+                <input id="premiumTime" name="birthTime" placeholder="예: 09:30" />
+                <div class="helper-text">시간을 모르면 비워둘 수 있습니다.</div>
+              </div>
+              <div>
+                <label for="premiumLeapMonth">윤달 여부</label>
+                <select id="premiumLeapMonth" name="isLeapMonth">
+                  <option value="false">아니오</option>
+                  <option value="true">예</option>
+                  <option value="unknown">모름</option>
+                </select>
+              </div>
+            </div>
+            <div class="inline-2">
+              <div>
+                <label for="premiumPhone">연락처</label>
+                <input id="premiumPhone" name="phone" inputmode="tel" required placeholder="01012345678" />
+              </div>
+              <div>
+                <label for="premiumEmail">이메일</label>
+                <input id="premiumEmail" name="email" inputmode="email" required placeholder="name@example.com" />
+              </div>
+            </div>
+            <div>
+              <label for="premiumConcern">현재 고민 또는 상담받고 싶은 내용</label>
+              <textarea id="premiumConcern" name="concern" placeholder="예: 이직 시기와 재물 흐름, 연애 방향이 궁금해요."></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="toggle-box">
+          <div class="toggle-line">
+            <div>
+              <div class="toggle-chip">궁합 분석 포함</div>
+              <div class="helper-text">상대방 정보를 입력하면 2인 궁합 리포트로 자동 전환됩니다.</div>
+            </div>
+            <button type="button" class="switch" id="compatibilityToggle" aria-pressed="false" aria-label="궁합 분석 포함 전환"></button>
+          </div>
+          <div class="collapsible-fields" id="compatibilityFields">
+            <div class="inline-2">
+              <div>
+                <label for="partnerName">상대방 이름</label>
+                <input id="partnerName" name="partnerName" placeholder="예: 박도윤" />
+              </div>
+              <div>
+                <label>상대방 성별</label>
+                <div class="gender-choice" role="radiogroup" aria-label="상대방 성별 선택">
+                  <label class="gender-option"><input type="radio" name="partnerGender" value="female" /><span>여성</span></label>
+                  <label class="gender-option"><input type="radio" name="partnerGender" value="male" /><span>남성</span></label>
+                </div>
+              </div>
+            </div>
+            <div class="inline-3">
+              <div>
+                <label for="partnerYear">상대방 생년</label>
+                <input id="partnerYear" name="partnerYear" inputmode="numeric" placeholder="1993" />
+              </div>
+              <div>
+                <label for="partnerMonth">월</label>
+                <input id="partnerMonth" name="partnerMonth" inputmode="numeric" placeholder="06" />
+              </div>
+              <div>
+                <label for="partnerDay">일</label>
+                <input id="partnerDay" name="partnerDay" inputmode="numeric" placeholder="05" />
+              </div>
+            </div>
+            <div class="inline-2">
+              <div>
+                <label for="partnerCalendarType">상대방 양력 / 음력</label>
+                <select id="partnerCalendarType" name="partnerCalendarType">
+                  <option value="solar">양력</option>
+                  <option value="lunar">음력</option>
+                </select>
+              </div>
+              <div>
+                <label for="partnerTime">상대방 태어난 시간</label>
+                <input id="partnerTime" name="partnerTime" placeholder="예: 18:30" />
+              </div>
+            </div>
+            <div>
+              <label for="partnerMemo">궁합 관련 메모</label>
+              <textarea id="partnerMemo" name="partnerMemo" placeholder="예: 결혼 시기, 가치관 차이, 관계 흐름이 궁금해요."></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="status-inline" id="premiumStatusInline"></div>
+        <button type="submit" class="btn btn-pay">결제하고 리포트 신청하기</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="./premium-flow.js"></script>
 </body>
 </html>
