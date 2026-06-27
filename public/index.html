@@ -2296,26 +2296,40 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       }
     }
 
+    function cleanNumeric(value, maxLength) {
+      return String(value || '').replace(/[^0-9]/g, '').slice(0, maxLength);
+    }
+
     function getFormPayload() {
-      const year = document.getElementById('year').value;
-      const month = document.getElementById('month').value;
-      const day = document.getElementById('day').value;
-      const birthHour = isBirthTimeUnknown() ? '' : (timeHourSelect?.value || '');
-      const birthMinute = isBirthTimeUnknown() ? '' : (timeMinuteSelect?.value || '');
+      const year = cleanNumeric(document.getElementById('year')?.value, 4);
+      const month = cleanNumeric(document.getElementById('month')?.value, 2);
+      const day = cleanNumeric(document.getElementById('day')?.value, 2);
+      const paddedMonth = month ? month.padStart(2, '0') : '';
+      const paddedDay = day ? day.padStart(2, '0') : '';
+      const birthHour = isBirthTimeUnknown() ? '' : String(timeHourSelect?.value || '').padStart(2, '0');
+      const birthMinute = isBirthTimeUnknown() ? '' : String(timeMinuteSelect?.value || '').padStart(2, '0');
+      const calendarType = document.getElementById('calendarType').value;
+      const gender = document.querySelector('input[name="gender"]:checked')?.value || '';
       return {
         name: document.getElementById('name').value || '사용자',
         buyerPhone: '',
         year,
-        month,
-        day,
-        birthDate: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+        month: paddedMonth,
+        day: paddedDay,
+        birthYear: year,
+        birthMonth: paddedMonth,
+        birthDay: paddedDay,
+        hour: birthHour,
+        minute: birthMinute,
         birthHour,
         birthMinute,
+        birthDate: year && paddedMonth && paddedDay ? `${year}-${paddedMonth}-${paddedDay}` : '',
         birthTimeUnknown: isBirthTimeUnknown(),
         birthTime: birthHour && birthMinute ? `${birthHour}:${birthMinute}` : '',
-        calendar: document.getElementById('calendarType').value,
+        calendar: calendarType,
+        calendarType,
         isLeapMonth: document.getElementById('leapMonth').value === 'true',
-        gender: document.querySelector('input[name="gender"]:checked')?.value || ''
+        gender
       };
     }
 
@@ -2658,6 +2672,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
 
       try {
         validateSummaryPayload(payload);
+        console.log('[FREE SUMMARY] request payload', payload);
         const data = await requestJson('/api/saju/summary', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

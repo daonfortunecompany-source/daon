@@ -89,17 +89,52 @@ app.get('/api/health', async (_req, res) => {
 });
 
 app.post('/api/saju/summary', async (req, res) => {
+  const rawBody = req.body || {};
+  let parsedBirthInput = null;
+  let mansaeRequestPayload = null;
   try {
     console.log('[FREE SUMMARY] request received');
-    const payload = normalizeApplicant(req.body || {});
+    const payload = normalizeApplicant(rawBody);
     const luckyPayload = toLuckyFlatPayload(payload);
+    parsedBirthInput = {
+      year: payload.birthYear,
+      month: payload.birthMonth,
+      day: payload.birthDay,
+      hour: payload.birthTime ? String(payload.birthTime).split(':')[0] || '' : '',
+      minute: payload.birthTime ? String(payload.birthTime).split(':')[1] || '' : '',
+      calendarType: payload.calendarType,
+      gender: payload.gender,
+      birthTimeUnknown: payload.birthTimeUnknown
+    };
+    mansaeRequestPayload = {
+      year: luckyPayload.year,
+      month: luckyPayload.month,
+      day: luckyPayload.day,
+      hour: luckyPayload.hour,
+      minute: luckyPayload.minute,
+      birthYear: luckyPayload.birthYear,
+      birthMonth: luckyPayload.birthMonth,
+      birthDay: luckyPayload.birthDay,
+      birthHour: luckyPayload.birthHour,
+      birthMinute: luckyPayload.birthMinute,
+      calendarType: luckyPayload.calendarType,
+      calendar: luckyPayload.calendar,
+      gender: luckyPayload.gender,
+      isLeapMonth: luckyPayload.isLeapMonth
+    };
+    console.log('[FREE SUMMARY] parsed birth input:', JSON.stringify(parsedBirthInput));
+    console.log('[MANSAE API] request payload:', JSON.stringify(mansaeRequestPayload));
     let mansaeData = null;
     let source = 'lucky';
     let usingFallback = false;
     try {
       mansaeData = await callLuckyApi(CONFIG.lucky.mansaeUrl, [luckyPayload], 'mansae');
     } catch (error) {
-      await appendLog('summary_api_warning', { error: error.message });
+      await appendLog('summary_api_warning', {
+        error: error.message,
+        parsedBirthInput,
+        mansaeRequestPayload
+      });
       if (!CONFIG.allowLocalFallback) {
         console.log('[LUCKY API] using fallback: false');
         throw error;
@@ -118,7 +153,18 @@ app.post('/api/saju/summary', async (req, res) => {
     const result = buildFreeSummary(payload, mansaeData, { source, usingFallback });
     res.json({ result });
   } catch (error) {
-    res.status(400).json({ error: error.message || '요약 결과를 생성하지 못했습니다.' });
+    const rawMessage = error.message || '요약 결과를 생성하지 못했습니다.';
+    console.error('[FREE SUMMARY] error:', rawMessage);
+    await appendLog('free_summary_error', {
+      error: rawMessage,
+      requestBody: rawBody,
+      parsedBirthInput,
+      mansaeRequestPayload
+    });
+    const userMessage = /년,\s*월,\s*일을\s*모두\s*입력해주세요/.test(rawMessage) || /mansae api 400/i.test(rawMessage)
+      ? '생년월일 정보가 정상 전달되지 않았습니다. 잠시 후 다시 시도해주세요.'
+      : rawMessage;
+    res.status(400).json({ error: userMessage });
   }
 });
 
@@ -381,10 +427,10 @@ async function optionalApiCall(label, url, payloadCandidates, warnings, critical
 }
 
 async function callLuckyApi(url, payloadCandidates, label) {
+  console.log('[LUCKY API] request start');
   if (!CONFIG.lucky.apiKey) {
     throw new Error('LUCKY_API_KEY가 설정되지 않았습니다.');
   }
-  console.log('[LUCKY API] request start');
   const candidates = Array.isArray(payloadCandidates) ? payloadCandidates : [payloadCandidates];
   const authVariants = resolveLuckyAuthVariants();
   let lastError = new Error(`${label} API 호출 실패`);
@@ -528,12 +574,14 @@ function normalizeOrderInput(input) {
 }
 
 function normalizeApplicant(raw, isPartner = false) {
-  const birthYear = cleanDigits(raw.birthYear || raw.year || '');
-  const birthMonth = cleanDigits(raw.birthMonth || raw.month || '');
-  const birthDay = cleanDigits(raw.birthDay || raw.day || '');
+  const dateParts = parseBirthDateParts(raw.birthDate || raw.date || '');
+  const timeParts = parseBirthTimeParts(raw.birthTime || raw.time || '');
+  const birthYear = normalizeYearValue(raw.birthYear || raw.year || dateParts.year || '');
+  const birthMonth = normalizeMonthDayValue(raw.birthMonth || raw.month || dateParts.month || '');
+  const birthDay = normalizeMonthDayValue(raw.birthDay || raw.day || dateParts.day || '');
   const birthTimeUnknown = raw.birthTimeUnknown === true || raw.birthTimeUnknown === 'true' || raw.birthTimeUnknown === 'unknown';
-  const birthHour = cleanDigits(raw.birthHour || '').slice(0, 2);
-  const birthMinute = cleanDigits(raw.birthMinute || '').slice(0, 2);
+  const birthHour = normalizeHourMinuteValue(raw.birthHour || raw.hour || timeParts.hour || '', 23);
+  const birthMinute = normalizeHourMinuteValue(raw.birthMinute || raw.minute || timeParts.minute || '', 59);
   const combinedBirthTime = birthHour || birthMinute ? `${birthHour.padStart(2, '0')}:${birthMinute.padStart(2, '0')}` : '';
   return {
     name: String(raw.name || '').trim(),
@@ -573,16 +621,30 @@ function shouldCallCompatibility(order) {
 }
 
 function toLuckyFlatPayload(person) {
-  const [hour, minute] = String(person.birthTime || '').split(':');
+  const [hourRaw, minuteRaw] = String(person.birthTime || '').split(':');
+  const year = normalizeYearValue(person.birthYear || '');
+  const month = normalizeMonthDayValue(person.birthMonth || '');
+  const day = normalizeMonthDayValue(person.birthDay || '');
+  const hour = normalizeHourMinuteValue(hourRaw || '', 23);
+  const minute = normalizeHourMinuteValue(minuteRaw || '', 59);
+  const calendar = person.calendarType === 'lunar' ? 'lunar' : 'solar';
   return {
-    birthYear: person.birthYear,
-    birthMonth: String(Number(person.birthMonth || 0) || ''),
-    birthDay: String(Number(person.birthDay || 0) || ''),
-    birthHour: hour ? String(Number(hour)) : '',
-    birthMinute: minute ? String(Number(minute)) : '',
-    calendarType: person.calendarType === 'lunar' ? '음력' : '양력',
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    birthYear: year,
+    birthMonth: month,
+    birthDay: day,
+    birthHour: hour,
+    birthMinute: minute,
+    calendarType: calendar,
+    calendar,
+    calendarLabel: calendar === 'lunar' ? '음력' : '양력',
     gender: person.gender,
     isLeapMonth: person.isLeapMonth === true,
+    leapMonth: person.isLeapMonth === true,
     useYajasiRule: true
   };
 }
@@ -605,6 +667,47 @@ function normalizeTime(value) {
   if (digits.length === 4) return `${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
   if (digits.length === 3) return `0${digits[0]}:${digits.slice(1, 3)}`;
   return '';
+}
+
+function parseBirthDateParts(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (!match) return { year: '', month: '', day: '' };
+  return {
+    year: match[1],
+    month: match[2],
+    day: match[3]
+  };
+}
+
+function parseBirthTimeParts(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return { hour: '', minute: '' };
+  return {
+    hour: match[1],
+    minute: match[2]
+  };
+}
+
+function normalizeYearValue(value) {
+  return cleanDigits(value).slice(0, 4);
+}
+
+function normalizeMonthDayValue(value) {
+  const digits = cleanDigits(value).slice(0, 2);
+  if (!digits) return '';
+  const number = Number(digits);
+  if (!Number.isFinite(number) || number <= 0) return '';
+  return String(number).padStart(2, '0');
+}
+
+function normalizeHourMinuteValue(value, max) {
+  const digits = cleanDigits(value).slice(0, 2);
+  if (digits === '') return '';
+  const number = Number(digits);
+  if (!Number.isFinite(number) || number < 0 || number > max) return '';
+  return String(number).padStart(2, '0');
 }
 
 function cleanDigits(value) {
