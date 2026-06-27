@@ -259,6 +259,8 @@ app.post('/api/orders/create', async (req, res) => {
       product,
       applicant: input.applicant,
       partner: input.partner,
+      person1: input.person1,
+      person2: input.person2,
       compatibilityRequested: input.compatibilityRequested,
       warnings: buildInputWarnings(input),
       payment: {
@@ -426,45 +428,47 @@ async function generatePremiumReport(orderId) {
     const warnings = [...(order.warnings || [])];
     const apiSnapshots = {};
     const applicantPayload = toLuckyFlatPayload(order.applicant);
+    const hasPerson1 = Boolean(order.applicant?.name && order.applicant?.birthYear && order.applicant?.birthMonth && order.applicant?.birthDay);
+    const hasPerson2 = Boolean(order.partner?.name && order.partner?.birthYear && order.partner?.birthMonth && order.partner?.birthDay && order.partner?.gender);
+    console.log('[PDF] order data loaded:', JSON.stringify({
+      orderId: order.id,
+      productType: order.product?.type || 'single',
+      compatibilityRequested: Boolean(order.compatibilityRequested),
+      hasPerson1,
+      hasPerson2
+    }));
 
-    const mansaeResult = await optionalApiCall('mansae', CONFIG.lucky.mansaeUrl, [applicantPayload], warnings, true);
+    const mansaeResult = await optionalApiCall('mansae', CONFIG.lucky.mansaeUrl, [applicantPayload], warnings, false);
     if (mansaeResult.data) apiSnapshots.mansae = mansaeResult.data;
 
-    const sajuCandidates = [
-      { ...applicantPayload },
-      { ...applicantPayload, fields: ['daeun', 'seun', 'sinsal', 'gyeokgukYongsin'] }
-    ];
+    const sajuCandidates = [{ ...applicantPayload }];
     const sajuResult = await optionalApiCall('saju', CONFIG.lucky.sajuUrl, sajuCandidates, warnings, true);
     if (sajuResult.data) apiSnapshots.saju = sajuResult.data;
 
-    const periodCandidates = [
-      { ...applicantPayload, years: 5, months: 6, defaultYear: CONFIG.lucky.defaultPeriodYear, defaultMonth: CONFIG.lucky.defaultPeriodMonth, defaultDay: CONFIG.lucky.defaultPeriodDay },
-      { ...applicantPayload, futureYears: 5, futureMonths: 6, defaultYear: CONFIG.lucky.defaultPeriodYear, defaultMonth: CONFIG.lucky.defaultPeriodMonth, defaultDay: CONFIG.lucky.defaultPeriodDay },
-      { ...applicantPayload, rangeYears: 5, rangeMonths: 6, defaultYear: CONFIG.lucky.defaultPeriodYear, defaultMonth: CONFIG.lucky.defaultPeriodMonth, defaultDay: CONFIG.lucky.defaultPeriodDay },
-      { ...applicantPayload, years: 5, months: 6, baseYear: CONFIG.lucky.defaultPeriodYear, baseMonth: CONFIG.lucky.defaultPeriodMonth, baseDay: CONFIG.lucky.defaultPeriodDay },
-      { ...applicantPayload, years: 5, months: 6, startYear: CONFIG.lucky.defaultPeriodYear, startMonth: CONFIG.lucky.defaultPeriodMonth, startDay: CONFIG.lucky.defaultPeriodDay }
-    ];
-    const periodResult = await optionalApiCall('period', CONFIG.lucky.periodUrl, periodCandidates, warnings, false);
+    const periodCandidates = buildPeriodPayloadCandidates(applicantPayload);
+    const periodResult = await optionalApiCall('period', CONFIG.lucky.periodUrl, periodCandidates, warnings, true);
     if (periodResult.data) apiSnapshots.period = periodResult.data;
 
     if (shouldCallCompatibility(order)) {
-      const partnerPayload = toLuckyFlatPayload(order.partner);
-      const compatibilityCandidates = [
-        { person1: applicantPayload, person2: partnerPayload, note: order.partner?.memo || '' },
-        { me: applicantPayload, partner: partnerPayload, note: order.partner?.memo || '' },
-        { applicant: applicantPayload, partner: partnerPayload, note: order.partner?.memo || '' },
-        { ...applicantPayload, partner: partnerPayload, note: order.partner?.memo || '' }
-      ];
-      const compatibilityResult = await optionalApiCall('compatibility', CONFIG.lucky.compatibilityUrl, compatibilityCandidates, warnings, false);
+      const compatibilityPayload = buildCompatibilityPayload(order.applicant, order.partner, order.partner?.memo || '');
+      console.log('[COMPATIBILITY API] request payload check:', JSON.stringify({
+        hasPerson1: Boolean(compatibilityPayload.person1),
+        hasPerson2: Boolean(compatibilityPayload.person2),
+        person1Keys: Object.keys(compatibilityPayload.person1 || {}),
+        person2Keys: Object.keys(compatibilityPayload.person2 || {})
+      }));
+      const compatibilityResult = await optionalApiCall('compatibility', CONFIG.lucky.compatibilityUrl, [compatibilityPayload], warnings, true);
       if (compatibilityResult.data) apiSnapshots.compatibility = compatibilityResult.data;
     }
 
-    if (!apiSnapshots.saju && !apiSnapshots.mansae) {
-      if (CONFIG.allowLocalFallback) {
-        warnings.push('핵심 사주 API 응답을 받지 못해 내부 대체 요약 구조로 PDF를 생성했습니다. 운영 환경에서는 실제 API 키와 인증 설정을 반드시 확인해 주세요.');
-      } else {
-        throw new Error('핵심 사주 데이터 호출에 실패했습니다.');
-      }
+    if (!apiSnapshots.saju) {
+      throw new Error('핵심 사주 데이터 호출에 실패했습니다.');
+    }
+    if (shouldCallCompatibility(order) && !apiSnapshots.compatibility) {
+      throw new Error('궁합 데이터 호출에 실패했습니다.');
+    }
+    if (!apiSnapshots.period) {
+      throw new Error('기간운 데이터 호출에 실패했습니다.');
     }
 
     const promptPayload = buildAiPromptPayload(order, apiSnapshots, warnings);
@@ -497,8 +501,9 @@ async function optionalApiCall(label, url, payloadCandidates, warnings, critical
     const data = await callLuckyApi(url, payloadCandidates, label);
     return { data };
   } catch (error) {
-    warnings.push(`${label} API 호출 실패: ${error.message}`);
-    if (critical) await appendLog('critical_api_failure', { label, message: error.message });
+    warnings.push(`${label} API 호출 실패`);
+    await appendLog(critical ? 'critical_api_failure' : 'api_failure', { label, message: error.message });
+    if (critical) throw error;
     return { data: null, error };
   }
 }
@@ -518,7 +523,10 @@ async function callLuckyApi(url, payloadCandidates, label) {
   for (const payload of candidates) {
     for (const authVariant of authVariants) {
       try {
-        const headers = { 'Content-Type': 'application/json' };
+        const headers = {
+          'Content-Type': 'application/json; charset=utf-8',
+          Accept: 'application/json'
+        };
         let requestUrl = url;
         const body = JSON.stringify(payload);
         if (authVariant.mode === 'header') {
@@ -536,7 +544,7 @@ async function callLuckyApi(url, payloadCandidates, label) {
         if (!response.ok) {
           await appendLog('lucky_api_attempt_failed', {
             label,
-            url: requestUrl,
+            url: sanitizeLuckyUrlForLog(requestUrl),
             authMode: authVariant.mode,
             authHeader: authVariant.mode === 'header' ? authVariant.header : null,
             status: response.status,
@@ -558,6 +566,16 @@ function sanitizeLuckyPayloadForLog(payload) {
   if (!payload || typeof payload !== 'object') return payload;
   const cloned = JSON.parse(JSON.stringify(payload));
   return cloned;
+}
+
+function sanitizeLuckyUrlForLog(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.searchParams.has('apiKey')) parsed.searchParams.set('apiKey', '[redacted]');
+    return parsed.toString();
+  } catch {
+    return String(url || '');
+  }
 }
 
 function logLuckyResponseDiagnostics(label, data, fallbackPerson) {
@@ -659,27 +677,33 @@ function buildInputWarnings(input) {
 function buildStatusMessage(order) {
   switch (order.status) {
     case 'payment_pending':
-      return '결제창에서 결제를 완료하면 자동으로 리포트 생성 단계로 넘어갑니다.';
+      return '결제 완료를 기다리고 있습니다.';
     case 'payment_success':
-      return '결제가 확인되었습니다. API 데이터와 해설을 정리할 준비를 하고 있습니다.';
+      return '사주를 해석하고 풀이하는 중입니다. 잠시만 기다려주세요.';
     case 'generating':
-      return '리포트를 생성 중입니다. 만세력, 사주, 시기별 운세 데이터를 바탕으로 PDF를 정리하고 있습니다.';
+      return '사주를 해석하고 풀이하는 중입니다. 잠시만 기다려주세요.';
     case 'ready':
       return '프리미엄 리포트가 준비되었습니다. 아래 다운로드 버튼으로 결과물을 받으실 수 있습니다.';
     case 'payment_cancelled':
       return '결제가 취소되어 결과물 생성이 진행되지 않았습니다.';
     case 'failed':
-      return '리포트 생성 중 문제가 발생했습니다. 로그가 저장되었고 재처리 또는 관리자 확인이 가능합니다.';
+      return '리포트 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
     default:
       return '주문 상태를 확인하고 있습니다.';
   }
 }
 
 function normalizeOrderInput(input) {
+  const applicantSource = input.applicant || input.person1 || {};
+  const partnerSource = input.partner || input.person2 || null;
+  const applicant = normalizeApplicant(applicantSource);
+  const partner = partnerSource ? normalizeApplicant(partnerSource, true) : null;
   return {
-    compatibilityRequested: Boolean(input.compatibilityRequested),
-    applicant: normalizeApplicant(input.applicant || {}),
-    partner: input.partner ? normalizeApplicant(input.partner, true) : null
+    compatibilityRequested: Boolean(input.compatibilityRequested || input.productType === 'compatibility' || hasPartnerCoreFields(partner)),
+    applicant,
+    partner,
+    person1: applicant,
+    person2: partner
   };
 }
 
@@ -738,7 +762,9 @@ function toLuckyFlatPayload(person) {
   const hour = normalizeHourMinuteValue(hourRaw || '', 23);
   const minute = normalizeHourMinuteValue(minuteRaw || '', 59);
   const calendar = person.calendarType === 'lunar' ? 'lunar' : 'solar';
+  const calendarLabel = formatCalendarTypeForLucky(calendar);
   return {
+    name: String(person.name || '').trim(),
     year,
     month,
     day,
@@ -749,9 +775,9 @@ function toLuckyFlatPayload(person) {
     birthDay: day,
     birthHour: hour,
     birthMinute: minute,
-    calendarType: calendar,
+    calendarType: calendarLabel,
     calendar,
-    calendarLabel: calendar === 'lunar' ? '음력' : '양력',
+    calendarLabel,
     gender: person.gender,
     isLeapMonth: person.isLeapMonth === true,
     leapMonth: person.isLeapMonth === true,
@@ -761,6 +787,58 @@ function toLuckyFlatPayload(person) {
 
 function normalizeCalendarType(value) {
   return value === 'lunar' || value === '음력' ? 'lunar' : 'solar';
+}
+
+function formatCalendarTypeForLucky(value) {
+  return value === 'lunar' || value === '음력' ? '음력' : '양력';
+}
+
+function buildPeriodPayloadCandidates(applicantPayload) {
+  const targetYear = CONFIG.lucky.defaultPeriodYear;
+  const targetMonth = CONFIG.lucky.defaultPeriodMonth;
+  const targetDay = CONFIG.lucky.defaultPeriodDay;
+  const targetDate = `${String(targetYear).padStart(4, '0')}-${String(targetMonth).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
+  return [
+    {
+      ...applicantPayload,
+      targetYear,
+      targetMonth,
+      targetDate,
+      targetYears: [targetYear],
+      targetMonths: [targetMonth],
+      targetDates: [targetDate]
+    }
+  ];
+}
+
+function buildCompatibilityPayload(person1, person2, note = '') {
+  const a = toLuckyFlatPayload(person1 || {});
+  const b = toLuckyFlatPayload(person2 || {});
+  return {
+    person1: {
+      name: String(person1?.name || '').trim(),
+      gender: a.gender,
+      year: a.year,
+      month: String(Number(a.month || 0) || '').trim() || a.month,
+      day: String(Number(a.day || 0) || '').trim() || a.day,
+      hour: a.hour,
+      minute: a.minute || '00',
+      calendarType: a.calendarType,
+      isLeapMonth: a.isLeapMonth === true
+    },
+    person2: {
+      name: String(person2?.name || '').trim(),
+      gender: b.gender,
+      year: b.year,
+      month: String(Number(b.month || 0) || '').trim() || b.month,
+      day: String(Number(b.day || 0) || '').trim() || b.day,
+      hour: b.hour,
+      minute: b.minute || '00',
+      calendarType: b.calendarType,
+      isLeapMonth: b.isLeapMonth === true
+    },
+    note: String(note || '').trim()
+  };
 }
 
 function normalizeLeap(value) {
@@ -1447,8 +1525,6 @@ function buildAiPromptPayload(order, apiSnapshots, warnings) {
     applicant: order.applicant,
     partner: order.partner,
     compatibilityRequested: order.compatibilityRequested,
-    calculationMemo: warnings,
-    rawSajuText: JSON.stringify(apiSnapshots.saju || {}, null, 2),
     mansaeInfo: apiSnapshots.mansae || null,
     futureFiveYears: apiSnapshots.period || null,
     futureSixMonths: apiSnapshots.period || null,
@@ -1583,6 +1659,7 @@ async function renderPremiumPdf(order, promptPayload, sections) {
   const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const safeName = sanitizeFileName(order.applicant.name || 'report');
   const filePath = path.join(REPORTS_DIR, `${safeName}-${dateStamp}.pdf`);
+  const premiumSections = buildPremiumPdfSections(order, promptPayload, sections || {});
 
   await new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50, autoFirstPage: true });
@@ -1604,15 +1681,17 @@ async function renderPremiumPdf(order, promptPayload, sections) {
     const sectionTitle = (title) => {
       ensureSpace(60);
       doc.moveDown(0.6);
-      doc.roundedRect(page.margin, doc.y, page.width - page.margin * 2, 28, 12).fillAndStroke('#fff5f0', '#f0ddd1');
-      doc.fillColor(colors.primary).font('Bold').fontSize(14).text(title, page.margin + 14, doc.y + 8, { width: page.width - page.margin * 2 - 28 });
-      doc.moveDown(1.8);
+      const top = doc.y;
+      doc.roundedRect(page.margin, top, page.width - page.margin * 2, 28, 12).fillAndStroke('#fff5f0', '#f0ddd1');
+      doc.fillColor(colors.primary).font('Bold').fontSize(14).text(title, page.margin + 14, top + 8, { width: page.width - page.margin * 2 - 28 });
+      doc.y = top + 34;
       doc.fillColor(colors.text).font('Regular');
     };
 
     const paragraph = (text) => {
       if (!text) return;
-      const parts = String(text).split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
+      const safeText = sanitizeCustomerFacingText(text);
+      const parts = String(safeText).split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
       parts.forEach((part) => {
         ensureSpace(70);
         doc.font('Regular').fontSize(11.5).fillColor(colors.text).text(part, { lineGap: 6, paragraphGap: 10, align: 'left' });
@@ -1624,6 +1703,50 @@ async function renderPremiumPdf(order, promptPayload, sections) {
       ensureSpace(28);
       doc.font('Bold').fontSize(10.5).fillColor(colors.muted).text(label, page.margin + 14, doc.y, { continued: true });
       doc.font('Regular').fillColor(colors.text).text(`  ${value || '-'}`);
+    };
+
+    const drawPillarTable = (pillarDetails) => {
+      ensureSpace(250);
+      const cols = [
+        { key: 'head', title: '구분', width: 76 },
+        { key: 'year', title: '년주', width: 104 },
+        { key: 'month', title: '월주', width: 104 },
+        { key: 'day', title: '일주', width: 104 },
+        { key: 'hour', title: '시주', width: 104 }
+      ];
+      const left = page.margin;
+      const top = doc.y;
+      const rowHeight = 34;
+      const widths = cols.map((col) => col.width);
+      const rows = [
+        ['천간', pillarDetails.year?.gan || '-', pillarDetails.month?.gan || '-', pillarDetails.day?.gan || '-', pillarDetails.hour?.gan || '-'],
+        ['지지', pillarDetails.year?.ji || '-', pillarDetails.month?.ji || '-', pillarDetails.day?.ji || '-', pillarDetails.hour?.ji || '-'],
+        ['천간 십성', pillarDetails.year?.sipseong?.gan || '', pillarDetails.month?.sipseong?.gan || '', pillarDetails.day?.sipseong?.gan || '', pillarDetails.hour?.sipseong?.gan || ''],
+        ['지지 십성', pillarDetails.year?.sipseong?.ji || '', pillarDetails.month?.sipseong?.ji || '', pillarDetails.day?.sipseong?.ji || '', pillarDetails.hour?.sipseong?.ji || ''],
+        ['오행', `${pillarDetails.year?.ohaeng?.gan || '-'} / ${pillarDetails.year?.ohaeng?.ji || '-'}`, `${pillarDetails.month?.ohaeng?.gan || '-'} / ${pillarDetails.month?.ohaeng?.ji || '-'}`, `${pillarDetails.day?.ohaeng?.gan || '-'} / ${pillarDetails.day?.ohaeng?.ji || '-'}`, `${pillarDetails.hour?.ohaeng?.gan || '-'} / ${pillarDetails.hour?.ohaeng?.ji || '-'}`],
+        ['음양', `${pillarDetails.year?.eumyang?.gan || '-'} / ${pillarDetails.year?.eumyang?.ji || '-'}`, `${pillarDetails.month?.eumyang?.gan || '-'} / ${pillarDetails.month?.eumyang?.ji || '-'}`, `${pillarDetails.day?.eumyang?.gan || '-'} / ${pillarDetails.day?.eumyang?.ji || '-'}`, `${pillarDetails.hour?.eumyang?.gan || '-'} / ${pillarDetails.hour?.eumyang?.ji || '-'}`]
+      ];
+
+      let x = left;
+      cols.forEach((col) => {
+        doc.rect(x, top, col.width, rowHeight).fillAndStroke('#fbf6f0', '#e7ddd2');
+        doc.fillColor('#6f5b50').font('Bold').fontSize(10.5).text(col.title, x, top + 11, { width: col.width, align: 'center' });
+        x += col.width;
+      });
+
+      rows.forEach((row, rowIndex) => {
+        let cellX = left;
+        const y = top + rowHeight * (rowIndex + 1);
+        row.forEach((cell, colIndex) => {
+          doc.rect(cellX, y, widths[colIndex], rowHeight).fillAndStroke(colIndex === 0 ? '#f9f4ee' : '#ffffff', '#e7ddd2');
+          doc.fillColor(colIndex === 0 ? '#856d5f' : colors.text)
+            .font(colIndex === 0 ? 'Bold' : 'Regular')
+            .fontSize(colIndex === 0 ? 10 : 10.5)
+            .text(String(cell || '-'), cellX + 6, y + 9, { width: widths[colIndex] - 12, align: 'center' });
+          cellX += widths[colIndex];
+        });
+      });
+      doc.y = top + rowHeight * (rows.length + 1) + 16;
     };
 
     doc.rect(0, 0, page.width, page.height).fill('#fffdfa');
@@ -1643,33 +1766,38 @@ async function renderPremiumPdf(order, promptPayload, sections) {
     if (order.applicant.concern) {
       doc.roundedRect(page.margin, 312, page.width - page.margin * 2, 90, 18).fillAndStroke('#f8f3ee', '#eadfd2');
       doc.font('Bold').fontSize(13).fillColor(colors.primary).text('현재 고민', page.margin + 18, 328);
-      doc.font('Regular').fontSize(11).fillColor(colors.text).text(order.applicant.concern, page.margin + 18, 350, { width: page.width - page.margin * 2 - 36, lineGap: 5 });
+      doc.font('Regular').fontSize(11).fillColor(colors.text).text(sanitizeCustomerFacingText(order.applicant.concern), page.margin + 18, 350, { width: page.width - page.margin * 2 - 36, lineGap: 5 });
       doc.y = 420;
     } else {
       doc.y = 330;
     }
 
-    sectionTitle('기본 정보 요약');
+    sectionTitle('기본 정보');
     infoRow('상품', order.product.name);
     infoRow('연락처', order.applicant.phone || '-');
     infoRow('이메일', order.applicant.email || '-');
-    if (order.partner?.name) infoRow('상대방', `${order.partner.name} / ${order.partner.gender === 'male' ? '남성' : '여성'}`);
-    if ((promptPayload.calculationMemo || []).length) {
-      sectionTitle('계산 확인 메모');
-      paragraph((promptPayload.calculationMemo || []).map((item) => `• ${item}`).join('\n'));
+    if (order.partner?.name) {
+      infoRow('상대방', `${order.partner.name} / ${order.partner.gender === 'male' ? '남성' : '여성'}`);
+      infoRow('상대방 생년월일', `${order.partner.birthYear}.${pad2(order.partner.birthMonth)}.${pad2(order.partner.birthDay)} ${order.partner.birthTime || ''}`.trim());
+      infoRow('상대방 달력 기준', order.partner.calendarType === 'lunar' ? '음력' : '양력');
     }
+    if (order.applicant.concern) infoRow('현재 고민', order.applicant.concern);
+
+    sectionTitle('사주팔자 원국 표');
+    drawPillarTable(premiumSections.pillarDetails);
 
     const orderedSections = [
-      '핵심 요약','사주 원국 해석','오행/십성 등 주요 분석 요약','대운','세운','월운','운성','신살, 귀인','십성','재물운','직업운','애정운','자녀운','건강운','실천 조언','주의할 점','고민에 대한 조언','궁합 참고 해석'
+      ['오행 분석', premiumSections.ohaengAnalysis],
+      ['십성 분석', premiumSections.sipseongAnalysis],
+      ['핵심 성향', premiumSections.coreAnalysis],
+      ['일/재물/사업운', premiumSections.workMoneyAnalysis],
+      ['관계/궁합', premiumSections.relationshipAnalysis],
+      ['기간운/시기별 조언', premiumSections.periodAnalysis],
+      ['맞춤 답변', premiumSections.customAnswer],
+      ['종합 조언', premiumSections.finalAdvice]
     ];
 
-    const synthetic = {
-      '오행/십성 등 주요 분석 요약': buildApiDigest(promptPayload.apiSnapshots)
-    };
-
-    for (const title of orderedSections) {
-      const body = sections[title] || synthetic[title];
-      if (!body) continue;
+    for (const [title, body] of orderedSections) {
       sectionTitle(title);
       paragraph(body);
     }
@@ -1680,6 +1808,72 @@ async function renderPremiumPdf(order, promptPayload, sections) {
   });
 
   return filePath;
+}
+
+function buildPremiumPdfSections(order, promptPayload, aiSections) {
+  const fallbackSections = fallbackAiSections(promptPayload);
+  const mergedSections = { ...fallbackSections, ...(aiSections || {}) };
+  const apiBase = promptPayload.apiSnapshots?.saju || promptPayload.apiSnapshots?.mansae || {};
+  const pillars = extractPillars(apiBase, order.applicant);
+  const pillarDetails = buildPillarDetails(pillars, apiBase);
+  const fiveElements = extractDistribution(apiBase, ['오행', 'five', 'element']) || defaultElementDistribution(order.applicant);
+  const tenGods = extractDistribution(apiBase, ['십성', 'tenGod', 'ten']) || defaultTenGodDistribution(order.applicant);
+  const hasCompatibility = Boolean(promptPayload.apiSnapshots?.compatibility && order.partner?.name);
+
+  return {
+    pillarDetails,
+    ohaengAnalysis: [
+      buildDistributionSummary('오행', fiveElements),
+      mergedSections['사주 원국 해석']
+    ].filter(Boolean).join('\n\n'),
+    sipseongAnalysis: [
+      buildDistributionSummary('십성', tenGods),
+      mergedSections['십성']
+    ].filter(Boolean).join('\n\n'),
+    coreAnalysis: [
+      mergedSections['핵심 요약'],
+      mergedSections['사주 원국 해석']
+    ].filter(Boolean).join('\n\n'),
+    workMoneyAnalysis: [
+      mergedSections['재물운'],
+      mergedSections['직업운']
+    ].filter(Boolean).join('\n\n'),
+    relationshipAnalysis: [
+      mergedSections['애정운'],
+      hasCompatibility ? mergedSections['궁합 참고 해석'] : '관계에서는 감정의 속도와 생활 리듬을 맞추는 것이 중요합니다. 상대와의 기대치를 미리 조율할수록 안정감이 커집니다.'
+    ].filter(Boolean).join('\n\n'),
+    periodAnalysis: [
+      mergedSections['대운'],
+      mergedSections['세운'],
+      mergedSections['월운']
+    ].filter(Boolean).join('\n\n'),
+    customAnswer: mergedSections['고민에 대한 조언'] || mergedSections['실천 조언'],
+    finalAdvice: [
+      mergedSections['실천 조언'],
+      mergedSections['주의할 점'],
+      mergedSections['건강운']
+    ].filter(Boolean).join('\n\n')
+  };
+}
+
+function buildDistributionSummary(label, valueMap) {
+  const entries = Object.entries(valueMap || {})
+    .filter(([, value]) => Number(value || 0) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]));
+  if (!entries.length) return '';
+  const total = entries.reduce((sum, [, value]) => sum + Number(value || 0), 0) || 1;
+  const lines = entries.map(([key, value]) => `${key} ${((Number(value || 0) / total) * 100).toFixed(1)}%`);
+  return `${label} 분포는 ${lines.join(', ')} 순으로 읽힙니다. 가장 두드러지는 기운을 중심으로 강점과 보완 포인트를 함께 해석했습니다.`;
+}
+
+function sanitizeCustomerFacingText(text) {
+  const blocked = /(계산 확인 메모|saju api|period api|compatibility api|requiredfields|content-type|charset|raw json error|debug|fallback|mock|source|api 400)/i;
+  const parts = String(text || '')
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !blocked.test(line));
+  return parts.join('\n\n').replace(/\s{2,}/g, ' ').trim();
 }
 
 function buildApiDigest(apiSnapshots) {

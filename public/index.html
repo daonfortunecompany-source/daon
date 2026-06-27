@@ -343,34 +343,61 @@
       width: 100%;
       border: 1px solid #e9ddcf;
       background: rgba(255,255,255,.98);
-      border-radius: 16px;
+      border-radius: 14px;
+      height: 52px;
       min-height: 52px;
-      padding: 14px 14px;
-      font-size: 16px;
+      padding: 0 14px;
+      font-size: 15px;
+      line-height: 1.2;
       color: var(--text);
       outline: none;
+      box-sizing: border-box;
     }
     input:focus, select:focus {
       border-color: #dfa18f;
       box-shadow: 0 0 0 4px rgba(233,154,141,.16);
     }
 
+    select {
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: linear-gradient(45deg, transparent 50%, #8a7063 50%), linear-gradient(135deg, #8a7063 50%, transparent 50%);
+      background-position: calc(100% - 18px) calc(50% - 2px), calc(100% - 12px) calc(50% - 2px);
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
+      padding-right: 34px;
+    }
+
     .time-selects {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
+      align-items: stretch;
     }
 
-    .time-selects select {
+    .time-selects select,
+    .calendar-select-unified {
       position: relative;
       z-index: 1;
       pointer-events: auto;
       touch-action: manipulation;
+      height: 52px;
+      min-height: 52px;
+      padding: 0 14px;
+      border-radius: 14px;
+      font-size: 15px;
+      line-height: 1.2;
     }
 
-    .time-field-stack {
+    .time-field-stack,
+    .calendar-field-stack {
       display: grid;
       gap: 10px;
+      align-content: start;
+    }
+
+    .time-calendar-row {
+      align-items: start;
     }
 
     .time-unknown-option {
@@ -732,7 +759,7 @@
     .donut-chart-v2::after {
       content: '';
       position: absolute;
-      inset: 26px;
+      inset: 22px;
       border-radius: 50%;
       background: #fff;
       box-shadow: inset 0 0 0 1px #efe4d9;
@@ -745,18 +772,18 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 8px;
+      gap: 4px;
       text-align: center;
       z-index: 1;
-      padding: 0 34px;
+      padding: 0 28px;
       pointer-events: none;
     }
 
     .donut-center-v2 strong {
       display: block;
       max-width: 100%;
-      font-size: clamp(22px, 5vw, 24px);
-      line-height: 1.1;
+      font-size: clamp(18px, 4vw, 20px);
+      line-height: 1.15;
       color: #4f433c;
       word-break: keep-all;
     }
@@ -764,17 +791,17 @@
     .donut-center-v2 span {
       display: block;
       max-width: 100%;
-      font-size: 12px;
-      line-height: 1.35;
+      font-size: 14px;
+      line-height: 1.1;
       color: #857265;
-      font-weight: 700;
+      font-weight: 800;
       margin-top: 0;
       word-break: keep-all;
     }
 
     .stats-table-v2 {
       display: grid;
-      gap: 8px;
+      gap: 10px;
       width: 100%;
       max-width: 100%;
     }
@@ -782,16 +809,29 @@
     .stats-row-v2 {
       display: grid;
       grid-template-columns: minmax(0,1fr) auto;
-      gap: 10px;
+      gap: 12px;
       align-items: center;
-      padding: 8px 10px;
+      padding: 11px 12px;
       border-radius: 12px;
       background: #faf6f1;
-      font-size: 13px;
+      font-size: 14px;
+      line-height: 1.45;
     }
 
-    .stats-row-v2 strong { font-size: 13px; }
-    .stats-row-v2 span { color: #6d5c52; font-weight: 700; }
+    .stats-row-v2 strong {
+      font-size: 14px;
+      font-weight: 800;
+      display: block;
+      min-width: 0;
+      word-break: keep-all;
+    }
+    .stats-row-v2 span {
+      color: #6d5c52;
+      font-weight: 800;
+      font-size: 14px;
+      white-space: nowrap;
+      text-align: right;
+    }
 
     .reading-grid-v2 {
       display: grid;
@@ -841,7 +881,7 @@
     .metal { color: #6f7287; }
     .water { color: #394b66; }
 
-    @media (max-width: 920px) {
+    @media (max-width: 1024px) {
       .analysis-grid-v2 { grid-template-columns: 1fr; }
     }
 
@@ -851,8 +891,8 @@
       .pillar-matrix .row-head { width: 58px; }
       .pillar-main strong { font-size: 24px; }
       .pillar-matrix th, .pillar-matrix td { padding: 8px 4px; }
-      .donut-shell-v2 { width: min(170px, 100%); }
-      .donut-chart-v2::after { inset: 24px; }
+      .donut-shell-v2 { width: min(176px, 100%); }
+      .donut-chart-v2::after { inset: 20px; }
     }
 
     .summary-box {
@@ -1467,6 +1507,7 @@
       .card { padding: 16px; }
       .card h2 { font-size: 21px; }
       .inline-2 { grid-template-columns: 1fr; }
+      .time-calendar-row.inline-2 { grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr); align-items: start; }
       .inline-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .result-hero { padding: 16px 14px; }
       .result-hero h3 { font-size: 24px; }
@@ -1491,16 +1532,18 @@
       .pillar-main strong { font-size: 20px; }
       .pillar-main small, .mini-cell { font-size: 11px; }
       .analysis-box-head { font-size: 13px; }
-      .donut-shell-v2 { width: min(148px, 100%); }
-      .donut-center-v2 { padding: 0 20px; gap: 6px; }
-      .donut-center-v2 strong { font-size: 18px; }
-      .donut-center-v2 span, .stats-row-v2 span, .stats-row-v2 strong { font-size: 11px; }
+      .donut-shell-v2 { width: min(156px, 100%); }
+      .donut-center-v2 { padding: 0 18px; gap: 4px; }
+      .donut-center-v2 strong { font-size: 17px; }
+      .donut-center-v2 span { font-size: 13px; }
+      .stats-row-v2 strong, .stats-row-v2 span { font-size: 13px; }
     }
 
     @media (max-width: 360px) {
       .hero h1 { font-size: 26px; }
       .card { padding: 15px; }
       .inline-3 { grid-template-columns: 1fr; }
+      .time-calendar-row.inline-2 { grid-template-columns: 1fr; }
       .pillars { grid-template-columns: 1fr 1fr; }
       .feature-scroll { grid-auto-columns: 84%; }
       .bottom-cta button { font-size: 14px; }
@@ -1930,7 +1973,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
               <input id="day" inputmode="numeric" placeholder="21" value="21" />
             </div>
           </div>
-          <div class="inline-2">
+          <div class="inline-2 time-calendar-row">
             <div class="time-field-stack">
               <label for="timeHour">출생 시각 (24시간 기준)</label>
               <div class="time-selects">
@@ -2030,9 +2073,9 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
                 <span>출생시간 모름</span>
               </label>
             </div>
-            <div>
+            <div class="calendar-field-stack">
               <label for="calendarType">양력 / 음력</label>
-              <select id="calendarType">
+              <select id="calendarType" class="calendar-select-unified">
                 <option value="solar">양력</option>
                 <option value="lunar">음력</option>
               </select>
@@ -2093,11 +2136,11 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         <section class="reference-panel">
           <div class="panel-title-row">
             <h3>오행 · 십성 분포</h3>
-            <span class="panel-note" id="distributionNote">응답 원점수와 정규화 비중을 함께 표시합니다.</span>
+            <span class="panel-note hidden" id="distributionNote"></span>
           </div>
           <div class="analysis-grid-v2">
             <div class="analysis-box-v2">
-              <div class="analysis-box-head">오행 경향 점수</div>
+              <div class="analysis-box-head">오행 분포</div>
               <div class="donut-shell-v2">
                 <div class="donut-chart-v2" id="elementRing"></div>
                 <div class="donut-center-v2">
@@ -2109,7 +2152,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
             </div>
 
             <div class="analysis-box-v2">
-              <div class="analysis-box-head">십성 경향 점수</div>
+              <div class="analysis-box-head">십성 분포</div>
               <div class="donut-shell-v2">
                 <div class="donut-chart-v2" id="starRing"></div>
                 <div class="donut-center-v2">
@@ -2576,10 +2619,13 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
 
     function renderStatsTable(target, stats, type) {
       if (!target) return;
-      target.innerHTML = stats.filter((item) => item.value > 0).map((item) => {
-        const labelClass = type === 'element' ? getElementClass(item.label[0]) : '';
-        return `<div class="stats-row-v2"><strong class="${labelClass}" style="color:${item.color}">${item.label}</strong><span>${item.raw}점 · ${item.value.toFixed(1)}%</span></div>`;
-      }).join('');
+      target.innerHTML = stats
+        .filter((item) => item.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .map((item) => {
+          const labelClass = type === 'element' ? getElementClass(item.label[0]) : '';
+          return `<div class="stats-row-v2"><strong class="${labelClass}" style="color:${item.color}">${item.label}</strong><span>${item.value.toFixed(1)}%</span></div>`;
+        }).join('');
     }
 
     function buildPillarMatrixHtml(result) {
@@ -2633,7 +2679,8 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         ? '현재 화면은 대체 데이터로 구성되었을 수 있습니다. 아래 카드에서 실제 반환값 기준 요약을 먼저 확인해 주세요.'
         : '사주 원국, 오행·십성 경향, 핵심 해석을 아래 카드에서 확인해보세요.';
       if (distributionNote) {
-        distributionNote.textContent = '오행·십성 숫자는 응답 원점수이며, 도넛 차트는 보기 쉽게 정규화한 비중입니다.';
+        distributionNote.textContent = '';
+        distributionNote.style.display = 'none';
       }
       premiumHint.textContent = isFallback
         ? '현재 결과는 Lucky API 원문이 아닌 로컬 대체 요약일 수 있습니다. 재시도 후에도 동일하면 Lucky 연동 상태를 먼저 확인해 주세요.'
@@ -2651,12 +2698,12 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       renderRing(elementRing, analysis.elementStats);
       renderStatsTable(elementTable, analysis.elementStats, 'element');
       elementCoreLabel.textContent = analysis.elementCore.label;
-      elementCorePct.textContent = `${analysis.elementCore.raw}점 · 정규화 ${analysis.elementCore.value.toFixed(1)}%`;
+      elementCorePct.textContent = `${analysis.elementCore.value.toFixed(1)}%`;
 
       renderRing(starRing, analysis.tenGodStats);
       renderStatsTable(starTable, analysis.tenGodStats, 'star');
       starCoreLabel.textContent = analysis.starCore.label;
-      starCorePct.textContent = `${analysis.starCore.raw}점 · 정규화 ${analysis.starCore.value.toFixed(1)}%`;
+      starCorePct.textContent = `${analysis.starCore.value.toFixed(1)}%`;
 
       resultCard.classList.remove('hidden');
       resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });

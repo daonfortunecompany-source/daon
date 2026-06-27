@@ -12,6 +12,8 @@
       --text: #352c29;
       --muted: #6f625b;
       --primary: #cf8f7a;
+      --primary-soft: #fff5f0;
+      --good: #7db4a5;
       --shadow: 0 20px 40px rgba(95, 72, 56, .08);
       --radius: 26px;
     }
@@ -37,6 +39,7 @@
     h1, h2, p { margin: 0; }
     h1 { font-size: 26px; letter-spacing: -.04em; }
     .sub { margin-top: 10px; color: var(--muted); line-height: 1.7; font-size: 14px; }
+
     .status-badge {
       display: inline-flex;
       align-items: center;
@@ -44,30 +47,220 @@
       margin-top: 18px;
       padding: 10px 14px;
       border-radius: 999px;
-      background: #fff5f0;
+      background: var(--primary-soft);
       border: 1px solid #f0ddd1;
       color: #8b5d53;
-      font-weight: 700;
+      font-weight: 800;
       font-size: 13px;
     }
+
+    .loading-panel {
+      margin-top: 18px;
+      border: 1px solid #f0e2d6;
+      border-radius: 22px;
+      background: linear-gradient(180deg, #fffaf6 0%, #fff 100%);
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .loading-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      min-height: 58px;
+    }
+
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 3px solid #f1ded5;
+      border-top-color: var(--primary);
+      animation: spin 1s linear infinite;
+      flex: 0 0 auto;
+    }
+
+    .loading-copy {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 800;
+      color: #6d5247;
+      font-size: 15px;
+      letter-spacing: -.02em;
+    }
+
+    .loading-copy .base {
+      animation: breathe 1.6s ease-in-out infinite;
+    }
+
+    .loading-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 24px;
+    }
+
+    .loading-dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--primary);
+      opacity: .3;
+      animation: dotPulse 1.2s ease-in-out infinite;
+    }
+
+    .loading-dots span:nth-child(2) { animation-delay: .18s; }
+    .loading-dots span:nth-child(3) { animation-delay: .36s; }
+
+    .progress-shell {
+      display: grid;
+      gap: 8px;
+    }
+
+    .progress-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      background: #f2e8df;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #e3a694 0%, #cf8f7a 45%, #b97669 100%);
+      transition: width .45s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .progress-bar::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
+      transform: translateX(-100%);
+      animation: shimmer 1.8s linear infinite;
+    }
+
     .timeline {
-      margin-top: 22px;
+      margin-top: 18px;
       display: grid;
       gap: 12px;
     }
+
     .timeline-item {
       border: 1px solid var(--line);
       border-radius: 18px;
       background: #fff;
       padding: 14px 14px;
+      position: relative;
+      overflow: hidden;
+      transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease, background .25s ease;
     }
+
+    .timeline-item::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(207,143,122,.08), rgba(255,255,255,0));
+      opacity: 0;
+      transition: opacity .25s ease;
+      pointer-events: none;
+    }
+
     .timeline-item strong { display: block; font-size: 14px; margin-bottom: 6px; }
-    .timeline-item span { color: var(--muted); font-size: 13px; line-height: 1.65; }
+    .timeline-item span { color: var(--muted); font-size: 13px; line-height: 1.65; display: block; }
+
+    .step-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .02em;
+      color: #927160;
+      text-transform: uppercase;
+    }
+
+    .step-kicker i {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #d8c8bc;
+      display: inline-block;
+      flex: 0 0 auto;
+    }
+
+    .timeline-item.active {
+      border-color: #e1b8a9;
+      background: linear-gradient(180deg, #fff8f3 0%, #fff 100%);
+      box-shadow: 0 14px 28px rgba(207, 143, 122, .14);
+      transform: translateY(-1px);
+    }
+
+    .timeline-item.active::after {
+      opacity: 1;
+      animation: stepGlow 1.6s ease-in-out infinite;
+    }
+
+    .timeline-item.active .step-kicker i {
+      background: var(--primary);
+      box-shadow: 0 0 0 6px rgba(207,143,122,.12);
+      animation: pulseDot 1.3s ease-in-out infinite;
+    }
+
+    .timeline-item.done {
+      border-color: #d5e8e1;
+      background: linear-gradient(180deg, #f6fbf9 0%, #fff 100%);
+    }
+
+    .timeline-item.done .step-kicker {
+      color: #538170;
+    }
+
+    .timeline-item.done .step-kicker i {
+      background: var(--good);
+      box-shadow: 0 0 0 6px rgba(125,180,165,.12);
+    }
+
+    .timeline-item.pending .step-kicker i {
+      background: #d8c8bc;
+      box-shadow: none;
+    }
+
+    .detail {
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: 18px;
+      background: #f8f3ee;
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 13px;
+      white-space: pre-line;
+    }
+
     .actions {
       margin-top: 22px;
       display: grid;
       gap: 10px;
     }
+
     .btn {
       appearance: none;
       border: 0;
@@ -81,46 +274,111 @@
       justify-content: center;
       text-decoration: none;
     }
+
     .btn-primary {
       background: linear-gradient(135deg, var(--primary), #e2a38e);
       color: white;
       box-shadow: 0 12px 24px rgba(207,143,122,.22);
     }
+
     .btn-soft {
       background: rgba(255,255,255,.86);
       color: var(--text);
       border: 1px solid var(--line);
     }
-    .detail {
-      margin-top: 16px;
-      padding: 14px;
-      border-radius: 18px;
-      background: #f8f3ee;
-      color: var(--muted);
-      line-height: 1.7;
-      font-size: 13px;
-      white-space: pre-line;
+
+    .is-final .spinner,
+    .is-final .loading-dots,
+    .is-final .progress-bar::after {
+      animation: none;
+    }
+
+    .is-final .spinner {
+      border-color: #d7ebe4;
+      border-top-color: var(--good);
+    }
+
+    .is-failed .loading-copy,
+    .is-failed .status-badge {
+      color: #9a4b43;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes dotPulse {
+      0%, 80%, 100% { transform: translateY(0); opacity: .25; }
+      40% { transform: translateY(-5px); opacity: 1; }
+    }
+    @keyframes breathe {
+      0%, 100% { opacity: .72; }
+      50% { opacity: 1; }
+    }
+    @keyframes shimmer {
+      to { transform: translateX(100%); }
+    }
+    @keyframes pulseDot {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.12); }
+    }
+    @keyframes stepGlow {
+      0%, 100% { opacity: .45; }
+      50% { opacity: .9; }
+    }
+
+    @media (max-width: 420px) {
+      .card {
+        padding: 22px 16px;
+      }
+      h1 { font-size: 24px; }
+      .loading-row {
+        gap: 10px;
+        min-height: 54px;
+      }
+      .loading-copy {
+        font-size: 14px;
+      }
     }
   </style>
 </head>
 <body>
-  <main class="card">
+  <main class="card" id="statusCard">
     <h1>리포트 생성 상태</h1>
-    <p class="sub">결제 완료 확인 후 만세력 계산, 사주 해설 생성, PDF 리포트 정리 순서로 진행됩니다.</p>
+    <p class="sub">사주를 해석하고 풀이하는 중입니다. 잠시만 기다려주세요.</p>
     <div class="status-badge" id="statusBadge">상태 확인 중...</div>
 
+    <section class="loading-panel" aria-label="리포트 생성 진행 상태">
+      <div class="loading-row">
+        <div class="spinner" aria-hidden="true"></div>
+        <div class="loading-copy" aria-live="polite">
+          <span class="base" id="loadingText">리포트 생성 중</span>
+          <span class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+        </div>
+      </div>
+      <div class="progress-shell">
+        <div class="progress-meta">
+          <span id="progressLabel">진행 상태를 확인하고 있습니다.</span>
+          <span id="progressValue">0%</span>
+        </div>
+        <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+      </div>
+    </section>
+
     <section class="timeline">
-      <article class="timeline-item">
+      <article class="timeline-item pending" id="stepPayment">
+        <div class="step-kicker"><i></i><span>Step 1</span></div>
         <strong>1. 결제 확인</strong>
         <span id="paymentStep">결제 승인 여부를 확인하고 있습니다.</span>
       </article>
-      <article class="timeline-item">
+      <article class="timeline-item pending" id="stepGenerating">
+        <div class="step-kicker"><i></i><span>Step 2</span></div>
         <strong>2. 리포트 생성</strong>
-        <span id="generationStep">필요한 데이터와 해설을 정리할 준비 중입니다.</span>
+        <span id="generationStep">사주 원국과 해석을 정리하고 있습니다.</span>
       </article>
-      <article class="timeline-item">
+      <article class="timeline-item pending" id="stepDownload">
+        <div class="step-kicker"><i></i><span>Step 3</span></div>
         <strong>3. PDF 결과물 전달</strong>
-        <span id="downloadStep">다운로드 링크가 준비되면 이 화면에서 바로 받을 수 있습니다.</span>
+        <span id="downloadStep">완료 후 PDF를 다운로드할 수 있습니다.</span>
       </article>
     </section>
 
@@ -134,49 +392,130 @@
   <script>
     const params = new URLSearchParams(window.location.search);
     const orderId = params.get('order');
+    const statusCard = document.getElementById('statusCard');
+    const statusSub = document.querySelector('.sub');
     const statusBadge = document.getElementById('statusBadge');
     const paymentStep = document.getElementById('paymentStep');
     const generationStep = document.getElementById('generationStep');
     const downloadStep = document.getElementById('downloadStep');
     const detailBox = document.getElementById('detailBox');
     const actions = document.getElementById('actions');
+    const progressBar = document.getElementById('progressBar');
+    const progressLabel = document.getElementById('progressLabel');
+    const progressValue = document.getElementById('progressValue');
+    const loadingText = document.getElementById('loadingText');
+    const stepPayment = document.getElementById('stepPayment');
+    const stepGenerating = document.getElementById('stepGenerating');
+    const stepDownload = document.getElementById('stepDownload');
+
+    function setStepState(target, state) {
+      if (!target) return;
+      target.classList.remove('pending', 'active', 'done');
+      target.classList.add(state);
+    }
+
+    function applyProgress(percent, label) {
+      const safe = Math.max(0, Math.min(100, Number(percent) || 0));
+      progressBar.style.width = `${safe}%`;
+      progressValue.textContent = `${safe}%`;
+      progressLabel.textContent = label;
+    }
 
     function renderStatus(data) {
+      const status = data.status || 'created';
       const statusMap = {
-        created: '결제창 준비 완료',
+        created: '결제창 준비 중',
         payment_pending: '결제 대기 중',
-        payment_success: '결제 완료',
+        payment_success: '리포트 생성 시작',
         generating: '리포트 생성 중',
         ready: '리포트 준비 완료',
         payment_cancelled: '결제 취소',
         failed: '처리 실패'
       };
-      statusBadge.textContent = statusMap[data.status] || data.status || '상태 확인 중';
+      statusBadge.textContent = statusMap[status] || '상태 확인 중';
 
-      if (data.status === 'payment_success' || data.status === 'generating' || data.status === 'ready') {
-        paymentStep.textContent = '결제 성공이 확인되었습니다.';
-      } else if (data.status === 'payment_cancelled') {
-        paymentStep.textContent = '결제가 취소되어 리포트 생성이 진행되지 않았습니다.';
-      } else {
-        paymentStep.textContent = '결제 승인 여부를 확인하고 있습니다.';
+      statusCard.classList.toggle('is-final', ['ready', 'payment_cancelled', 'failed'].includes(status));
+      statusCard.classList.toggle('is-failed', ['payment_cancelled', 'failed'].includes(status));
+      if (statusSub) {
+        statusSub.textContent = status === 'ready'
+          ? '프리미엄 PDF 리포트가 준비되었습니다. 아래 버튼에서 바로 다운로드하실 수 있습니다.'
+          : status === 'failed'
+            ? '리포트 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
+            : status === 'payment_cancelled'
+              ? '결제가 취소되어 리포트 생성이 진행되지 않았습니다.'
+              : '사주를 해석하고 풀이하는 중입니다. 잠시만 기다려주세요.';
       }
 
-      if (data.status === 'generating') {
-        generationStep.textContent = '사주 데이터와 해설을 바탕으로 PDF를 생성하고 있습니다.';
-        downloadStep.textContent = '완료되면 다운로드 버튼이 자동으로 표시됩니다.';
-      } else if (data.status === 'ready') {
+      const isGenerating = status === 'payment_success' || status === 'generating';
+      loadingText.textContent = status === 'ready'
+        ? '리포트 준비 완료'
+        : status === 'failed'
+          ? '리포트 생성 확인 필요'
+          : status === 'payment_cancelled'
+            ? '결제가 취소되었습니다'
+            : isGenerating
+              ? '리포트 생성 중'
+              : '리포트 상태 확인 중';
+
+      if (['payment_success', 'generating', 'ready'].includes(status)) {
+        paymentStep.textContent = '결제 성공이 확인되었습니다.';
+        setStepState(stepPayment, 'done');
+      } else if (status === 'payment_cancelled') {
+        paymentStep.textContent = '결제가 취소되어 리포트 생성이 진행되지 않았습니다.';
+        setStepState(stepPayment, 'pending');
+      } else {
+        paymentStep.textContent = '결제 승인 여부를 확인하고 있습니다.';
+        setStepState(stepPayment, status === 'payment_pending' ? 'active' : 'pending');
+      }
+
+      if (status === 'payment_success' || status === 'generating') {
+        generationStep.textContent = '사주 원국과 해석을 정리하고 있습니다.';
+        downloadStep.textContent = '완료 후 PDF를 다운로드할 수 있습니다.';
+        setStepState(stepGenerating, 'active');
+        setStepState(stepDownload, 'pending');
+      } else if (status === 'ready') {
         generationStep.textContent = '리포트 생성이 완료되었습니다.';
         downloadStep.textContent = '지금 바로 PDF를 내려받을 수 있습니다.';
-      } else if (data.status === 'failed') {
+        setStepState(stepGenerating, 'done');
+        setStepState(stepDownload, 'done');
+      } else if (status === 'failed') {
         generationStep.textContent = '리포트 생성 중 문제가 발생했습니다.';
-        downloadStep.textContent = '관리자가 확인할 수 있도록 로그를 남겼습니다.';
+        downloadStep.textContent = '잠시 후 다시 시도해 주세요.';
+        setStepState(stepGenerating, 'active');
+        setStepState(stepDownload, 'pending');
+      } else if (status === 'payment_cancelled') {
+        generationStep.textContent = '리포트 생성이 시작되지 않았습니다.';
+        downloadStep.textContent = '결제 완료 후에만 PDF 결과물이 준비됩니다.';
+        setStepState(stepGenerating, 'pending');
+        setStepState(stepDownload, 'pending');
+      } else {
+        generationStep.textContent = '사주 원국과 해석을 정리할 준비 중입니다.';
+        downloadStep.textContent = '완료 후 PDF를 다운로드할 수 있습니다.';
+        setStepState(stepGenerating, 'pending');
+        setStepState(stepDownload, 'pending');
+      }
+
+      if (status === 'payment_pending') {
+        applyProgress(18, '결제 완료를 기다리고 있습니다.');
+      } else if (status === 'payment_success') {
+        applyProgress(42, '결제가 확인되어 리포트 생성을 시작했습니다.');
+      } else if (status === 'generating') {
+        applyProgress(72, '사주를 해석하고 PDF를 정리하고 있습니다.');
+      } else if (status === 'ready') {
+        applyProgress(100, '리포트가 준비되었습니다.');
+      } else if (status === 'failed') {
+        applyProgress(72, '생성 중 문제가 감지되어 확인이 필요합니다.');
+      } else if (status === 'payment_cancelled') {
+        applyProgress(0, '결제가 취소되어 진행이 중단되었습니다.');
+      } else {
+        applyProgress(8, '주문 정보를 확인하고 있습니다.');
       }
 
       detailBox.textContent = data.message || '리포트 상태를 계속 확인하고 있습니다.';
 
       const existingDownload = document.getElementById('downloadButton');
       if (existingDownload) existingDownload.remove();
-      if (data.downloadUrl) {
+      if (status === 'ready' && data.downloadUrl) {
         const a = document.createElement('a');
         a.id = 'downloadButton';
         a.className = 'btn btn-primary';
@@ -190,6 +529,7 @@
       if (!orderId) {
         statusBadge.textContent = '주문번호 없음';
         detailBox.textContent = '유효한 주문번호가 없어 상태를 확인할 수 없습니다.';
+        applyProgress(0, '주문번호를 확인해 주세요.');
         return;
       }
       try {
@@ -201,6 +541,7 @@
         }
       } catch (error) {
         detailBox.textContent = '상태를 확인하는 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도합니다.';
+        applyProgress(12, '상태를 다시 확인하고 있습니다.');
         setTimeout(poll, 5000);
       }
     }
