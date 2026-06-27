@@ -90,15 +90,32 @@ app.get('/api/health', async (_req, res) => {
 
 app.post('/api/saju/summary', async (req, res) => {
   try {
+    console.log('[FREE SUMMARY] request received');
     const payload = normalizeApplicant(req.body || {});
     const luckyPayload = toLuckyFlatPayload(payload);
     let mansaeData = null;
+    let source = 'lucky';
+    let usingFallback = false;
     try {
       mansaeData = await callLuckyApi(CONFIG.lucky.mansaeUrl, [luckyPayload], 'mansae');
     } catch (error) {
       await appendLog('summary_api_warning', { error: error.message });
+      if (!CONFIG.allowLocalFallback) {
+        console.log('[LUCKY API] using fallback: false');
+        throw error;
+      }
+      usingFallback = true;
+      source = String(process.env.USE_MOCK_DATA || 'false').toLowerCase() === 'true' ? 'mock' : 'local';
     }
-    const result = buildFreeSummary(payload, mansaeData);
+    if (!mansaeData) {
+      usingFallback = true;
+      source = source === 'lucky'
+        ? (String(process.env.USE_MOCK_DATA || 'false').toLowerCase() === 'true' ? 'mock' : 'local')
+        : source;
+    }
+    console.log(`[LUCKY API] using fallback: ${usingFallback}`);
+    console.log(`[FREE SUMMARY] response source: ${source}`);
+    const result = buildFreeSummary(payload, mansaeData, { source, usingFallback });
     res.json({ result });
   } catch (error) {
     res.status(400).json({ error: error.message || '요약 결과를 생성하지 못했습니다.' });
@@ -367,6 +384,7 @@ async function callLuckyApi(url, payloadCandidates, label) {
   if (!CONFIG.lucky.apiKey) {
     throw new Error('LUCKY_API_KEY가 설정되지 않았습니다.');
   }
+  console.log('[LUCKY API] request start');
   const candidates = Array.isArray(payloadCandidates) ? payloadCandidates : [payloadCandidates];
   const authVariants = resolveLuckyAuthVariants();
   let lastError = new Error(`${label} API 호출 실패`);
@@ -388,6 +406,7 @@ async function callLuckyApi(url, payloadCandidates, label) {
         }
         const response = await fetch(requestUrl, { method: 'POST', headers, body });
         const text = await response.text();
+        console.log(`[LUCKY API] status: ${response.status}`);
         if (!response.ok) {
           await appendLog('lucky_api_attempt_failed', {
             label,
@@ -586,19 +605,27 @@ function cleanDigits(value) {
   return String(value || '').replace(/[^0-9]/g, '');
 }
 
-function buildFreeSummary(payload, mansaeData) {
+function buildFreeSummary(payload, mansaeData, meta = {}) {
   const pillars = extractPillars(mansaeData, payload);
   const elements = extractDistribution(mansaeData, ['오행', 'five', 'element']) || defaultElementDistribution(payload);
   const tenGods = extractDistribution(mansaeData, ['십성', 'tenGod', 'ten']) || defaultTenGodDistribution(payload);
   const name = payload.name || '사용자';
   const dominantElement = Object.entries(elements).sort((a, b) => b[1] - a[1])[0]?.[0] || '목';
   const dominantGod = Object.entries(tenGods).sort((a, b) => b[1] - a[1])[0]?.[0] || '비견';
+  const source = meta.source || (mansaeData ? 'lucky' : 'local');
   return {
+    source,
+    usingFallback: Boolean(meta.usingFallback),
+    metrics: {
+      fiveElementsUnit: 'score',
+      tenGodsUnit: 'score',
+      chartDisplay: 'normalized-percent'
+    },
     year: pillars.year,
     month: pillars.month,
     day: pillars.day,
     hour: pillars.hour,
-    pillarDetails: buildPillarDetails(pillars),
+    pillarDetails: buildPillarDetails(pillars, mansaeData),
     fiveElements: elements,
     tenGods,
     tags: [`${dominantElement} 기운`, `${dominantGod} 중심`, payload.calendarType === 'lunar' ? '음력 기준' : '양력 기준'],
@@ -607,15 +634,15 @@ function buildFreeSummary(payload, mansaeData) {
     love: `관계에서는 솔직함과 안정감을 동시에 원합니다. 가까워질수록 속도를 맞춰주는 사람이 잘 맞고, 말보다 행동에서 신뢰를 확인하려는 경향이 있습니다.`,
     work: `일과 재물에서는 당장의 성과보다 흐름을 길게 보는 편이 유리합니다. 익숙한 영역에서 실력을 쌓되, 결정적인 시점에는 스스로 주도권을 잡는 방식이 좋습니다.`,
     ui: {
-      sourceLabel: mansaeData ? '만세력 API' : 'FREE SUMMARY',
-      intro: '입력한 생년월일시를 바탕으로 네 기둥 구조와 핵심 해석을 한 화면에 정리했습니다.',
-      summaryTitle: '사주의 중심 흐름',
-      summaryBody: `${name}님의 무료 요약 결과입니다. 현재는 핵심 성향과 구조를 빠르게 확인할 수 있도록 정리했습니다.`
+      sourceLabel: source === 'lucky' ? 'Lucky API' : source === 'mock' ? 'MOCK DATA' : 'LOCAL FALLBACK',
+      intro: '입력한 생년월일시를 바탕으로 사주 원국, 오행/십성 경향, 핵심 해석을 한 화면에 정리했습니다.',
+      summaryTitle: '무료 요약 결과',
+      summaryBody: `${name}님의 무료 요약 결과입니다. 아래에서 사주 원국과 핵심 해석을 함께 확인해보세요.`
     }
   };
 }
 
-function buildPillarDetails(pillars) {
+function buildPillarDetails(pillars, rawData = null) {
   const maps = {
     stemHanja: { 갑: '甲', 을: '乙', 병: '丙', 정: '丁', 무: '戊', 기: '己', 경: '庚', 신: '辛', 임: '壬', 계: '癸' },
     branchHanja: { 자: '子', 축: '丑', 인: '寅', 묘: '卯', 진: '辰', 사: '巳', 오: '午', 미: '未', 신: '申', 유: '酉', 술: '戌', 해: '亥' },
@@ -624,19 +651,67 @@ function buildPillarDetails(pillars) {
     ohaengStem: { 갑: '목', 을: '목', 병: '화', 정: '화', 무: '토', 기: '토', 경: '금', 신: '금', 임: '수', 계: '수' },
     ohaengBranch: { 자: '수', 축: '토', 인: '목', 묘: '목', 진: '토', 사: '화', 오: '화', 미: '토', 신: '금', 유: '금', 술: '토', 해: '수' }
   };
-  const make = (pillar) => {
+  const make = (pillar, pillarKey) => {
     const p = String(pillar || '--');
     const gan = p[0] || '-';
     const ji = p[1] || '-';
+    const sipseong = extractPillarSipseong(rawData, pillarKey);
     return {
       hangul: p,
       hanja: `${maps.stemHanja[gan] || ''}${maps.branchHanja[ji] || ''}` || '-',
       eumyang: { gan: maps.yinYangStem[gan] || '-', ji: maps.yinYangBranch[ji] || '-' },
       ohaeng: { gan: maps.ohaengStem[gan] || '-', ji: maps.ohaengBranch[ji] || '-' },
-      sipseong: { gan: '-', ji: '-' }
+      sipseong: { gan: sipseong.gan || '-', ji: sipseong.ji || '-' }
     };
   };
-  return { year: make(pillars.year), month: make(pillars.month), day: make(pillars.day), hour: make(pillars.hour) };
+  return {
+    year: make(pillars.year, 'year'),
+    month: make(pillars.month, 'month'),
+    day: make(pillars.day, 'day'),
+    hour: make(pillars.hour, 'hour')
+  };
+}
+
+function extractPillarSipseong(data, pillarKey) {
+  if (!data || typeof data !== 'object') return { gan: '-', ji: '-' };
+  const pillarNode = findValueByKeys(data, [pillarKey, `${pillarKey}Pillar`, `${pillarKey}Info`, `${pillarKey}柱`, `${pillarKey}주`]);
+  const localized = pillarKey === 'year' ? '년' : pillarKey === 'month' ? '월' : pillarKey === 'day' ? '일' : '시';
+  const gan = String(
+    findValueByKeyPatterns(pillarNode || data, [
+      [pillarKey, 'stem', 'tengod'],
+      [pillarKey, 'gan', 'sipseong'],
+      [pillarKey, 'heavenly', 'tengod'],
+      [localized, '천간', '십성'],
+      ['천간', '십성']
+    ]) || '-'
+  ).trim();
+  const ji = String(
+    findValueByKeyPatterns(pillarNode || data, [
+      [pillarKey, 'branch', 'tengod'],
+      [pillarKey, 'ji', 'sipseong'],
+      [pillarKey, 'earthly', 'tengod'],
+      [localized, '지지', '십성'],
+      ['지지', '십성']
+    ]) || '-'
+  ).trim();
+  return { gan, ji };
+}
+
+function findValueByKeyPatterns(root, patternGroups) {
+  if (!root || typeof root !== 'object') return null;
+  const queue = [root];
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object') continue;
+    for (const [key, value] of Object.entries(current)) {
+      const lower = String(key).toLowerCase();
+      if (patternGroups.some((group) => group.every((token) => lower.includes(String(token).toLowerCase())))) {
+        return value;
+      }
+      if (value && typeof value === 'object') queue.push(value);
+    }
+  }
+  return null;
 }
 
 function extractPillars(data, fallbackPerson) {
