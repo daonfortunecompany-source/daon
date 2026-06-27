@@ -322,7 +322,7 @@ app.all('/api/payapp/feedback', async (req, res) => {
     };
 
     if (payState === 4) {
-      order.status = order.status === 'ready' ? 'ready' : 'payment_success';
+      order.status = isOrderCompleted(order) ? 'completed' : 'payment_success';
       order.logs.push(logLine('payment_success', { payState, mulNo: order.payment.mulNo }));
       await saveOrder(order);
       triggerReportGeneration(order.id);
@@ -348,13 +348,18 @@ app.all('/api/payapp/feedback', async (req, res) => {
 
 app.get('/api/orders/:orderId/status', async (req, res) => {
   const order = await readOrder(req.params.orderId);
+  applyNoCacheHeaders(res);
   if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' });
 
+  const publicStatus = getPublicOrderStatus(order.status);
+  const downloadReady = isOrderCompleted(order);
   res.json({
     orderId: order.id,
-    status: order.status,
+    status: publicStatus,
+    progress: getOrderProgress(order),
+    failedStep: order.failedStep || null,
     message: buildStatusMessage(order),
-    downloadUrl: order.status === 'ready' ? `${BASE_URL}/api/orders/${encodeURIComponent(order.id)}/report.pdf` : null,
+    downloadUrl: downloadReady ? `${BASE_URL}/api/orders/${encodeURIComponent(order.id)}/report.pdf` : null,
     productName: order.product.name,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt
@@ -418,10 +423,9 @@ async function generatePremiumReport(orderId) {
   generatingOrders.add(orderId);
   try {
     const order = await readOrder(orderId);
-    if (!order || order.status === 'ready') return;
+    if (!order || isOrderCompleted(order)) return;
 
-    order.status = 'generating';
-    order.updatedAt = new Date().toISOString();
+    updateOrderProgress(order, { status: 'generating', progress: 42, currentStep: 'generation', failedStep: null });
     order.logs.push(logLine('generation_started', {}));
     await saveOrder(order);
 
@@ -438,20 +442,29 @@ async function generatePremiumReport(orderId) {
       hasPerson2
     }));
 
+    updateOrderProgress(order, { progress: 50, currentStep: 'mansae', failedStep: null });
+    await saveOrder(order);
     const mansaeResult = await optionalApiCall('mansae', CONFIG.lucky.mansaeUrl, [applicantPayload], warnings, false);
     if (mansaeResult.data) apiSnapshots.mansae = mansaeResult.data;
 
+    updateOrderProgress(order, { progress: 62, currentStep: 'saju', failedStep: null });
+    await saveOrder(order);
     const sajuCandidates = [{ ...applicantPayload }];
     const sajuResult = await optionalApiCall('saju', CONFIG.lucky.sajuUrl, sajuCandidates, warnings, true);
     if (sajuResult.data) apiSnapshots.saju = sajuResult.data;
 
+    updateOrderProgress(order, { progress: 72, currentStep: 'period', failedStep: null });
+    await saveOrder(order);
     const periodCandidates = buildPeriodPayloadCandidates(applicantPayload);
     const periodResult = await optionalApiCall('period', CONFIG.lucky.periodUrl, periodCandidates, warnings, true);
     if (periodResult.data) apiSnapshots.period = periodResult.data;
 
     if (shouldCallCompatibility(order)) {
+      updateOrderProgress(order, { progress: 84, currentStep: 'compatibility', failedStep: null });
+      await saveOrder(order);
       const compatibilityPayload = buildCompatibilityPayload(order.applicant, order.partner, order.partner?.memo || '');
-      console.log('[COMPATIBILITY API] request payload check:', JSON.stringify({
+      console.log('[COMPATIBILITY API] request start');
+      console.log('[COMPATIBILITY API] payload check:', JSON.stringify({
         hasPerson1: Boolean(compatibilityPayload.person1),
         hasPerson2: Boolean(compatibilityPayload.person2),
         person1Keys: Object.keys(compatibilityPayload.person1 || {}),
@@ -462,21 +475,31 @@ async function generatePremiumReport(orderId) {
     }
 
     if (!apiSnapshots.saju) {
-      throw new Error('핵심 사주 데이터 호출에 실패했습니다.');
-    }
-    if (shouldCallCompatibility(order) && !apiSnapshots.compatibility) {
-      throw new Error('궁합 데이터 호출에 실패했습니다.');
+      const error = new Error('핵심 사주 데이터 호출에 실패했습니다.');
+      error.failedStep = 'saju';
+      error.progress = 62;
+      throw error;
     }
     if (!apiSnapshots.period) {
-      throw new Error('기간운 데이터 호출에 실패했습니다.');
+      const error = new Error('기간운 데이터 호출에 실패했습니다.');
+      error.failedStep = 'period';
+      error.progress = 72;
+      throw error;
+    }
+    if (shouldCallCompatibility(order) && !apiSnapshots.compatibility) {
+      const error = new Error('궁합 데이터 호출에 실패했습니다.');
+      error.failedStep = 'compatibility';
+      error.progress = 84;
+      throw error;
     }
 
+    updateOrderProgress(order, { progress: 92, currentStep: 'pdf', failedStep: null });
+    await saveOrder(order);
     const promptPayload = buildAiPromptPayload(order, apiSnapshots, warnings);
     const aiSections = await generateAiSections(promptPayload);
     const pdfFilePath = await renderPremiumPdf(order, promptPayload, aiSections);
 
-    order.status = 'ready';
-    order.updatedAt = new Date().toISOString();
+    updateOrderProgress(order, { status: 'completed', progress: 100, currentStep: 'completed', failedStep: null });
     order.artifacts.pdfPath = pdfFilePath;
     order.artifacts.aiSections = aiSections;
     order.artifacts.promptPayload = promptPayload;
@@ -485,12 +508,13 @@ async function generatePremiumReport(orderId) {
   } catch (error) {
     const order = await readOrder(orderId);
     if (order) {
-      order.status = 'failed';
-      order.updatedAt = new Date().toISOString();
-      order.logs.push(logLine('generation_failed', { message: error.message }));
+      const failedStep = error.failedStep || order.currentStep || 'generation';
+      const progress = Number.isFinite(Number(error.progress)) ? Number(error.progress) : getDefaultProgressForStep(failedStep);
+      updateOrderProgress(order, { status: 'failed', progress, currentStep: failedStep, failedStep });
+      order.logs.push(logLine('generation_failed', { failedStep, message: error.message }));
       await saveOrder(order);
     }
-    await appendLog('generation_failed', { orderId, message: error.message });
+    await appendLog('generation_failed', { orderId, failedStep: error.failedStep || 'generation', message: error.message });
   } finally {
     generatingOrders.delete(orderId);
   }
@@ -510,9 +534,29 @@ async function optionalApiCall(label, url, payloadCandidates, warnings, critical
 
 async function callLuckyApi(url, payloadCandidates, label) {
   console.log('[LUCKY API] request start');
+  if (label === 'period') {
+    console.log('[PERIOD API] request start');
+    console.log('[PERIOD API] endpoint check:', JSON.stringify({
+      url: sanitizeLuckyUrlForLog(url),
+      method: 'POST',
+      headers: ['Content-Type: application/json; charset=utf-8', 'Accept: application/json']
+    }));
+  }
+  if (label === 'compatibility') {
+    console.log('[COMPATIBILITY API] request start');
+  }
   const candidates = Array.isArray(payloadCandidates) ? payloadCandidates : [payloadCandidates];
   candidates.forEach((payload) => {
     console.log(`[LUCKY API] final request payload (${label}): ${JSON.stringify(sanitizeLuckyPayloadForLog(payload))}`);
+    if (label === 'period') {
+      console.log('[PERIOD API] payload check:', JSON.stringify({
+        fieldNames: Object.keys(payload || {}),
+        calendarType: payload?.calendarType || null,
+        calendar: payload?.calendar || null,
+        targetMode: payload?.targetDate ? 'targetDate' : payload?.targetYear || payload?.targetMonth ? 'targetYearMonth' : payload?.targetDates ? 'targetDates' : 'unknown',
+        targetDateFormat: payload?.targetDate || (Array.isArray(payload?.targetDates) ? payload.targetDates[0] : null) || null
+      }));
+    }
   });
   if (!CONFIG.lucky.apiKey) {
     throw new Error('LUCKY_API_KEY가 설정되지 않았습니다.');
@@ -541,21 +585,33 @@ async function callLuckyApi(url, payloadCandidates, label) {
         const response = await fetch(requestUrl, { method: 'POST', headers, body });
         const text = await response.text();
         console.log(`[LUCKY API] status: ${response.status}`);
+        if (label === 'period') console.log(`[PERIOD API] status: ${response.status}`);
+        if (label === 'compatibility') console.log(`[COMPATIBILITY API] status: ${response.status}`);
         if (!response.ok) {
+          const sanitizedBody = sanitizeApiErrorBodyForLog(text);
+          if (label === 'period') console.log(`[PERIOD API] error body: ${sanitizedBody}`);
+          if (label === 'compatibility') console.log(`[COMPATIBILITY API] error body: ${sanitizedBody}`);
           await appendLog('lucky_api_attempt_failed', {
             label,
             url: sanitizeLuckyUrlForLog(requestUrl),
             authMode: authVariant.mode,
             authHeader: authVariant.mode === 'header' ? authVariant.header : null,
             status: response.status,
-            bodyPreview: text.slice(0, 160)
+            bodyPreview: sanitizedBody.slice(0, 400)
           });
-          lastError = new Error(`${label} API ${response.status}: ${text.slice(0, 160)}`);
+          lastError = new Error(`${label} API ${response.status}: ${sanitizedBody.slice(0, 160)}`);
+          lastError.failedStep = label;
+          lastError.progress = getDefaultProgressForStep(label);
           continue;
         }
-        return safeJsonParse(text);
+        const data = safeJsonParse(text);
+        if (label === 'period') console.log('[PERIOD API] result keys:', JSON.stringify(safeObjectKeys(data)));
+        if (label === 'compatibility') console.log('[COMPATIBILITY API] result keys:', JSON.stringify(safeObjectKeys(data)));
+        return data;
       } catch (error) {
         lastError = error;
+        if (!lastError.failedStep) lastError.failedStep = label;
+        if (!Number.isFinite(Number(lastError.progress))) lastError.progress = getDefaultProgressForStep(label);
       }
     }
   }
@@ -674,20 +730,81 @@ function buildInputWarnings(input) {
   return warnings;
 }
 
+function getPublicOrderStatus(status) {
+  return status === 'ready' ? 'completed' : status;
+}
+
+function isOrderCompleted(order) {
+  return ['ready', 'completed'].includes(order?.status);
+}
+
+function getDefaultProgressForStep(step) {
+  const map = {
+    payment_pending: 18,
+    payment_success: 42,
+    generation: 42,
+    mansae: 50,
+    saju: 62,
+    period: 72,
+    compatibility: 84,
+    pdf: 92,
+    completed: 100
+  };
+  return map[step] ?? 72;
+}
+
+function getOrderProgress(order) {
+  if (Number.isFinite(Number(order?.progress))) return Number(order.progress);
+  return getDefaultProgressForStep(getPublicOrderStatus(order?.status));
+}
+
+function applyNoCacheHeaders(res) {
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    Pragma: 'no-cache',
+    Expires: '0',
+    'Surrogate-Control': 'no-store'
+  });
+}
+
+function updateOrderProgress(order, updates = {}) {
+  if (!order || typeof order !== 'object') return order;
+  if (updates.status) order.status = updates.status;
+  if (updates.currentStep) order.currentStep = updates.currentStep;
+  if ('failedStep' in updates) order.failedStep = updates.failedStep || null;
+  if (Number.isFinite(Number(updates.progress))) order.progress = Number(updates.progress);
+  order.updatedAt = new Date().toISOString();
+  return order;
+}
+
+function buildFailureMessage(failedStep) {
+  switch (failedStep) {
+    case 'period':
+      return '리포트 생성 중 기간운 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+    case 'compatibility':
+      return '리포트 생성 중 궁합 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+    case 'saju':
+      return '리포트 생성 중 핵심 사주 해석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+    default:
+      return '리포트 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+  }
+}
+
 function buildStatusMessage(order) {
-  switch (order.status) {
+  const publicStatus = getPublicOrderStatus(order?.status);
+  switch (publicStatus) {
     case 'payment_pending':
       return '결제 완료를 기다리고 있습니다.';
     case 'payment_success':
       return '사주를 해석하고 풀이하는 중입니다. 잠시만 기다려주세요.';
     case 'generating':
       return '사주를 해석하고 풀이하는 중입니다. 잠시만 기다려주세요.';
-    case 'ready':
+    case 'completed':
       return '프리미엄 리포트가 준비되었습니다. 아래 다운로드 버튼으로 결과물을 받으실 수 있습니다.';
     case 'payment_cancelled':
       return '결제가 취소되어 결과물 생성이 진행되지 않았습니다.';
     case 'failed':
-      return '리포트 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      return buildFailureMessage(order?.failedStep);
     default:
       return '주문 상태를 확인하고 있습니다.';
   }
@@ -798,17 +915,52 @@ function buildPeriodPayloadCandidates(applicantPayload) {
   const targetMonth = CONFIG.lucky.defaultPeriodMonth;
   const targetDay = CONFIG.lucky.defaultPeriodDay;
   const targetDate = `${String(targetYear).padStart(4, '0')}-${String(targetMonth).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
+  const basePayload = { ...applicantPayload };
   return [
     {
-      ...applicantPayload,
+      ...basePayload,
+      targetDate
+    },
+    {
+      ...basePayload,
       targetYear,
-      targetMonth,
-      targetDate,
-      targetYears: [targetYear],
-      targetMonths: [targetMonth],
+      targetMonth
+    },
+    {
+      ...basePayload,
       targetDates: [targetDate]
     }
   ];
+}
+
+function sanitizeApiErrorBodyForLog(text) {
+  const raw = String(text || '').slice(0, 1200);
+  const redactKeys = new Set(['name', 'birthYear', 'birthMonth', 'birthDay', 'birthHour', 'birthMinute', 'year', 'month', 'day', 'hour', 'minute', 'phone', 'email', 'person1', 'person2', 'note', 'concern']);
+  const sanitizeValue = (value) => {
+    if (Array.isArray(value)) return value.map(sanitizeValue);
+    if (value && typeof value === 'object') {
+      const out = {};
+      for (const [key, nested] of Object.entries(value)) {
+        out[key] = redactKeys.has(key) ? '[redacted]' : sanitizeValue(nested);
+      }
+      return out;
+    }
+    if (typeof value === 'string') {
+      return value
+        .replace(/\d{4}-\d{2}-\d{2}/g, '[redacted-date]')
+        .replace(/\d{2}:\d{2}/g, '[redacted-time]')
+        .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[redacted-email]');
+    }
+    return value;
+  };
+  try {
+    return JSON.stringify(sanitizeValue(JSON.parse(raw)));
+  } catch {
+    return raw
+      .replace(/\d{4}-\d{2}-\d{2}/g, '[redacted-date]')
+      .replace(/\d{2}:\d{2}/g, '[redacted-time]')
+      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[redacted-email]');
+  }
 }
 
 function buildCompatibilityPayload(person1, person2, note = '') {

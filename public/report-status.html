@@ -422,32 +422,41 @@
     }
 
     function renderStatus(data) {
-      const status = data.status || 'created';
+      const rawStatus = data.status || 'created';
+      const status = rawStatus === 'ready' ? 'completed' : rawStatus;
+      const failedStep = data.failedStep || null;
+      const progress = Number.isFinite(Number(data.progress)) ? Number(data.progress) : null;
       const statusMap = {
         created: '결제창 준비 중',
         payment_pending: '결제 대기 중',
         payment_success: '리포트 생성 시작',
         generating: '리포트 생성 중',
         ready: '리포트 준비 완료',
+        completed: '리포트 준비 완료',
         payment_cancelled: '결제 취소',
         failed: '처리 실패'
       };
       statusBadge.textContent = statusMap[status] || '상태 확인 중';
 
-      statusCard.classList.toggle('is-final', ['ready', 'payment_cancelled', 'failed'].includes(status));
+      const isCompleted = status === 'completed';
+      statusCard.classList.toggle('is-final', ['completed', 'payment_cancelled', 'failed'].includes(status));
       statusCard.classList.toggle('is-failed', ['payment_cancelled', 'failed'].includes(status));
       if (statusSub) {
-        statusSub.textContent = status === 'ready'
+        statusSub.textContent = isCompleted
           ? '프리미엄 PDF 리포트가 준비되었습니다. 아래 버튼에서 바로 다운로드하실 수 있습니다.'
           : status === 'failed'
-            ? '리포트 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
+            ? (failedStep === 'period'
+                ? '기간운 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
+                : failedStep === 'compatibility'
+                  ? '궁합 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
+                  : '리포트 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.')
             : status === 'payment_cancelled'
               ? '결제가 취소되어 리포트 생성이 진행되지 않았습니다.'
               : '사주를 해석하고 풀이하는 중입니다. 잠시만 기다려주세요.';
       }
 
       const isGenerating = status === 'payment_success' || status === 'generating';
-      loadingText.textContent = status === 'ready'
+      loadingText.textContent = isCompleted
         ? '리포트 준비 완료'
         : status === 'failed'
           ? '리포트 생성 확인 필요'
@@ -457,7 +466,7 @@
               ? '리포트 생성 중'
               : '리포트 상태 확인 중';
 
-      if (['payment_success', 'generating', 'ready'].includes(status)) {
+      if (['payment_success', 'generating', 'completed'].includes(status)) {
         paymentStep.textContent = '결제 성공이 확인되었습니다.';
         setStepState(stepPayment, 'done');
       } else if (status === 'payment_cancelled') {
@@ -473,13 +482,17 @@
         downloadStep.textContent = '완료 후 PDF를 다운로드할 수 있습니다.';
         setStepState(stepGenerating, 'active');
         setStepState(stepDownload, 'pending');
-      } else if (status === 'ready') {
+      } else if (isCompleted) {
         generationStep.textContent = '리포트 생성이 완료되었습니다.';
         downloadStep.textContent = '지금 바로 PDF를 내려받을 수 있습니다.';
         setStepState(stepGenerating, 'done');
         setStepState(stepDownload, 'done');
       } else if (status === 'failed') {
-        generationStep.textContent = '리포트 생성 중 문제가 발생했습니다.';
+        generationStep.textContent = failedStep === 'period'
+          ? '기간운 분석 단계에서 실패했습니다.'
+          : failedStep === 'compatibility'
+            ? '궁합 분석 단계에서 실패했습니다.'
+            : '리포트 생성 중 문제가 발생했습니다.';
         downloadStep.textContent = '잠시 후 다시 시도해 주세요.';
         setStepState(stepGenerating, 'active');
         setStepState(stepDownload, 'pending');
@@ -495,27 +508,39 @@
         setStepState(stepDownload, 'pending');
       }
 
-      if (status === 'payment_pending') {
-        applyProgress(18, '결제 완료를 기다리고 있습니다.');
-      } else if (status === 'payment_success') {
-        applyProgress(42, '결제가 확인되어 리포트 생성을 시작했습니다.');
-      } else if (status === 'generating') {
-        applyProgress(72, '사주를 해석하고 PDF를 정리하고 있습니다.');
-      } else if (status === 'ready') {
-        applyProgress(100, '리포트가 준비되었습니다.');
-      } else if (status === 'failed') {
-        applyProgress(72, '생성 중 문제가 감지되어 확인이 필요합니다.');
-      } else if (status === 'payment_cancelled') {
-        applyProgress(0, '결제가 취소되어 진행이 중단되었습니다.');
-      } else {
-        applyProgress(8, '주문 정보를 확인하고 있습니다.');
-      }
+      const defaultProgress = status === 'payment_pending'
+        ? 18
+        : status === 'payment_success'
+          ? 42
+          : status === 'generating'
+            ? 72
+            : isCompleted
+              ? 100
+              : status === 'failed'
+                ? 72
+                : status === 'payment_cancelled'
+                  ? 0
+                  : 8;
+      const progressText = status === 'payment_pending'
+        ? '결제 완료를 기다리고 있습니다.'
+        : status === 'payment_success'
+          ? '결제가 확인되어 리포트 생성을 시작했습니다.'
+          : status === 'generating'
+            ? '사주를 해석하고 PDF를 정리하고 있습니다.'
+            : isCompleted
+              ? '리포트가 준비되었습니다.'
+              : status === 'failed'
+                ? (failedStep === 'period' ? '기간운 분석 단계에서 문제가 감지되어 확인이 필요합니다.' : '생성 중 문제가 감지되어 확인이 필요합니다.')
+                : status === 'payment_cancelled'
+                  ? '결제가 취소되어 진행이 중단되었습니다.'
+                  : '주문 정보를 확인하고 있습니다.';
+      applyProgress(progress ?? defaultProgress, progressText);
 
       detailBox.textContent = data.message || '리포트 상태를 계속 확인하고 있습니다.';
 
       const existingDownload = document.getElementById('downloadButton');
       if (existingDownload) existingDownload.remove();
-      if (status === 'ready' && data.downloadUrl) {
+      if (isCompleted && data.downloadUrl) {
         const a = document.createElement('a');
         a.id = 'downloadButton';
         a.className = 'btn btn-primary';
@@ -533,10 +558,10 @@
         return;
       }
       try {
-        const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}/status`);
+        const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}/status?t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
         const data = await res.json();
         renderStatus(data);
-        if (!['ready', 'failed', 'payment_cancelled'].includes(data.status)) {
+        if (!['ready', 'completed', 'failed', 'payment_cancelled'].includes(data.status)) {
           setTimeout(poll, 4000);
         }
       } catch (error) {
