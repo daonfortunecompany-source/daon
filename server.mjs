@@ -886,17 +886,29 @@ function buildPillarDetails(pillars, rawData = null) {
     ohaengStem: { 갑: '목', 을: '목', 병: '화', 정: '화', 무: '토', 기: '토', 경: '금', 신: '금', 임: '수', 계: '수' },
     ohaengBranch: { 자: '수', 축: '토', 인: '목', 묘: '목', 진: '토', 사: '화', 오: '화', 미: '토', 신: '금', 유: '금', 술: '토', 해: '수' }
   };
+  const dayStem = String(pillars?.day || '')[0] || '';
   const make = (pillar, pillarKey) => {
     const p = String(pillar || '--');
     const gan = p[0] || '-';
     const ji = p[1] || '-';
-    const sipseong = extractPillarSipseong(rawData, pillarKey);
+    const apiSipseong = extractPillarSipseong(rawData, pillarKey);
+    const localSipseong = computeLocalPillarSipseong(dayStem, p);
+    const ganSipseong = apiSipseong.gan && apiSipseong.gan !== '-' ? apiSipseong.gan : localSipseong.gan;
+    const jiSipseong = apiSipseong.ji && apiSipseong.ji !== '-' ? apiSipseong.ji : localSipseong.ji;
+    if ((!apiSipseong.gan || apiSipseong.gan === '-') && ganSipseong) {
+      console.log(`[SAJU WARNING] missing sipseong mapping pillar=${pillarKey} field=gan reason=Lucky response field not found, using local calculation`);
+    }
+    if ((!apiSipseong.ji || apiSipseong.ji === '-') && jiSipseong) {
+      console.log(`[SAJU WARNING] missing sipseong mapping pillar=${pillarKey} field=ji reason=Lucky response field not found, using local calculation`);
+    }
     return {
       hangul: p,
       hanja: `${maps.stemHanja[gan] || ''}${maps.branchHanja[ji] || ''}` || '-',
+      gan,
+      ji,
       eumyang: { gan: maps.yinYangStem[gan] || '-', ji: maps.yinYangBranch[ji] || '-' },
       ohaeng: { gan: maps.ohaengStem[gan] || '-', ji: maps.ohaengBranch[ji] || '-' },
-      sipseong: { gan: sipseong.gan || '-', ji: sipseong.ji || '-' }
+      sipseong: { gan: ganSipseong || '', ji: jiSipseong || '' }
     };
   };
   return {
@@ -949,6 +961,46 @@ function findValueByKeyPatterns(root, patternGroups) {
   return null;
 }
 
+function computeLocalPillarSipseong(dayStem, pillar) {
+  const gan = normalizeStemChar(String(pillar || '').slice(0, 1));
+  const ji = normalizeBranchChar(String(pillar || '').slice(1, 2));
+  return {
+    gan: calculateTenGod(dayStem, gan),
+    ji: calculateTenGod(dayStem, getMainHiddenStemForBranch(ji))
+  };
+}
+
+function getMainHiddenStemForBranch(branch) {
+  const map = {
+    자: '계', 축: '기', 인: '갑', 묘: '을', 진: '무', 사: '병',
+    오: '정', 미: '기', 신: '경', 유: '신', 술: '무', 해: '임'
+  };
+  return map[branch] || '';
+}
+
+function calculateTenGod(dayStemRaw, targetStemRaw) {
+  const dayStem = normalizeStemChar(dayStemRaw);
+  const targetStem = normalizeStemChar(targetStemRaw);
+  if (!dayStem || !targetStem) return '';
+  const stemOrder = ['갑','을','병','정','무','기','경','신','임','계'];
+  const elementMap = { 갑: '목', 을: '목', 병: '화', 정: '화', 무: '토', 기: '토', 경: '금', 신: '금', 임: '수', 계: '수' };
+  const polarityMap = { 갑: '양', 을: '음', 병: '양', 정: '음', 무: '양', 기: '음', 경: '양', 신: '음', 임: '양', 계: '음' };
+  const generates = { 목: '화', 화: '토', 토: '금', 금: '수', 수: '목' };
+  const controls = { 목: '토', 토: '수', 수: '화', 화: '금', 금: '목' };
+  const dayElement = elementMap[dayStem];
+  const targetElement = elementMap[targetStem];
+  const samePolarity = polarityMap[dayStem] === polarityMap[targetStem];
+  if (dayElement === targetElement) return samePolarity ? '비견' : '겁재';
+  if (generates[dayElement] === targetElement) return samePolarity ? '식신' : '상관';
+  if (controls[dayElement] === targetElement) return samePolarity ? '편재' : '정재';
+  if (controls[targetElement] === dayElement) return samePolarity ? '편관' : '정관';
+  if (generates[targetElement] === dayElement) return samePolarity ? '편인' : '정인';
+  const dayIndex = stemOrder.indexOf(dayStem);
+  const targetIndex = stemOrder.indexOf(targetStem);
+  if (dayIndex === targetIndex) return '비견';
+  return '';
+}
+
 function extractPillars(data, fallbackPerson) {
   const debug = extractPillarsDetailed(data, fallbackPerson);
   return debug.pillars;
@@ -989,6 +1041,18 @@ function validateBirthPillarSelection(pillarDebug, payload) {
       selectedPillarsFrom: pillarDebugToResponsePaths(pillarDebug)
     });
   }
+  const expectedYearPillar = computeExpectedYearPillar(payload);
+  if (expectedYearPillar && pillarDebug?.pillars?.year && pillarDebug.pillars.year !== expectedYearPillar) {
+    console.log('[SAJU VALIDATION] year pillar mismatch');
+    console.log(`[SAJU VALIDATION] expected: ${expectedYearPillar}`);
+    console.log(`[SAJU VALIDATION] actual: ${pillarDebug.pillars.year}`);
+    console.log(`[SAJU VALIDATION] input: ${payload.birthYear}-${payload.birthMonth}-${payload.birthDay} ${payload.birthTime || ''} ${payload.calendarType || payload.calendar || ''}`);
+    throw createStructuredSummaryError(`생년주 검증에 실패했습니다. expected=${expectedYearPillar}, actual=${pillarDebug.pillars.year}`, {
+      source: 'lucky',
+      usingFallback: false,
+      selectedPillarsFrom: pillarDebugToResponsePaths(pillarDebug)
+    });
+  }
   const repeatedCore = [pillarDebug.pillars.year, pillarDebug.pillars.month, pillarDebug.pillars.day];
   if (new Set(repeatedCore).size === 1) {
     console.log('[SAJU VALIDATION] suspicious repeated pillars detected');
@@ -1017,6 +1081,21 @@ function localizePillarName(key) {
   return ({ year: '생년주', month: '생월주', day: '생일주', hour: '생시주' })[key] || key;
 }
 
+function computeExpectedYearPillar(payload) {
+  const year = Number(payload?.birthYear || payload?.year || 0);
+  const month = Number(payload?.birthMonth || payload?.month || 0);
+  const day = Number(payload?.birthDay || payload?.day || 0);
+  const calendar = payload?.calendarType || payload?.calendar || 'solar';
+  if (!Number.isFinite(year) || !month || !day || calendar !== 'solar') return '';
+  const effectiveYear = (month > 2 || (month === 2 && day >= 4)) ? year : year - 1;
+  const stems = ['갑','을','병','정','무','기','경','신','임','계'];
+  const branches = ['자','축','인','묘','진','사','오','미','신','유','술','해'];
+  const offset = effectiveYear - 1984;
+  const stem = stems[((offset % 10) + 10) % 10];
+  const branch = branches[((offset % 12) + 12) % 12];
+  return `${stem}${branch}`;
+}
+
 function guessExpectedHourBranch(timeText) {
   const hour = Number(String(timeText || '').split(':')[0]);
   if (!Number.isFinite(hour)) return '';
@@ -1042,6 +1121,8 @@ function extractPillarsDetailed(data, fallbackPerson = {}, options = {}) {
     day: generatePillarSeed(fallbackPerson.birthDay, 2),
     hour: generatePillarSeed((fallbackPerson.birthTime || '09:00').split(':')[0], 3)
   };
+  const expectedYearPillar = computeExpectedYearPillar(fallbackPerson);
+  const expectedHourBranch = guessExpectedHourBranch(fallbackPerson.birthTime || '');
   const candidates = collectPillarCandidates(data);
   const selected = {};
   const selectedPaths = {};
@@ -1049,11 +1130,17 @@ function extractPillarsDetailed(data, fallbackPerson = {}, options = {}) {
   for (const pillarType of ['year', 'month', 'day', 'hour']) {
     const bucket = candidates
       .filter((item) => item.type === pillarType && normalizePillar(item.value))
-      .sort((a, b) => b.score - a.score);
+      .map((item) => ({
+        ...item,
+        weightedScore: item.score
+          + (pillarType === 'year' && expectedYearPillar && normalizePillar(item.value) === expectedYearPillar ? 500 : 0)
+          + (pillarType === 'hour' && expectedHourBranch && normalizeBranchChar(String(normalizePillar(item.value)).slice(1, 2)) === expectedHourBranch ? 120 : 0)
+      }))
+      .sort((a, b) => b.weightedScore - a.weightedScore);
     if (bucket[0]) {
       selected[pillarType] = normalizePillar(bucket[0].value);
       selectedPaths[pillarType] = bucket[0].path;
-      selectedScores[pillarType] = bucket[0].score;
+      selectedScores[pillarType] = bucket[0].weightedScore;
     }
   }
   const missing = ['year', 'month', 'day', 'hour'].filter((key) => !selected[key]);
