@@ -131,13 +131,15 @@ app.post('/api/saju/summary', async (req, res) => {
     let source = 'lucky';
     let usingFallback = false;
     let selectedPillars = null;
+    let selectedPillarDebug = null;
     try {
       mansaeData = await callLuckyApi(CONFIG.lucky.mansaeUrl, [luckyPayload], 'mansae');
       logLuckyResponseDiagnostics('mansae', mansaeData, payload);
-      let pillarDebug = extractPillarsDetailed(mansaeData, payload);
+      let pillarDebug = extractPillarsDetailed(mansaeData, payload, { allowFallback: false });
       console.log('[LUCKY API] selected birth pillars from mansae:', JSON.stringify({
-        usedFallback: pillarDebug.usedFallback,
-        pillars: pillarDebug.pillars
+        status: pillarDebug.status,
+        pillars: pillarDebug.pillars,
+        selectedPaths: pillarDebug.selectedPaths
       }));
 
       if (CONFIG.lucky.sajuUrl) {
@@ -145,12 +147,13 @@ app.post('/api/saju/summary', async (req, res) => {
         try {
           sajuData = await callLuckyApi(CONFIG.lucky.sajuUrl, [luckyPayload], 'saju');
           logLuckyResponseDiagnostics('saju', sajuData, payload);
-          const sajuPillarDebug = extractPillarsDetailed(sajuData, payload);
+          const sajuPillarDebug = extractPillarsDetailed(sajuData, payload, { allowFallback: false });
           console.log('[LUCKY API] selected birth pillars from saju:', JSON.stringify({
-            usedFallback: sajuPillarDebug.usedFallback,
-            pillars: sajuPillarDebug.pillars
+            status: sajuPillarDebug.status,
+            pillars: sajuPillarDebug.pillars,
+            selectedPaths: sajuPillarDebug.selectedPaths
           }));
-          if (!sajuPillarDebug.usedFallback) {
+          if (isBetterBirthPillarSelection(sajuPillarDebug, pillarDebug)) {
             pillarDebug = sajuPillarDebug;
           }
         } catch (secondaryError) {
@@ -161,17 +164,19 @@ app.post('/api/saju/summary', async (req, res) => {
           });
         }
       }
+      validateBirthPillarSelection(pillarDebug, payload);
       selectedPillars = pillarDebug.pillars;
-      if (pillarDebug.usedFallback) {
-        usingFallback = true;
-        console.log('[FREE SUMMARY] birth pillar mapping used local fallback after API response');
-      }
+      selectedPillarDebug = pillarDebug;
     } catch (error) {
       await appendLog('summary_api_warning', {
         error: error.message,
         parsedBirthInput,
         mansaeRequestPayload
       });
+      if (error.summaryMeta) {
+        console.log('[LUCKY API] using fallback: false');
+        throw error;
+      }
       if (!CONFIG.allowLocalFallback) {
         console.log('[LUCKY API] using fallback: false');
         throw error;
@@ -192,6 +197,7 @@ app.post('/api/saju/summary', async (req, res) => {
       source,
       usingFallback,
       selectedPillars,
+      selectedPillarsFrom: pillarDebugToResponsePaths(selectedPillarDebug),
       inputEcho: {
         year: payload.birthYear,
         month: payload.birthMonth,
@@ -216,6 +222,25 @@ app.post('/api/saju/summary', async (req, res) => {
     const userMessage = /년,\s*월,\s*일을\s*모두\s*입력해주세요/.test(rawMessage) || /mansae api 400/i.test(rawMessage)
       ? '생년월일 정보가 정상 전달되지 않았습니다. 잠시 후 다시 시도해주세요.'
       : rawMessage;
+    if (error.summaryMeta) {
+      return res.status(400).json({
+        ok: false,
+        error: userMessage,
+        source: error.summaryMeta.source || 'lucky',
+        usingFallback: Boolean(error.summaryMeta.usingFallback),
+        inputEcho: parsedBirthInput ? {
+          year: parsedBirthInput.year,
+          month: parsedBirthInput.month,
+          day: parsedBirthInput.day,
+          hour: parsedBirthInput.hour,
+          minute: parsedBirthInput.minute,
+          calendar: parsedBirthInput.calendar,
+          gender: parsedBirthInput.gender,
+          isLeapMonth: parsedBirthInput.isLeapMonth
+        } : null,
+        selectedPillarsFrom: error.summaryMeta.selectedPillarsFrom || { year: '', month: '', day: '', hour: '' }
+      });
+    }
     res.status(400).json({ error: userMessage });
   }
 });
@@ -537,13 +562,26 @@ function sanitizeLuckyPayloadForLog(payload) {
 
 function logLuckyResponseDiagnostics(label, data, fallbackPerson) {
   console.log(`[LUCKY API] response top-level keys (${label}): ${JSON.stringify(safeObjectKeys(data))}`);
-  const pillarDebug = extractPillarsDetailed(data, fallbackPerson);
-  console.log(`[LUCKY API] raw pillar candidates (${label}): ${JSON.stringify(pillarDebug.candidates.slice(0, 12))}`);
+  console.log(`[LUCKY API] response data keys (${label}): ${JSON.stringify(collectResponseDataKeys(data))}`);
+  const pillarDebug = extractPillarsDetailed(data, fallbackPerson, { allowFallback: false });
+  console.log(`[LUCKY API] candidate pillar fields (${label}): ${JSON.stringify(pillarDebug.candidates.slice(0, 12))}`);
+  console.log(`[LUCKY API] selected pillar paths (${label}): ${JSON.stringify(pillarDebugToResponsePaths(pillarDebug))}`);
   console.log(`[LUCKY API] selected birth pillars (${label}): ${JSON.stringify(pillarDebug.pillars)}`);
 }
 
 function safeObjectKeys(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).slice(0, 30) : [];
+}
+
+function collectResponseDataKeys(value) {
+  const buckets = [];
+  if (!value || typeof value !== 'object') return buckets;
+  for (const key of ['data', 'result', 'response', 'mansae', 'saju', 'payload']) {
+    if (value[key] && typeof value[key] === 'object' && !Array.isArray(value[key])) {
+      buckets.push({ key, keys: Object.keys(value[key]).slice(0, 30) });
+    }
+  }
+  return buckets;
 }
 
 function resolveLuckyAuthVariants() {
@@ -807,6 +845,12 @@ function buildFreeSummary(payload, mansaeData, meta = {}) {
       gender: payload.gender,
       isLeapMonth: payload.isLeapMonth === true
     },
+    selectedPillarsFrom: meta.selectedPillarsFrom || {
+      year: '',
+      month: '',
+      day: '',
+      hour: ''
+    },
     metrics: {
       fiveElementsUnit: 'score',
       tenGodsUnit: 'score',
@@ -906,10 +950,92 @@ function findValueByKeyPatterns(root, patternGroups) {
 }
 
 function extractPillars(data, fallbackPerson) {
-  return extractPillarsDetailed(data, fallbackPerson).pillars;
+  const debug = extractPillarsDetailed(data, fallbackPerson);
+  return debug.pillars;
 }
 
-function extractPillarsDetailed(data, fallbackPerson = {}) {
+function pillarDebugToResponsePaths(pillarDebug) {
+  if (!pillarDebug) return { year: '', month: '', day: '', hour: '' };
+  return {
+    year: pillarDebug.selectedPaths?.year || '',
+    month: pillarDebug.selectedPaths?.month || '',
+    day: pillarDebug.selectedPaths?.day || '',
+    hour: pillarDebug.selectedPaths?.hour || ''
+  };
+}
+
+function isBetterBirthPillarSelection(nextDebug, currentDebug) {
+  const nextCount = countSelectedBirthPillars(nextDebug);
+  const currentCount = countSelectedBirthPillars(currentDebug);
+  if (nextCount !== currentCount) return nextCount > currentCount;
+  return sumSelectedCandidateScores(nextDebug) > sumSelectedCandidateScores(currentDebug);
+}
+
+function countSelectedBirthPillars(pillarDebug) {
+  return ['year', 'month', 'day', 'hour'].filter((key) => Boolean(pillarDebug?.pillars?.[key])).length;
+}
+
+function sumSelectedCandidateScores(pillarDebug) {
+  return Object.values(pillarDebug?.selectedScores || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+}
+
+function validateBirthPillarSelection(pillarDebug, payload) {
+  const missing = ['year', 'month', 'day', 'hour'].filter((key) => !pillarDebug?.pillars?.[key]);
+  if (missing.length) {
+    console.log(`[SAJU VALIDATION] missing birth pillars detected: ${missing.join(', ')}`);
+    throw createStructuredSummaryError(`Lucky API에서 출생 ${missing.map(localizePillarName).join('/')} 필드를 찾지 못했습니다.`, {
+      source: 'lucky',
+      usingFallback: false,
+      selectedPillarsFrom: pillarDebugToResponsePaths(pillarDebug)
+    });
+  }
+  const repeatedCore = [pillarDebug.pillars.year, pillarDebug.pillars.month, pillarDebug.pillars.day];
+  if (new Set(repeatedCore).size === 1) {
+    console.log('[SAJU VALIDATION] suspicious repeated pillars detected');
+    console.log(`[SAJU VALIDATION] year/month/day are identical: ${repeatedCore.join('/')}`);
+    console.log('[SAJU VALIDATION] do not use repeated fallback as valid result');
+    throw createStructuredSummaryError('Lucky API 응답에서 출생 월주/일주 필드를 신뢰할 수 없습니다. 원국 매핑을 다시 확인해 주세요.', {
+      source: 'lucky',
+      usingFallback: false,
+      selectedPillarsFrom: pillarDebugToResponsePaths(pillarDebug)
+    });
+  }
+  const hourBranch = normalizeBranchChar((pillarDebug.pillars.hour || '').slice(1));
+  const expectedHourBranch = guessExpectedHourBranch(payload.birthTime || '');
+  if (hourBranch && expectedHourBranch && hourBranch !== expectedHourBranch) {
+    console.log(`[SAJU VALIDATION] hour branch mismatch detected: input=${payload.birthTime || ''}, expected=${expectedHourBranch}, actual=${hourBranch}`);
+  }
+}
+
+function createStructuredSummaryError(message, meta = {}) {
+  const error = new Error(message);
+  error.summaryMeta = meta;
+  return error;
+}
+
+function localizePillarName(key) {
+  return ({ year: '생년주', month: '생월주', day: '생일주', hour: '생시주' })[key] || key;
+}
+
+function guessExpectedHourBranch(timeText) {
+  const hour = Number(String(timeText || '').split(':')[0]);
+  if (!Number.isFinite(hour)) return '';
+  if (hour >= 23 || hour < 1) return '자';
+  if (hour < 3) return '축';
+  if (hour < 5) return '인';
+  if (hour < 7) return '묘';
+  if (hour < 9) return '진';
+  if (hour < 11) return '사';
+  if (hour < 13) return '오';
+  if (hour < 15) return '미';
+  if (hour < 17) return '신';
+  if (hour < 19) return '유';
+  if (hour < 21) return '술';
+  return '해';
+}
+
+function extractPillarsDetailed(data, fallbackPerson = {}, options = {}) {
+  const allowFallback = options.allowFallback !== false;
   const fallback = {
     year: generatePillarSeed(fallbackPerson.birthYear, 0),
     month: generatePillarSeed(fallbackPerson.birthMonth, 1),
@@ -918,21 +1044,35 @@ function extractPillarsDetailed(data, fallbackPerson = {}) {
   };
   const candidates = collectPillarCandidates(data);
   const selected = {};
+  const selectedPaths = {};
+  const selectedScores = {};
   for (const pillarType of ['year', 'month', 'day', 'hour']) {
     const bucket = candidates
       .filter((item) => item.type === pillarType && normalizePillar(item.value))
       .sort((a, b) => b.score - a.score);
-    if (bucket[0]) selected[pillarType] = normalizePillar(bucket[0].value);
+    if (bucket[0]) {
+      selected[pillarType] = normalizePillar(bucket[0].value);
+      selectedPaths[pillarType] = bucket[0].path;
+      selectedScores[pillarType] = bucket[0].score;
+    }
   }
-  const usedFallback = !['year', 'month', 'day', 'hour'].every((key) => Boolean(selected[key]));
+  const missing = ['year', 'month', 'day', 'hour'].filter((key) => !selected[key]);
+  const usedFallback = missing.length > 0;
+  const repeatedCore = [selected.year, selected.month, selected.day].filter(Boolean);
+  const suspiciousRepeated = repeatedCore.length === 3 && new Set(repeatedCore).size === 1;
   return {
     pillars: {
-      year: selected.year || fallback.year,
-      month: selected.month || fallback.month,
-      day: selected.day || fallback.day,
-      hour: selected.hour || fallback.hour
+      year: selected.year || (allowFallback ? fallback.year : ''),
+      month: selected.month || (allowFallback ? fallback.month : ''),
+      day: selected.day || (allowFallback ? fallback.day : ''),
+      hour: selected.hour || (allowFallback ? fallback.hour : '')
     },
+    status: missing.length ? 'missing' : suspiciousRepeated ? 'suspicious' : 'resolved',
+    missing,
+    suspiciousRepeated,
     usedFallback,
+    selectedPaths,
+    selectedScores,
     candidates: candidates.map(({ type, path, value, score, reason }) => ({ type, path, value: normalizePillar(value) || String(value || '').slice(0, 32), score, reason }))
   };
 }
@@ -982,13 +1122,13 @@ function extractStructuredPillarCandidates(node, path) {
     if (directValue) {
       results.push({ type: pillarType, path: `${path}.${directValue.key}`, value: directValue.value, score: scoreCandidatePath(`${path}.${directValue.key}`, 'exact'), reason: 'direct-key' });
     }
-    const combinedCurrent = combinePillarFromNode(node, pillarType);
+    const combinedCurrent = combinePillarFromNode(node, pillarType, path);
     if (combinedCurrent) {
       results.push({ type: pillarType, path, value: combinedCurrent, score: scoreCandidatePath(path, 'combined-current'), reason: 'combined-current' });
     }
     const nestedNode = findNestedPillarNode(node, pillarType);
     if (nestedNode) {
-      const combinedNested = combinePillarFromNode(nestedNode.value, pillarType) || normalizePillar(nestedNode.value);
+      const combinedNested = combinePillarFromNode(nestedNode.value, pillarType, `${path}.${nestedNode.key}`) || normalizePillar(nestedNode.value);
       if (combinedNested) {
         results.push({ type: pillarType, path: `${path}.${nestedNode.key}`, value: combinedNested, score: scoreCandidatePath(`${path}.${nestedNode.key}`, 'nested'), reason: 'combined-nested' });
       }
@@ -1018,8 +1158,10 @@ function findNestedPillarNode(node, pillarType) {
   return null;
 }
 
-function combinePillarFromNode(node, pillarType) {
+function combinePillarFromNode(node, pillarType, contextPath = '') {
   if (!node || typeof node !== 'object') return '';
+  const hasTypeContext = matchesPillarAlias(contextPath, pillarType) || Object.keys(node).some((key) => matchesPillarAlias(key, pillarType));
+  if (!hasTypeContext) return '';
   const stemValue = findValueByTokens(node, pillarType, ['stem', 'gan', 'heavenly', '천간']);
   const branchValue = findValueByTokens(node, pillarType, ['branch', 'ji', 'earthly', '지지']);
   if (!stemValue || !branchValue) return '';
