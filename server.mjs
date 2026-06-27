@@ -493,6 +493,7 @@ function determineProduct(input) {
 function buildInputWarnings(input) {
   const warnings = [];
   const birthTime = input.applicant.birthTime || '';
+  if (!birthTime) warnings.push('출생 시간을 모름으로 선택하여 시주 해석은 보수적으로 정리합니다.');
   if (/^(23|00|01):/.test(birthTime)) warnings.push('야자시/조자시 구간 여부를 확인하는 메모를 함께 포함합니다.');
   if (input.applicant.calendarType === 'lunar' && input.applicant.isLeapMonth === 'unknown') warnings.push('음력 생일이며 윤달 여부가 불확실해 확인 메모를 포함합니다.');
   if (input.partner?.memo && !hasPartnerCoreFields(input.partner)) warnings.push('상대 정보가 일부만 입력되어 궁합 API 대신 관계 관련 참고 조언 중심으로 정리합니다.');
@@ -530,13 +531,18 @@ function normalizeApplicant(raw, isPartner = false) {
   const birthYear = cleanDigits(raw.birthYear || raw.year || '');
   const birthMonth = cleanDigits(raw.birthMonth || raw.month || '');
   const birthDay = cleanDigits(raw.birthDay || raw.day || '');
+  const birthTimeUnknown = raw.birthTimeUnknown === true || raw.birthTimeUnknown === 'true' || raw.birthTimeUnknown === 'unknown';
+  const birthHour = cleanDigits(raw.birthHour || '').slice(0, 2);
+  const birthMinute = cleanDigits(raw.birthMinute || '').slice(0, 2);
+  const combinedBirthTime = birthHour || birthMinute ? `${birthHour.padStart(2, '0')}:${birthMinute.padStart(2, '0')}` : '';
   return {
     name: String(raw.name || '').trim(),
     gender: raw.gender === 'male' ? 'male' : raw.gender === 'female' ? 'female' : '',
     birthYear,
     birthMonth,
     birthDay,
-    birthTime: normalizeTime(raw.birthTime || ''),
+    birthTime: birthTimeUnknown ? '' : normalizeTime(raw.birthTime || combinedBirthTime || ''),
+    birthTimeUnknown,
     calendarType: normalizeCalendarType(raw.calendarType || raw.calendar || 'solar'),
     isLeapMonth: normalizeLeap(raw.isLeapMonth),
     phone: isPartner ? '' : cleanDigits(raw.phone || raw.buyerPhone || ''),

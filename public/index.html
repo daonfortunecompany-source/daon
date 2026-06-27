@@ -361,6 +361,38 @@
       gap: 10px;
     }
 
+    .time-selects select {
+      position: relative;
+      z-index: 1;
+      pointer-events: auto;
+      touch-action: manipulation;
+    }
+
+    .time-field-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .time-unknown-option {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: #6a5a50;
+      cursor: pointer;
+    }
+
+    .time-unknown-option input {
+      width: 18px;
+      height: 18px;
+      min-height: 18px;
+      margin: 0;
+      accent-color: #cf8f7a;
+      cursor: pointer;
+    }
+
     .gender-choice {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -1899,16 +1931,104 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
             </div>
           </div>
           <div class="inline-2">
-            <div>
+            <div class="time-field-stack">
               <label for="timeHour">출생 시각 (24시간 기준)</label>
               <div class="time-selects">
                 <select id="timeHour" aria-label="출생 시각 시">
                   <option value="">시</option>
+                  <option value="00">00</option>
+                  <option value="01">01</option>
+                  <option value="02">02</option>
+                  <option value="03">03</option>
+                  <option value="04">04</option>
+                  <option value="05">05</option>
+                  <option value="06">06</option>
+                  <option value="07">07</option>
+                  <option value="08">08</option>
+                  <option value="09">09</option>
+                  <option value="10">10</option>
+                  <option value="11">11</option>
+                  <option value="12">12</option>
+                  <option value="13">13</option>
+                  <option value="14">14</option>
+                  <option value="15">15</option>
+                  <option value="16">16</option>
+                  <option value="17">17</option>
+                  <option value="18">18</option>
+                  <option value="19">19</option>
+                  <option value="20">20</option>
+                  <option value="21">21</option>
+                  <option value="22">22</option>
+                  <option value="23">23</option>
                 </select>
                 <select id="timeMinute" aria-label="출생 시각 분">
                   <option value="">분</option>
+                  <option value="00">00</option>
+                  <option value="01">01</option>
+                  <option value="02">02</option>
+                  <option value="03">03</option>
+                  <option value="04">04</option>
+                  <option value="05">05</option>
+                  <option value="06">06</option>
+                  <option value="07">07</option>
+                  <option value="08">08</option>
+                  <option value="09">09</option>
+                  <option value="10">10</option>
+                  <option value="11">11</option>
+                  <option value="12">12</option>
+                  <option value="13">13</option>
+                  <option value="14">14</option>
+                  <option value="15">15</option>
+                  <option value="16">16</option>
+                  <option value="17">17</option>
+                  <option value="18">18</option>
+                  <option value="19">19</option>
+                  <option value="20">20</option>
+                  <option value="21">21</option>
+                  <option value="22">22</option>
+                  <option value="23">23</option>
+                  <option value="24">24</option>
+                  <option value="25">25</option>
+                  <option value="26">26</option>
+                  <option value="27">27</option>
+                  <option value="28">28</option>
+                  <option value="29">29</option>
+                  <option value="30">30</option>
+                  <option value="31">31</option>
+                  <option value="32">32</option>
+                  <option value="33">33</option>
+                  <option value="34">34</option>
+                  <option value="35">35</option>
+                  <option value="36">36</option>
+                  <option value="37">37</option>
+                  <option value="38">38</option>
+                  <option value="39">39</option>
+                  <option value="40">40</option>
+                  <option value="41">41</option>
+                  <option value="42">42</option>
+                  <option value="43">43</option>
+                  <option value="44">44</option>
+                  <option value="45">45</option>
+                  <option value="46">46</option>
+                  <option value="47">47</option>
+                  <option value="48">48</option>
+                  <option value="49">49</option>
+                  <option value="50">50</option>
+                  <option value="51">51</option>
+                  <option value="52">52</option>
+                  <option value="53">53</option>
+                  <option value="54">54</option>
+                  <option value="55">55</option>
+                  <option value="56">56</option>
+                  <option value="57">57</option>
+                  <option value="58">58</option>
+                  <option value="59">59</option>
                 </select>
               </div>
+              <label class="time-unknown-option" for="birthTimeUnknown">
+                <input type="checkbox" id="birthTimeUnknown" />
+                <span>출생시간 모름</span>
+              </label>
             </div>
             <div>
               <label for="calendarType">양력 / 음력</label>
@@ -2155,12 +2275,33 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     const starTable = document.getElementById('starTable');
     const payButton = document.getElementById('payButton');
     const resultPremiumButton = document.getElementById('resultPremiumButton');
+    const birthTimeUnknown = document.getElementById('birthTimeUnknown');
+    const timeHourSelect = document.getElementById('timeHour');
+    const timeMinuteSelect = document.getElementById('timeMinute');
     let latestSummary = null;
+
+    function isBirthTimeUnknown() {
+      return Boolean(birthTimeUnknown?.checked);
+    }
+
+    function syncBirthTimeState() {
+      const unknown = isBirthTimeUnknown();
+      if (timeHourSelect) {
+        timeHourSelect.disabled = unknown;
+        if (unknown) timeHourSelect.value = '';
+      }
+      if (timeMinuteSelect) {
+        timeMinuteSelect.disabled = unknown;
+        if (unknown) timeMinuteSelect.value = '';
+      }
+    }
 
     function getFormPayload() {
       const year = document.getElementById('year').value;
       const month = document.getElementById('month').value;
       const day = document.getElementById('day').value;
+      const birthHour = isBirthTimeUnknown() ? '' : (timeHourSelect?.value || '');
+      const birthMinute = isBirthTimeUnknown() ? '' : (timeMinuteSelect?.value || '');
       return {
         name: document.getElementById('name').value || '사용자',
         buyerPhone: '',
@@ -2168,7 +2309,10 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         month,
         day,
         birthDate: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-        birthTime: `${String(document.getElementById('timeHour').value || '00').padStart(2, '0')}:${String(document.getElementById('timeMinute').value || '00').padStart(2, '0')}`,
+        birthHour,
+        birthMinute,
+        birthTimeUnknown: isBirthTimeUnknown(),
+        birthTime: birthHour && birthMinute ? `${birthHour}:${birthMinute}` : '',
         calendar: document.getElementById('calendarType').value,
         isLeapMonth: document.getElementById('leapMonth').value === 'true',
         gender: document.querySelector('input[name="gender"]:checked')?.value || ''
@@ -2182,6 +2326,17 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         throw new Error(data.error || data.detail || '요청 처리 중 오류가 발생했습니다.');
       }
       return data;
+    }
+
+    function validateSummaryPayload(payload) {
+      if (!payload.name?.trim()) throw new Error('이름 또는 닉네임을 입력해 주세요.');
+      if (!String(payload.year || '').trim() || !String(payload.month || '').trim() || !String(payload.day || '').trim()) {
+        throw new Error('출생 연도, 월, 일을 입력해 주세요.');
+      }
+      if (!payload.gender) throw new Error('성별을 선택해 주세요.');
+      if (!payload.birthTimeUnknown && (!payload.birthHour || !payload.birthMinute)) {
+        throw new Error('출생시간을 선택하거나 출생시간 모름을 체크해 주세요.');
+      }
     }
 
     function normalizePercent(rawValues) {
@@ -2206,29 +2361,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     }
 
     function populateTimeSelectors() {
-      const hourSelect = document.getElementById('timeHour');
-      const minuteSelect = document.getElementById('timeMinute');
-      if (!hourSelect || !minuteSelect) return;
-      if (hourSelect.options.length <= 1) {
-        Array.from({ length: 24 }, (_, hour) => {
-          const value = String(hour).padStart(2, '0');
-          const option = document.createElement('option');
-          option.value = value;
-          option.textContent = `${value}시`;
-          hourSelect.appendChild(option);
-        });
-      }
-      if (minuteSelect.options.length <= 1) {
-        Array.from({ length: 60 }, (_, minute) => {
-          const value = String(minute).padStart(2, '0');
-          const option = document.createElement('option');
-          option.value = value;
-          option.textContent = `${value}분`;
-          minuteSelect.appendChild(option);
-        });
-      }
-      if (!hourSelect.value) hourSelect.value = '09';
-      if (!minuteSelect.value) minuteSelect.value = '30';
+      syncBirthTimeState();
     }
 
     function pillarToHanja(pillar) {
@@ -2524,6 +2657,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       submitButton.textContent = '사주 계산 중...';
 
       try {
+        validateSummaryPayload(payload);
         const data = await requestJson('/api/saju/summary', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2556,6 +2690,9 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
 
     window.addEventListener('DOMContentLoaded', () => {
       populateTimeSelectors();
+      birthTimeUnknown?.addEventListener('change', syncBirthTimeState);
+      timeHourSelect?.addEventListener('change', syncBirthTimeState);
+      timeMinuteSelect?.addEventListener('change', syncBirthTimeState);
       latestSummary = null;
     });
   </script>
