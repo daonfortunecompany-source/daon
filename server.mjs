@@ -104,6 +104,9 @@ if (CONFIG.ai.debugMode) {
         ? String(req.query.candidate)
         : 'all';
       const result = await runKieSmokeTest(mode, candidate);
+      if (mode === 'smoke' && result?.ok) {
+        return res.json({ ok: true, message: 'pong' });
+      }
       res.json(result);
     } catch (error) {
       res.status(500).json({ ok: false, error: error.message || 'KIE smoke test failed' });
@@ -468,13 +471,19 @@ async function generatePremiumReport(orderId) {
     updateOrderProgress(order, { progress: 50, currentStep: 'mansae', failedStep: null });
     await saveOrder(order);
     const mansaeResult = await optionalApiCall('mansae', CONFIG.lucky.mansaeUrl, [applicantPayload], warnings, false);
-    if (mansaeResult.data) apiSnapshots.mansae = mansaeResult.data;
+    if (mansaeResult.data) {
+      apiSnapshots.mansae = mansaeResult.data;
+      logLuckyResponseDiagnostics('mansae', mansaeResult.data, applicantPayload);
+    }
 
     updateOrderProgress(order, { progress: 62, currentStep: 'saju', failedStep: null });
     await saveOrder(order);
     const sajuCandidates = [{ ...applicantPayload }];
     const sajuResult = await optionalApiCall('saju', CONFIG.lucky.sajuUrl, sajuCandidates, warnings, true);
-    if (sajuResult.data) apiSnapshots.saju = sajuResult.data;
+    if (sajuResult.data) {
+      apiSnapshots.saju = sajuResult.data;
+      logLuckyResponseDiagnostics('saju', sajuResult.data, applicantPayload);
+    }
 
     updateOrderProgress(order, { progress: 72, currentStep: 'period', failedStep: null });
     await saveOrder(order);
@@ -673,15 +682,32 @@ function logLuckyResponseDiagnostics(label, data, fallbackPerson) {
   console.log(`[LUCKY API] response top-level keys (${label}): ${JSON.stringify(safeObjectKeys(data))}`);
   console.log(`[LUCKY API] response data keys (${label}): ${JSON.stringify(collectResponseDataKeys(data))}`);
   const pillarDebug = extractPillarsDetailed(data, fallbackPerson, { allowFallback: false });
+  const inputBirthTime = String(
+    fallbackPerson?.birthTime
+    || fallbackPerson?.time
+    || ((fallbackPerson?.birthHour || fallbackPerson?.hour) ? `${String(fallbackPerson?.birthHour || fallbackPerson?.hour).padStart(2, '0')}:${String(fallbackPerson?.birthMinute || fallbackPerson?.minute || '00').padStart(2, '0')}` : '')
+  );
+  const expectedHourBranch = guessExpectedHourBranch(inputBirthTime);
+  const selectedHourPillar = pillarDebug?.pillars?.hour || '';
+  const actualHourBranch = normalizeBranchChar(selectedHourPillar.slice(1));
   console.log(`[LUCKY API] candidate pillar fields (${label}): ${JSON.stringify(pillarDebug.candidates.slice(0, 12))}`);
   console.log(`[LUCKY API] selected pillar paths (${label}): ${JSON.stringify(pillarDebugToResponsePaths(pillarDebug))}`);
   console.log(`[LUCKY API] selected birth pillars (${label}): ${JSON.stringify(pillarDebug.pillars)}`);
   console.log('[HOUR PILLAR DIAG]', JSON.stringify({
     label,
-    inputBirthTime: String(fallbackPerson?.birthTime || ''),
-    expectedHourBranch: guessExpectedHourBranch(fallbackPerson?.birthTime || ''),
-    selectedHourPillar: pillarDebug?.pillars?.hour || '',
+    inputBirthTime,
+    inputBirthHour: String(fallbackPerson?.birthHour || fallbackPerson?.hour || ''),
+    inputBirthMinute: String(fallbackPerson?.birthMinute || fallbackPerson?.minute || ''),
+    expectedHourBranch,
+    actualHourBranch,
+    selectedHourPillar,
     selectedHourPath: pillarDebug?.selectedPaths?.hour || '',
+    rawBirthInfo: summarizeLooseValue(searchLooseValue(data, [['birthinfo'], ['birth', 'info'], ['출생', '정보']]), 6),
+    rawHourGanji: summarizeLooseValue(searchLooseValue(data, [['hourganji'], ['hour', 'ganji'], ['시간', '간지']]), 6),
+    rawGanjiHour: summarizeLooseValue(searchLooseValue(data, [['ganji', 'hour'], ['ganjihour']]), 6),
+    rawPillarsHour: summarizeLooseValue(searchLooseValue(data, [['pillars', 'hour'], ['hour', 'pillar'], ['시주']]), 6),
+    useYajasiRule: fallbackPerson?.useYajasiRule ?? true,
+    localHourMatch: Boolean(actualHourBranch && expectedHourBranch && actualHourBranch === expectedHourBranch),
     hourCandidates: (pillarDebug?.candidates || []).filter((item) => item.type === 'hour').slice(0, 6)
   }));
 }
@@ -827,7 +853,7 @@ function buildFailureMessage(failedStep) {
     case 'compatibility':
       return '궁합 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
     case 'kie_ai':
-      return '리포트 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      return `리포트 생성이 지연되고 있습니다.\n\n결제는 정상 확인되었으나, 리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인하거나 고객센터로 문의해 주세요.`;
     case 'saju':
       return '리포트 생성 중 핵심 사주 해석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
     default:
@@ -1824,6 +1850,7 @@ function collectPromptContext(order, apiSnapshots, warnings) {
     pillarDetails,
     fiveElements,
     tenGods,
+    gyeokguk: summarizeLooseValue(searchLooseValue(apiSnapshots.saju, [['격국'], ['gyeok'], ['格局']]), 10),
     strength: summarizeLooseValue(searchLooseValue(apiSnapshots.saju, [['신강'], ['신약'], ['strength'], ['강약']]), 10),
     yongsin: summarizeLooseValue(searchLooseValue(apiSnapshots.saju, [['용신'], ['희신'], ['기신'], ['yong']]), 10),
     johu: summarizeLooseValue(searchLooseValue(apiSnapshots.saju, [['조후'], ['johu'], ['조화']]), 10),
@@ -1846,6 +1873,7 @@ function buildAiPromptPayload(order, apiSnapshots, warnings) {
       pillarDetails: promptContext.pillarDetails,
       fiveElements: promptContext.fiveElements,
       tenGods: promptContext.tenGods,
+      gyeokguk: promptContext.gyeokguk,
       strength: promptContext.strength,
       yongsin: promptContext.yongsin,
       johu: promptContext.johu,
@@ -2147,12 +2175,87 @@ function hasCompatibilityPromptPayload(promptPayload) {
   );
 }
 
-function validateAiSections(sections, promptPayload, meta = {}) {
-  const requiredSections = buildRequiredAiSections(hasCompatibilityPromptPayload(promptPayload));
+const REPORT_BATCHES = [
+  { batchName: 'core', sections: ['핵심 요약', '사주 원국 해석'] },
+  { batchName: 'timing', sections: ['대운', '세운', '월운', '운성'] },
+  { batchName: 'analysis', sections: ['신살,귀인', '십성', '재물운', '직업운'] },
+  { batchName: 'life', sections: ['애정운', '자녀운', '건강운', '실천 조언', '주의할 점'] },
+  { batchName: 'concern', sections: ['고민에 대한 조언'] },
+  { batchName: 'compatibility', sections: ['관계/궁합 해석'] }
+];
+
+const SECTION_MIN_VISIBLE_CHARS = {
+  '핵심 요약': 600,
+  '사주 원국 해석': 900,
+  '대운': 700,
+  '세운': 700,
+  '월운': 700,
+  '운성': 500,
+  '신살,귀인': 500,
+  '십성': 700,
+  '재물운': 700,
+  '직업운': 700,
+  '애정운': 600,
+  '자녀운': 500,
+  '건강운': 500,
+  '실천 조언': 700,
+  '주의할 점': 600,
+  '고민에 대한 조언': 1200,
+  '관계/궁합 해석': 1200
+};
+
+const META_RESPONSE_PHRASES = [
+  '한 번에 생성할 수 없습니다',
+  '분량을 초과합니다',
+  '여러 회차로 작성',
+  '요청을 처리할 수 없습니다',
+  '제공된 지시에는',
+  '다음과 같이 나누어',
+  '죄송합니다',
+  '작성할 수 없습니다'
+];
+
+function getReportBatches(hasCompatibility) {
+  return REPORT_BATCHES.filter((batch) => hasCompatibility || batch.batchName !== 'compatibility');
+}
+
+function getSectionMinVisibleChars(section) {
+  return SECTION_MIN_VISIBLE_CHARS[section] || 500;
+}
+
+function getSectionMinParagraphs(section) {
+  return section === '고민에 대한 조언' || section === '관계/궁합 해석' ? 5 : 3;
+}
+
+function detectMetaResponseText(text) {
+  const raw = String(text || '').trim();
+  const matches = META_RESPONSE_PHRASES.filter((phrase) => raw.includes(phrase));
+  return {
+    detected: matches.length > 0,
+    matches
+  };
+}
+
+function isAcceptedJsonDetectedFormat(format = '') {
+  return format === 'json' || format === 'json_wrapper';
+}
+
+function summarizeSectionLengths(sections, requiredSections) {
+  return Object.fromEntries(requiredSections.map((key) => [key, countVisibleChars(sections?.[key] || '')]));
+}
+
+function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
+  const requiredSections = options.requiredSections || buildRequiredAiSections(hasCompatibilityPromptPayload(promptPayload));
+  const enforceTotalLength = options.enforceTotalLength !== false;
+  const requireRawLength = options.requireRawLength === true;
+  const requireJsonOnly = options.requireJsonOnly === true;
   const errors = [];
+  if (requireJsonOnly && !isAcceptedJsonDetectedFormat(meta.detectedFormat || '')) {
+    errors.push('json_only_response_required');
+  }
   const paragraphCounts = {};
   const sectionLengths = {};
-  const banned = /(api|json|system|model|data structure|raw|debug|missingfields|requiredfields|계산 확인 메모|fallback|prompt|engine|content-type)/i;
+  const banned = /(api|json|system|model|data structure|raw|debug|missingfields|requiredfields|계산 확인 메모|fallback|prompt|engine|content-type|status\s*500|error)/i;
   for (const key of requiredSections) {
     const text = String(sections?.[key] || '').trim();
     const paragraphs = countMeaningfulParagraphs(text);
@@ -2160,18 +2263,21 @@ function validateAiSections(sections, promptPayload, meta = {}) {
     paragraphCounts[key] = paragraphs;
     sectionLengths[key] = length;
     if (!text) errors.push(`${key} 누락`);
-    const minParagraphs = key === '고민에 대한 조언' ? 5 : key === '관계/궁합 해석' ? 5 : 3;
-    const minLength = key === '고민에 대한 조언' ? 900 : key === '관계/궁합 해석' ? 900 : 260;
+    const minParagraphs = getSectionMinParagraphs(key);
+    const minLength = getSectionMinVisibleChars(key);
     if (text && paragraphs < minParagraphs) errors.push(`${key} 문단 수 부족`);
     if (text && length < minLength) errors.push(`${key} 분량 부족`);
     if (text && banned.test(text)) errors.push(`${key} 개발용 문구 포함`);
+    const metaResponse = detectMetaResponseText(text);
+    if (text && metaResponse.detected) errors.push(`${key} 메타 응답 포함`);
   }
   const totalLength = Object.values(sectionLengths).reduce((sum, value) => sum + Number(value || 0), 0);
-  if (Number(meta.rawLength || 0) < 1000) errors.push('raw_response_too_short_or_parse_failed');
-  if (totalLength < 5000) errors.push('total_section_length_too_short');
+  const minimumTotal = requiredSections.reduce((sum, key) => sum + getSectionMinVisibleChars(key), 0);
+  if (requireRawLength && Number(meta.rawLength || 0) < 500) errors.push('raw_response_too_short_or_parse_failed');
+  if (enforceTotalLength && totalLength < minimumTotal) errors.push('total_section_length_too_short');
   if (Object.values(sectionLengths).every((value) => Number(value || 0) === 0)) errors.push('all_sections_empty_parser_error');
   const concern = String(promptPayload?.basicInfo?.concern || promptPayload?.concern || '').trim();
-  if (concern) {
+  if (concern && requiredSections.includes('고민에 대한 조언')) {
     const concernText = String(sections?.['고민에 대한 조언'] || '');
     const keywords = collectConcernKeywords(concern);
     if (keywords.length && !keywords.some((token) => concernText.includes(token))) {
@@ -2187,7 +2293,7 @@ function validateAiSections(sections, promptPayload, meta = {}) {
       if (passed < 10) errors.push('온라인 사주 사업 질문 필수 항목 부족');
     }
   }
-  if (hasCompatibilityPromptPayload(promptPayload)) {
+  if (hasCompatibilityPromptPayload(promptPayload) && requiredSections.includes('관계/궁합 해석')) {
     const relationText = String(sections?.['관계/궁합 해석'] || '');
     const relationChecks = [/(일간)/, /(오행)/, /(십성)/, /(감정)/, /(소통)/, /(갈등)/, /(회복)/, /(협업|사업)/, /(금전)/, /(종합|결론)/];
     if (relationChecks.filter((regex) => regex.test(relationText)).length < 7) {
@@ -2203,6 +2309,7 @@ function validateAiSections(sections, promptPayload, meta = {}) {
     paragraphCounts,
     sectionLengths,
     totalSectionLength: totalLength,
+    minimumTotalLength: minimumTotal,
     rawLength: Number(meta.rawLength || 0),
     detectedFormat: meta.detectedFormat || 'unknown',
     sourcePath: meta.sourcePath || '',
@@ -2226,12 +2333,13 @@ function buildConcernSpecificInstruction(concern, hasCompatibility) {
   return lines.join(' ');
 }
 
-function buildRetryInstruction(reason, outputMode = 'json') {
+function buildRetryInstruction(reason, outputMode = 'json', requiredSections = []) {
+  const sectionGuide = requiredSections.length ? `이번 호출에서 허용된 섹션은 ${requiredSections.join(', ')} 입니다.` : '';
   if (outputMode === 'text_titles') {
-    const base = '이전 응답은 실패했습니다. 이번에는 JSON이 아니라 순수 텍스트만 반환하세요. 코드블록, 마크다운 설명문, 사전 안내 문구를 금지합니다. 각 제목은 반드시 `## 제목` 형식을 쓰고, 제목 아래 본문만 작성하세요. 각 섹션은 빈 내용 없이 최소 3문단 이상, 관계/궁합 해석과 고민에 대한 조언은 최소 5문단 이상 작성하세요.';
+    const base = `이전 응답은 실패했습니다. 이번에는 JSON이 아니라 순수 텍스트만 반환하세요. 코드블록, 마크다운 설명문, 사전 안내 문구를 금지합니다. 각 제목은 반드시 \`## 제목\` 형식을 쓰고, 제목 아래 본문만 작성하세요. 요청받은 섹션만 작성하고 다른 섹션은 절대 쓰지 마세요. ${sectionGuide}`;
     return reason ? `${base} 이전 실패 사유: ${reason}` : base;
   }
-  const base = '이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 모든 필수 섹션 key를 빠짐없이 포함하고, 각 key의 value는 빈 문자열 없이 최소 3문단 이상 작성하세요. "핵심 요약", "사주 원국 해석" 등 key 이름을 정확히 사용하세요.';
+  const base = `이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 요청받은 섹션 key만 포함하고 각 value는 빈 문자열 없이 충분한 문단과 분량으로 작성하세요. ${sectionGuide}`;
   return reason ? `${base} 이전 실패 사유: ${reason}` : base;
 }
 
@@ -2249,6 +2357,7 @@ function buildAiPayloadForMode(promptPayload, requiredSections, mode = 'full_rep
     pillarDetails: chartData.pillarDetails || {},
     fiveElements: chartData.fiveElements || {},
     tenGods: chartData.tenGods || {},
+    gyeokguk: chartData.gyeokguk || null,
     strength: chartData.strength || null,
     yongsin: chartData.yongsin || null,
     johu: chartData.johu || null,
@@ -2372,10 +2481,149 @@ function buildAiAttemptPlan(attempt) {
   }
   return {
     mode: 'compact_report',
-    outputMode: 'text_titles',
+    outputMode: 'json',
     maxTokens: Math.min(CONFIG.ai.maxTokens, 6500),
     includeRawBundle: false
   };
+}
+
+
+function createKieBatchError(message) {
+  const error = new Error(message || 'KIE AI batch generation failed');
+  error.failedStep = 'kie_ai';
+  error.progress = 88;
+  return error;
+}
+
+function shouldSplitBatchOnValidation(batch, validation) {
+  if (!batch?.sections || batch.sections.length <= 1) return false;
+  const joined = [validation?.reason || '', ...(validation?.errors || [])].join(' | ');
+  return /(분량 부족|문단 수 부족|메타 응답 포함|json_only_response_required|section_map_not_found_in_supported_paths|raw_response_not_valid_json|all_sections_empty_parser_error|total_section_length_too_short|누락)/.test(joined);
+}
+
+async function generateKieBatch(promptPayload, batch, endpointPath) {
+  let retryReason = '';
+  let lastError = null;
+  let lastValidation = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const plan = buildAiAttemptPlan(attempt);
+    const payloadForAi = buildAiPayloadForMode(promptPayload, batch.sections, plan.mode);
+    plan.payloadForAi = payloadForAi;
+    const systemPrompt = [
+      '당신은 숙련된 한국어 사주 해석 상담사입니다.',
+      '반드시 한국어로만 작성하세요.',
+      '반드시 JSON 객체만 반환하세요.',
+      '마크다운 코드블록 금지, 설명문 금지, 사과문 금지, 안내문 금지입니다.',
+      'API, JSON, 시스템, 모델, 데이터 구조 같은 기술 용어는 절대 드러내지 마세요.',
+      '반드시 요청받은 섹션 key만 포함하세요. 다른 섹션은 절대 작성하지 마세요.',
+      '각 섹션 값에는 실제 리포트 본문만 작성하세요.',
+      '"한 번에 작성할 수 없습니다" 같은 메타 문장을 절대 쓰지 마세요.',
+      batch.sections.map((section) => `${section}: 최소 ${getSectionMinParagraphs(section)}문단, 최소 ${getSectionMinVisibleChars(section)}자`).join(' | '),
+      buildConcernSpecificInstruction(promptPayload?.basicInfo?.concern || '', batch.sections.includes('관계/궁합 해석')),
+      attempt > 1 ? buildRetryInstruction(retryReason, 'json', batch.sections) : ''
+    ].filter(Boolean).join(' ');
+    const userText = JSON.stringify({
+      batchName: batch.batchName,
+      sectionsToWrite: batch.sections,
+      outputMode: 'json',
+      outputRules: {
+        jsonOnly: true,
+        noMarkdown: true,
+        noMeta: true,
+        noExtraSections: true
+      },
+      promptPayload: payloadForAi
+    });
+
+    console.log('[KIE AI BATCH] start', JSON.stringify({ batchName: batch.batchName, attempt, endpointPath, outputMode: 'json' }));
+    console.log('[KIE AI BATCH] batchName', batch.batchName);
+    console.log('[KIE AI BATCH] sections', JSON.stringify(batch.sections));
+
+    const result = await callAiProvider({
+      label: 'KIE AI BATCH',
+      attempt,
+      payloadMode: plan,
+      outputMode: 'json',
+      systemPrompt,
+      userText,
+      requiredSections: batch.sections,
+      endpointPathOverride: endpointPath
+    });
+
+    if (!result.ok) {
+      lastError = createKieBatchError(result.upstreamError?.bodyMessage || 'KIE upstream error');
+      retryReason = `${result.upstreamError?.bodyCode || 'error'}:${result.upstreamError?.bodyMessage || 'upstream_error'}`;
+      const shouldRetry = attempt < 2 && result.upstreamError?.type !== 'KIE_UPSTREAM_HTTP_ERROR';
+      if (shouldRetry) {
+        console.log('[KIE AI BATCH] retry start', JSON.stringify({ batchName: batch.batchName, reason: retryReason }));
+        continue;
+      }
+      throw lastError;
+    }
+
+    console.log('[KIE AI BATCH] response length', JSON.stringify({ batchName: batch.batchName, rawLength: result.raw.length }));
+    const metaResponse = detectMetaResponseText(result.raw);
+    if (metaResponse.detected) {
+      console.log('[KIE AI] meta response detected', JSON.stringify({ batchName: batch.batchName, matches: metaResponse.matches }));
+      if (batch.sections.length > 1) {
+        return { ok: false, splitRecommended: true, splitReason: 'meta_response_detected', matches: metaResponse.matches };
+      }
+      lastError = createKieBatchError('KIE AI meta response detected');
+      retryReason = metaResponse.matches.join(', ') || 'meta_response_detected';
+      if (attempt < 2) {
+        console.log('[KIE AI BATCH] retry start', JSON.stringify({ batchName: batch.batchName, reason: retryReason }));
+        continue;
+      }
+      throw lastError;
+    }
+
+    const parsedMeta = parseKieSectionMap(result.raw, batch.sections);
+    const normalized = parsedMeta.sections || Object.fromEntries(batch.sections.map((key) => [key, '']));
+    const validation = validateAiSections(normalized, promptPayload, parsedMeta, {
+      requiredSections: batch.sections,
+      enforceTotalLength: true,
+      requireRawLength: false,
+      requireJsonOnly: true
+    });
+    lastValidation = validation;
+    console.log('[KIE AI BATCH] parsed section keys', JSON.stringify(validation.foundSectionKeys.length ? validation.foundSectionKeys : Object.keys(normalized)));
+    console.log('[KIE AI BATCH] section lengths', JSON.stringify(validation.sectionLengths));
+    console.log('[KIE AI BATCH] validation result', JSON.stringify(validation));
+    if (validation.ok) {
+      console.log('[KIE AI BATCH] success', JSON.stringify({ batchName: batch.batchName, sections: batch.sections }));
+      return { ok: true, sections: normalized, validation };
+    }
+    retryReason = validation.parseFailureReason || validation.errors.slice(0, 8).join(' | ') || 'batch_validation_failed';
+    if (attempt < 2) {
+      console.log('[KIE AI BATCH] retry start', JSON.stringify({ batchName: batch.batchName, reason: retryReason }));
+      continue;
+    }
+    if (shouldSplitBatchOnValidation(batch, validation)) {
+      return { ok: false, splitRecommended: true, splitReason: retryReason, validation };
+    }
+    lastError = createKieBatchError('KIE AI batch validation failed');
+    throw lastError;
+  }
+  if (lastValidation && shouldSplitBatchOnValidation(batch, lastValidation)) {
+    return { ok: false, splitRecommended: true, splitReason: lastValidation.errors.join(' | ') || lastValidation.reason, validation: lastValidation };
+  }
+  throw lastError || createKieBatchError('KIE AI batch generation failed');
+}
+
+async function generateKieBatchOrSplit(promptPayload, batch, endpointPath) {
+  const batchResult = await generateKieBatch(promptPayload, batch, endpointPath);
+  if (batchResult?.ok) return batchResult.sections;
+  if (batchResult?.splitRecommended && batch.sections.length > 1) {
+    const merged = {};
+    for (const section of batch.sections) {
+      const singleBatch = { batchName: `${batch.batchName}:${section}`, sections: [section] };
+      const singleResult = await generateKieBatch(promptPayload, singleBatch, endpointPath);
+      if (!singleResult?.ok) throw createKieBatchError(`KIE AI single-section batch failed: ${section}`);
+      Object.assign(merged, singleResult.sections || {});
+    }
+    return merged;
+  }
+  throw createKieBatchError(`KIE AI batch failed: ${batch.batchName}`);
 }
 
 function buildAiRequestBody({ style, systemPrompt, userText, outputMode, maxTokens }) {
@@ -2582,11 +2830,16 @@ async function runKieSmokeTest(mode = 'smoke', candidate = 'all') {
         continue;
       }
       const parsed = tryParseJsonText(result.raw);
-      const ok = parsed?.ok === true && parsed?.message === 'pong';
+      const nestedText = extractTextFromMessageContent(parsed?.choices?.[0]?.message?.content)
+        || extractResponsesText(parsed)
+        || '';
+      const nestedParsed = tryParseJsonText(nestedText);
+      const effectiveParsed = nestedParsed && typeof nestedParsed === 'object' ? nestedParsed : parsed;
+      const ok = effectiveParsed?.ok === true && effectiveParsed?.message === 'pong';
       console.log('[KIE SMOKE] endpointPath', endpointPath);
       console.log('[KIE SMOKE] status', JSON.stringify({ ok, endpointPath, status: result.response.status }));
       console.log('[KIE SMOKE] body preview', JSON.stringify({ endpointPath, preview: sanitizeKiePreviewText(result.raw) }));
-      tests.push({ ok, endpointPath, status: result.response.status, preview: sanitizeKiePreviewText(result.raw), parsed });
+      tests.push({ ok, endpointPath, status: result.response.status, preview: sanitizeKiePreviewText(result.raw), parsed: effectiveParsed });
       continue;
     }
 
@@ -2610,7 +2863,11 @@ async function runKieSmokeTest(mode = 'smoke', candidate = 'all') {
       continue;
     }
     const parsedMeta = parseKieSectionMap(result.raw, requiredSections);
-    const validation = validateAiSections(parsedMeta.sections || {}, { ...promptPayload, chartData: promptPayload.chartData, partnerInfo: promptPayload.partnerInfo }, parsedMeta);
+    const validation = validateAiSections(parsedMeta.sections || {}, { ...promptPayload, chartData: promptPayload.chartData, partnerInfo: promptPayload.partnerInfo }, parsedMeta, {
+      requiredSections,
+      enforceTotalLength: true,
+      requireJsonOnly: true
+    });
     console.log('[KIE SMOKE] endpointPath', endpointPath);
     console.log('[KIE SMOKE] status', JSON.stringify({ ok: validation.ok, endpointPath, status: result.response.status }));
     console.log('[KIE SMOKE] body preview', JSON.stringify({ endpointPath, preview: sanitizeKiePreviewText(result.raw) }));
@@ -2623,101 +2880,36 @@ async function runKieSmokeTest(mode = 'smoke', candidate = 'all') {
 
 async function generateAiSections(promptPayload) {
   if (!CONFIG.ai.apiKey) {
-    const error = new Error('AI API 키가 설정되지 않았습니다.');
-    error.failedStep = 'kie_ai';
-    error.progress = 88;
-    throw error;
+    throw createKieBatchError('AI API 키가 설정되지 않았습니다.');
   }
-  const requiredSections = buildRequiredAiSections(hasCompatibilityPromptPayload(promptPayload));
-  const schemaGuide = Object.fromEntries(requiredSections.map((key) => [key, 'string']));
-  const concernInstruction = buildConcernSpecificInstruction(promptPayload?.basicInfo?.concern || '', requiredSections.includes('관계/궁합 해석'));
-  let retryReason = '';
-  let lastError = null;
+  const hasCompatibility = hasCompatibilityPromptPayload(promptPayload);
   const endpointPath = resolveAiEndpointPath(resolveAiStyle());
+  const batches = getReportBatches(hasCompatibility);
+  const finalSections = {};
 
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const plan = buildAiAttemptPlan(attempt);
-    const payloadForAi = buildAiPayloadForMode(promptPayload, requiredSections, plan.mode);
-    plan.payloadForAi = payloadForAi;
-    const systemPrompt = [
-      '당신은 숙련된 한국어 사주 해석 상담사입니다.',
-      '반드시 한국어로만 작성하세요.',
-      'API, JSON, 시스템, 모델, 데이터 구조 같은 기술 용어는 절대 드러내지 마세요.',
-      '문체는 상담형으로 자연스럽고 친절하게 작성하세요.',
-      '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 데이터를 근거로 프리미엄 리포트 수준의 상세 해석을 작성하세요.',
-      plan.outputMode === 'json'
-        ? '반드시 JSON 객체만 반환하고, 스키마 키 이름을 한 글자도 바꾸지 마세요. 마크다운 금지, 코드블록 금지, 설명문 금지입니다.'
-        : `JSON 대신 순수 텍스트로만 작성하세요. 각 제목은 반드시 다음 형식을 지키세요:
-${buildTextTitleTemplate(requiredSections)}
-제목 외의 도입 문구, 코드블록, 마크다운 설명문은 금지입니다.`,
-      '각 섹션은 최소 3문단 이상, 관계/궁합 해석과 고민에 대한 조언은 최소 5문단 이상 작성하세요.',
-      '같은 문장을 반복하지 말고, 실제 삶의 장면이 떠오르는 예시와 실행 조언을 포함하세요.',
-      concernInstruction,
-      attempt > 1 ? buildRetryInstruction(retryReason, plan.outputMode) : ''
-    ].filter(Boolean).join(' ');
-    const userText = JSON.stringify({
-      requiredOutputSchema: plan.outputMode === 'json' ? schemaGuide : null,
-      requiredSectionOrder: requiredSections,
-      promptPayload: payloadForAi
-    });
-
-    const result = await callAiProvider({
-      label: 'KIE AI',
-      attempt,
-      payloadMode: plan,
-      outputMode: plan.outputMode,
-      systemPrompt,
-      userText,
-      requiredSections,
-      endpointPathOverride: endpointPath
-    });
-
-    if (!result.ok) {
-      lastError = new Error(result.upstreamError?.bodyMessage || 'KIE upstream error');
-      lastError.failedStep = 'kie_ai';
-      lastError.progress = 88;
-      retryReason = `${result.upstreamError?.bodyCode || 'error'}:${result.upstreamError?.bodyMessage || 'upstream_error'}`;
-      const shouldRetry = attempt < 2 && result.upstreamError?.type !== 'KIE_UPSTREAM_HTTP_ERROR';
-      if (shouldRetry) {
-        console.log('[KIE AI] retry start', JSON.stringify({ reason: retryReason, nextMode: 'compact_report', nextOutputMode: 'text_titles' }));
-        continue;
-      }
-      throw lastError;
-    }
-
-    const parsedMeta = parseKieSectionMap(result.raw, requiredSections);
-    if (!parsedMeta.sections) {
-      console.log('[KIE AI] parse failure', JSON.stringify({
-        type: parsedMeta.rawLength < 1000 ? 'KIE_RESPONSE_TOO_SHORT' : 'KIE_PARSE_ERROR',
-        detectedFormat: parsedMeta.detectedFormat,
-        parseFailureReason: parsedMeta.parseFailureReason,
-        sourcePath: parsedMeta.sourcePath,
-        rawLength: parsedMeta.rawLength,
-        preview: parsedMeta.preview
-      }));
-    }
-    const normalized = parsedMeta.sections || Object.fromEntries(requiredSections.map((key) => [key, '']));
-    const validation = validateAiSections(normalized, promptPayload, parsedMeta);
-    console.log('[KIE AI] section keys', JSON.stringify(validation.foundSectionKeys.length ? validation.foundSectionKeys : Object.keys(normalized)));
-    console.log('[KIE AI] section lengths', JSON.stringify(validation.sectionLengths));
-    console.log('[KIE AI] validation result', JSON.stringify(validation));
-    if (validation.ok) return normalized;
-
-    retryReason = validation.parseFailureReason || validation.errors.slice(0, 8).join(' | ') || 'unknown';
-    lastError = new Error('KIE AI section validation failed');
-    lastError.failedStep = 'kie_ai';
-    lastError.progress = 88;
-    if (attempt < 2) {
-      console.log('[KIE AI] retry start', JSON.stringify({ reason: retryReason, nextMode: 'compact_report', nextOutputMode: 'text_titles' }));
-      continue;
-    }
-    throw lastError;
+  for (const batch of batches) {
+    const sections = await generateKieBatchOrSplit(promptPayload, batch, endpointPath);
+    Object.assign(finalSections, sections);
   }
 
-  lastError = lastError || new Error('KIE AI section generation failed');
-  lastError.failedStep = 'kie_ai';
-  lastError.progress = 88;
-  throw lastError;
+  const requiredSections = buildRequiredAiSections(hasCompatibility);
+  const totalLength = requiredSections.reduce((sum, key) => sum + countVisibleChars(finalSections[key] || ''), 0);
+  console.log('[KIE AI FINAL] merged section keys', JSON.stringify(Object.keys(finalSections)));
+  console.log('[KIE AI FINAL] total length', JSON.stringify({ totalLength, requiredSections }));
+  const finalValidation = validateAiSections(finalSections, promptPayload, {
+    rawLength: totalLength,
+    detectedFormat: 'merged_sections',
+    sourcePath: 'batch_merge'
+  }, {
+    requiredSections,
+    enforceTotalLength: true,
+    requireRawLength: false
+  });
+  console.log('[KIE AI FINAL] validation result', JSON.stringify(finalValidation));
+  if (!finalValidation.ok) {
+    throw createKieBatchError('KIE AI final validation failed');
+  }
+  return finalSections;
 }
 
 
@@ -2744,7 +2936,7 @@ function fallbackAiSections(promptPayload) {
     '고민에 대한 조언': `${name}님이 적어주신 고민인 "${concern}"은 단순히 운의 좋고 나쁨보다, 지금 무엇을 먼저 정리하고 어디에 힘을 모을지와 더 깊이 연결되어 있습니다. 지금은 모든 문제를 한 번에 해결하려 하기보다, 가장 체감이 큰 한 가지를 먼저 명확히 정하고 그 다음 단계를 설계하는 방식이 맞습니다. 원하는 결과를 얻기 위해서는 타이밍도 중요하지만, 그 타이밍을 받아낼 준비를 갖추는 것이 더 중요합니다.`
   };
   if (hasCompatibility) {
-    sections['궁합 참고 해석'] = `두 사람의 궁합은 단순한 좋고 나쁨보다 서로가 관계에서 어떤 안정감을 원하는지, 갈등이 생겼을 때 어떻게 회복하는지가 핵심입니다. 서로의 속도와 표현 방식이 다를 수 있으므로, 감정을 추측하기보다 말과 행동의 기준을 맞추는 과정이 중요합니다. 상대에 대한 기대가 커질수록 실망도 커질 수 있으니, 관계의 방향을 천천히 확인하면서 신뢰를 쌓아가세요.`;
+    sections['관계/궁합 해석'] = `두 사람의 궁합은 단순한 좋고 나쁨보다 서로가 관계에서 어떤 안정감을 원하는지, 갈등이 생겼을 때 어떻게 회복하는지가 핵심입니다. 서로의 속도와 표현 방식이 다를 수 있으므로, 감정을 추측하기보다 말과 행동의 기준을 맞추는 과정이 중요합니다. 상대에 대한 기대가 커질수록 실망도 커질 수 있으니, 관계의 방향을 천천히 확인하면서 신뢰를 쌓아가세요.`;
   }
   return sections;
 }

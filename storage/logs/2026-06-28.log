@@ -1,0 +1,3 @@
+[2026-06-28T05:46:42.544Z] generation_failed {"orderId":"ord_1782625602407_b8d843cb","failedStep":"kie_ai","message":"KIE AI batch validation failed"}
+[2026-06-28T05:49:30.155Z] generation_failed {"orderId":"ord_1782625770019_16e73af0","failedStep":"kie_ai","message":"KIE AI batch validation failed"}
+[2026-06-28T05:52:04.497Z] generation_failed {"orderId":"ord_1782625924361_4c757587","failedStep":"kie_ai","message":"KIE AI batch validation failed"}

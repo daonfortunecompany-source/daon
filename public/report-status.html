@@ -385,6 +385,7 @@
     <div class="detail" id="detailBox">주문 정보를 불러오는 중입니다.</div>
 
     <div class="actions" id="actions">
+      <button class="btn btn-primary" id="refreshButton" type="button">다시 확인하기</button>
       <a class="btn btn-soft" href="/">메인으로 돌아가기</a>
     </div>
   </main>
@@ -395,6 +396,7 @@
     const statusCard = document.getElementById('statusCard');
     const statusSub = document.querySelector('.sub');
     const statusBadge = document.getElementById('statusBadge');
+    const refreshButton = document.getElementById('refreshButton');
     const paymentStep = document.getElementById('paymentStep');
     const generationStep = document.getElementById('generationStep');
     const downloadStep = document.getElementById('downloadStep');
@@ -450,7 +452,7 @@
                 : failedStep === 'compatibility'
                   ? '궁합 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
                   : failedStep === 'kie_ai'
-                    ? '리포트 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
+                    ? '결제는 정상 확인되었으나, 리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인하거나 고객센터로 문의해 주세요.'
                     : '리포트 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.')
             : status === 'payment_cancelled'
               ? '결제가 취소되어 리포트 생성이 진행되지 않았습니다.'
@@ -461,7 +463,7 @@
       loadingText.textContent = isCompleted
         ? '리포트 준비 완료'
         : status === 'failed'
-          ? '리포트 생성 확인 필요'
+          ? '리포트 생성이 지연되고 있습니다'
           : status === 'payment_cancelled'
             ? '결제가 취소되었습니다'
             : isGenerating
@@ -495,7 +497,7 @@
           : failedStep === 'compatibility'
             ? '궁합 분석 단계에서 실패했습니다.'
             : failedStep === 'kie_ai'
-              ? '리포트 해석 생성 단계에서 실패했습니다.'
+              ? '리포트 해석 생성이 일시 지연되고 있습니다.'
               : '리포트 생성 중 문제가 발생했습니다.';
         downloadStep.textContent = '잠시 후 다시 시도해 주세요.';
         setStepState(stepGenerating, 'active');
@@ -537,7 +539,7 @@
                 ? (failedStep === 'period'
                     ? '기간운 분석 단계에서 문제가 감지되어 확인이 필요합니다.'
                     : failedStep === 'kie_ai'
-                      ? '리포트 해석 생성 단계에서 문제가 감지되어 확인이 필요합니다.'
+                      ? '결제는 정상 확인되었으나 리포트 해석 생성이 일시 지연되고 있습니다.'
                       : '생성 중 문제가 감지되어 확인이 필요합니다.')
                 : status === 'payment_cancelled'
                   ? '결제가 취소되어 진행이 중단되었습니다.'
@@ -579,6 +581,7 @@
       }
     }
 
+    refreshButton?.addEventListener('click', () => { window.location.reload(); });
     poll();
   </script>
 </body>

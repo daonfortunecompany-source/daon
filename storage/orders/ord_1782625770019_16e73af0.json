@@ -1,0 +1,112 @@
+{
+  "id": "ord_1782625770019_16e73af0",
+  "createdAt": "2026-06-28T05:49:30.019Z",
+  "updatedAt": "2026-06-28T05:49:30.155Z",
+  "status": "failed",
+  "product": {
+    "type": "compatibility",
+    "name": "2인 사주(궁합 무료 진행)",
+    "price": 36000
+  },
+  "applicant": {
+    "name": "수연",
+    "gender": "female",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "이직 시기와 재물 흐름이 궁금해요.",
+    "memo": ""
+  },
+  "partner": {
+    "name": "정수라",
+    "gender": "male",
+    "birthYear": "1995",
+    "birthMonth": "05",
+    "birthDay": "14",
+    "birthTime": "21:45",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "",
+    "memo": ""
+  },
+  "person1": {
+    "name": "수연",
+    "gender": "female",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "이직 시기와 재물 흐름이 궁금해요.",
+    "memo": ""
+  },
+  "person2": {
+    "name": "정수라",
+    "gender": "male",
+    "birthYear": "1995",
+    "birthMonth": "05",
+    "birthDay": "14",
+    "birthTime": "21:45",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "",
+    "memo": ""
+  },
+  "compatibilityRequested": true,
+  "warnings": [],
+  "payment": {
+    "price": 36000,
+    "productName": "2인 사주(궁합 무료 진행)",
+    "mulNo": "mock_1782625770020",
+    "payState": 4,
+    "method": "mock",
+    "payUrl": "http://127.0.0.1:3126/mock-pay/ord_1782625770019_16e73af0"
+  },
+  "artifacts": {},
+  "logs": [
+    {
+      "at": "2026-06-28T05:49:30.020Z",
+      "type": "payment_request_created",
+      "detail": {
+        "mulNo": "mock_1782625770020"
+      }
+    },
+    {
+      "at": "2026-06-28T05:49:30.023Z",
+      "type": "mock_payment_success",
+      "detail": {}
+    },
+    {
+      "at": "2026-06-28T05:49:30.075Z",
+      "type": "generation_started",
+      "detail": {}
+    },
+    {
+      "at": "2026-06-28T05:49:30.155Z",
+      "type": "generation_failed",
+      "detail": {
+        "failedStep": "kie_ai",
+        "message": "KIE AI batch validation failed"
+      }
+    }
+  ],
+  "currentStep": "kie_ai",
+  "failedStep": "kie_ai",
+  "progress": 88
+}
