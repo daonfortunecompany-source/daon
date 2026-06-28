@@ -2151,6 +2151,100 @@ function normalizeAiSections(rawSections, requiredSections) {
   return output;
 }
 
+const SECTION_INTRO_MAP = {
+  '핵심 요약': '핵심 요약은 사주 전반의 흐름과 현재 가장 먼저 짚어야 할 포인트를 짧게 정리해 보는 항목입니다.',
+  '사주 원국 해석': '사주 원국 해석은 타고난 기질과 기본 성향, 삶의 중심 패턴을 살펴보는 항목입니다.',
+  '대운': '대운은 인생의 큰 흐름과 장기적인 변화 방향을 살펴보는 항목입니다.',
+  '세운': '세운은 특정 해에 들어오는 분위기와 선택의 흐름을 살펴보는 항목입니다.',
+  '월운': '월운은 특정 달에 나타나기 쉬운 흐름과 컨디션, 주의할 점을 살펴보는 항목입니다.',
+  '운성': '운성은 시기별 에너지의 움직임과 삶의 리듬 변화를 살펴보는 항목입니다.',
+  '신살,귀인': '신살과 귀인은 주변 환경의 변수와 도움을 주는 인연의 흐름을 살펴보는 항목입니다.',
+  '십성': '십성은 사람을 대하는 방식과 일의 태도, 관계 속 역할 성향을 살펴보는 항목입니다.',
+  '재물운': '재물운은 돈을 벌고 관리하는 방식, 소비와 투자 성향, 재정적 기회를 살펴보는 항목입니다.',
+  '직업운': '직업운은 일하는 방식, 적성, 커리어 방향, 조직과의 관계를 살펴보는 항목입니다.',
+  '애정운': '애정운은 감정 표현 방식과 관계의 안정감, 가까운 사람과의 호흡을 살펴보는 항목입니다.',
+  '자녀운': '자녀운은 돌봄의 태도와 책임감, 가족 안에서의 양육 흐름을 살펴보는 항목입니다.',
+  '건강운': '건강운은 체력 소모 패턴과 컨디션 관리 포인트, 생활 리듬을 살펴보는 항목입니다.',
+  '실천 조언': '실천 조언은 지금 흐름에서 바로 적용해 볼 수 있는 행동 기준과 생활 팁을 정리하는 항목입니다.',
+  '주의할 점': '주의할 점은 현재 흐름에서 무리하거나 놓치기 쉬운 부분을 미리 점검하는 항목입니다.',
+  '고민에 대한 조언': '고민에 대한 조언은 현재 질문과 가장 직접적으로 연결되는 선택 기준과 실천 방향을 살펴보는 항목입니다.',
+  '관계/궁합 해석': '관계/궁합 해석은 두 사람의 기질 차이와 소통 방식, 갈등 조율 포인트를 살펴보는 항목입니다.'
+};
+
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function prependSectionIntro(section, text) {
+  const body = String(text || '').trim();
+  if (!body) return body;
+  const intro = SECTION_INTRO_MAP[section] || '';
+  if (!intro) return body;
+  const firstChunk = body.slice(0, 180);
+  if (firstChunk.includes(intro) || /항목입니다|살펴보는 항목|정리하는 항목|의미하는 항목/.test(firstChunk)) return body;
+  return `${intro}\n\n${body}`;
+}
+
+function applyHonorificsToText(text, names = []) {
+  let output = String(text || '');
+  const filteredNames = Array.from(new Set((Array.isArray(names) ? names : []).map((item) => String(item || '').trim()).filter(Boolean))).sort((a, b) => b.length - a.length);
+  for (const name of filteredNames) {
+    const escaped = escapeRegex(name);
+    const particlePattern = new RegExp(`(^|[^가-힣A-Za-z0-9])(${escaped})(?!님)(?=(은|는|이|가|을|를|의|과|와|도|만|께서|께|에게|한테|처럼|보다|부터|까지|랑|으로|로|에|이나|나|이며|인데|입니다|입니까|일|적||\s|[.,!?;:()"'“”‘’]|$))`, 'g');
+    output = output.replace(particlePattern, (match, prefix, found) => `${prefix}${found}님`);
+    const barePattern = new RegExp(`(^|[^가-힣A-Za-z0-9])(${escaped})(?!님)(?=\s|[.,!?;:()"'“”‘’]|$)`, 'g');
+    output = output.replace(barePattern, (match, prefix, found) => `${prefix}${found}님`);
+  }
+  return output.replace(/님님/g, '님');
+}
+
+function convertMonthlySectionToFormalStyle(text) {
+  let output = String(text || '').trim();
+  if (!output) return output;
+  const replacements = [
+    [/감정 기복이 커진다/g, '감정 기복이 커질 수 있습니다'],
+    [/오해가 생긴다/g, '오해가 생길 수 있습니다'],
+    [/지출 관리가 필요하다/g, '지출 관리가 필요합니다'],
+    [/좋다\./g, '좋습니다.'],
+    [/필요하다\./g, '필요합니다.'],
+    [/중요하다\./g, '중요합니다.'],
+    [/유리하다\./g, '유리합니다.'],
+    [/불리하다\./g, '불리합니다.'],
+    [/가능하다\./g, '가능합니다.'],
+    [/이어진다\./g, '이어집니다.'],
+    [/보인다\./g, '보입니다.'],
+    [/작용한다\./g, '작용합니다.'],
+    [/생긴다\./g, '생길 수 있습니다.'],
+    [/커진다\./g, '커질 수 있습니다.'],
+    [/된다\./g, '됩니다.'],
+    [/맞다\./g, '맞습니다.'],
+    [/권한다\./g, '권합니다.'],
+    [/좋아진다\./g, '좋아질 수 있습니다.']
+  ];
+  for (const [pattern, replacement] of replacements) output = output.replace(pattern, replacement);
+  return output;
+}
+
+function postProcessReportSections(promptPayload, sections) {
+  const inputNames = [promptPayload?.basicInfo?.name, promptPayload?.applicant?.name, promptPayload?.partnerInfo?.name, promptPayload?.partner?.name]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  const output = {};
+  for (const [section, rawText] of Object.entries(sections || {})) {
+    let nextText = String(rawText || '').trim();
+    if (!nextText) {
+      output[section] = '';
+      continue;
+    }
+    nextText = prependSectionIntro(section, nextText);
+    if (section === '월운') nextText = convertMonthlySectionToFormalStyle(nextText);
+    nextText = applyHonorificsToText(nextText, inputNames);
+    output[section] = nextText.replace(/\n{3,}/g, '\n\n').trim();
+  }
+  return output;
+}
+
+
 function collectSectionObjectCandidates(parsed, requiredSections) {
   const candidates = [];
   const pushCandidate = (label, value) => {
@@ -2607,12 +2701,12 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
 
 function buildConcernSpecificInstruction(concern, hasCompatibility) {
   const lines = [
-    '각 섹션은 최소 3문단 이상 작성하고, 각 섹션의 첫 문단은 짧은 핵심 설명으로 시작하세요.',
+    '각 섹션은 최소 3문단 이상 작성하고, 각 섹션의 첫 부분에 해당 주제가 무엇을 의미하는지 1~2문장으로 짧게 설명한 뒤 실제 풀이를 이어가세요.',
     '추상적인 일반론 대신 실제 상담 장면이 떠오르는 구체 예시를 포함하세요.',
     '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 자료를 실제 해석 문장에 직접 연결하세요.',
     '고민에 대한 조언은 최소 5문단 이상 작성하고 사용자의 질문에 직접 답하세요.'
   ];
-  if (hasCompatibility) lines.push('관계/궁합 해석은 최소 5문단 이상 작성하고, 두 사람의 원국과 compatibility 자료를 함께 반영하세요.');
+  if (hasCompatibility) lines.push('관계/궁합 해석은 최소 5문단 이상 작성하고, 두 사람의 원국과 compatibility 자료를 함께 반영하세요. 이름을 언급할 때는 반드시 이름 뒤에 님을 붙여 작성하세요.');
   if (/온라인\s*사주\s*사업/.test(String(concern || ''))) {
     lines.push('사용자 질문이 온라인 사주 사업에 관한 경우, 온라인 사주 사업과 사주 구조의 적합성, 상담형/콘텐츠형/리포트형/브랜딩형 적합도, 수익화 가능성, 고객 응대 스타일, 사업 시작 시 주의점, 혼자 운영 vs 협업, 2026년 기준 실행 타이밍, 3개월 실행 계획, 6개월 실행 계획, 1년 운영 전략, 실패 가능성을 줄이는 조건, 최종 결론을 반드시 모두 포함하세요.');
   }
@@ -2625,7 +2719,7 @@ function buildRetryInstruction(reason, outputMode = 'json', requiredSections = [
     const base = `이전 응답은 실패했습니다. 이번에는 JSON이 아니라 순수 텍스트만 반환하세요. 코드블록, 마크다운 설명문, 사전 안내 문구를 금지합니다. 각 제목은 반드시 \`## 제목\` 형식을 쓰고, 제목 아래 본문만 작성하세요. 요청받은 섹션만 작성하고 다른 섹션은 절대 쓰지 마세요. ${sectionGuide}`;
     return reason ? `${base} 이전 실패 사유: ${reason}` : base;
   }
-  const base = `이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 요청받은 섹션 key만 포함하고 각 value는 빈 문자열 없이 충분한 문단과 분량으로 작성하세요. 각 문단은 2~3문장 이상으로 쓰고 실제 생활 예시, 주의점, 실천 조언을 포함하세요. ${sectionGuide}`;
+  const base = `이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 요청받은 섹션 key만 포함하고 각 value는 빈 문자열 없이 충분한 문단과 분량으로 작성하세요. 각 문단은 2~3문장 이상으로 쓰고 실제 생활 예시, 주의점, 실천 조언을 포함하세요. 모든 섹션은 존댓말 설명체(합니다/입니다/할 수 있습니다)로 작성하고, 이름을 언급할 때는 반드시 님을 붙이세요. ${sectionGuide}`;
   return reason ? `${base} 이전 실패 사유: ${reason}` : base;
 }
 
@@ -2803,7 +2897,10 @@ function buildSingleSectionPromptGuide(section) {
     `반드시 ${getSectionPromptTargetParagraphs(section)}문단 이상 작성하세요.`,
     '각 문단은 2~3문장 이상으로 작성하세요.',
     '짧게 요약하지 말고 실제 생활 예시, 주의점, 실천 조언을 반드시 포함하세요.',
-    `반드시 {"${section}":"본문"} 형식의 JSON 객체만 반환하세요.`
+    `반드시 {"${section}":"본문"} 형식의 JSON 객체만 반환하세요.`,
+    '해당 섹션이 무엇을 살펴보는 항목인지 1~2문장으로 짧게 설명한 뒤 본문 풀이를 이어가세요.',
+    '모든 문장은 존댓말 설명체(합니다/입니다/할 수 있습니다)로 작성하세요.',
+    '이름을 언급할 때는 반드시 이름 뒤에 님을 붙이세요.'
   ];
   if (section === '관계/궁합 해석') {
     base.push('관계 성향, 소통 방식, 갈등 포인트, 보완점, 현실 조언을 모두 포함하세요.');
@@ -2816,7 +2913,7 @@ function buildSingleSectionPromptGuide(section) {
 function buildSectionRequirementGuide(sections, isolated = false) {
   return sections.map((section) => isolated
     ? buildSingleSectionPromptGuide(section)
-    : `${section}: 최소 ${getSectionPromptTargetParagraphs(section)}문단, 최소 ${getSectionPromptTargetChars(section)}자, 각 문단 2~3문장 이상, 실제 예시/주의점/실천 조언 포함`).join(' | ');
+    : `${section}: 최소 ${getSectionPromptTargetParagraphs(section)}문단, 최소 ${getSectionPromptTargetChars(section)}자, 각 문단 2~3문장 이상, 실제 예시/주의점/실천 조언 포함, 섹션 시작 전에 1~2문장의 짧은 주제 설명 포함, 존댓말 설명체 유지, 이름 언급 시 반드시 님 사용`).join(' | ');
 }
 
 function isCompatibilityOnlyBatch(batch) {
@@ -2842,6 +2939,7 @@ function buildCompatibilitySpecificInstruction(attempt = 1) {
     '반드시 JSON 객체만 반환하고, key는 관계/궁합 해석 하나만 사용하세요.',
     '반드시 {"관계/궁합 해석":"본문"} 형식의 순수 JSON만 반환하세요.',
     '최소 1600자 이상, 최소 6문단 이상, 각 문단 2~3문장 이상으로 작성하세요.',
+    '이름을 언급할 때는 반드시 이름 뒤에 님을 붙이고, 모든 문장은 존댓말 설명체(합니다/입니다/할 수 있습니다)로 작성하세요.',
     '관계 성향, 소통 방식, 갈등 포인트, 보완점, 역할 분담, 금전과 현실 문제, 안정적인 대화 조언을 모두 포함하세요.',
     '결혼, 이별, 성공, 실패, 운명, 최고, 최악 같은 단정적 표현을 금지합니다.',
     '사과문, 거절문, 안내문, 코드블록, 마크다운, 추가 key를 절대 쓰지 마세요.'
@@ -2909,6 +3007,9 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       '반드시 JSON 객체만 반환하세요.',
       '마크다운 코드블록 금지, 설명문 금지, 사과문 금지, 안내문 금지입니다.',
       'API, JSON, 시스템, 모델, 데이터 구조 같은 기술 용어는 절대 드러내지 마세요.',
+      '모든 섹션은 존댓말 설명체로 작성하세요. "합니다", "입니다", "할 수 있습니다" 말투를 사용하고 "한다", "된다", "좋다", "필요하다" 같은 단정형 어미는 피하세요.',
+      '각 섹션의 첫 부분에는 해당 주제가 무엇을 보는 항목인지 1~2문장으로 짧게 설명한 뒤 실제 풀이를 이어가세요.',
+      '이름을 언급할 때는 반드시 이름 뒤에 "님"을 붙여 작성하세요. 이름 뒤에 바로 조사를 붙이는 표현은 금지합니다.',
       '반드시 요청받은 섹션 key만 포함하세요. 다른 섹션은 절대 작성하지 마세요.',
       '각 섹션 값에는 실제 리포트 본문만 작성하세요.',
       '"한 번에 작성할 수 없습니다" 같은 메타 문장을 절대 쓰지 마세요.',
@@ -3397,7 +3498,7 @@ async function generateAiSections(promptPayload, order = null) {
       const batch = wave[index];
       const result = settled[index];
       if (result.status === 'fulfilled') {
-        const sections = result.value.sections || {};
+        const sections = postProcessReportSections(promptPayload, result.value.sections || {});
         Object.assign(finalSections, sections);
         await persistBatchProgress(order, batch.batchName, 'kie_batch_success', {
           sections: Object.keys(sections),
@@ -3431,7 +3532,8 @@ async function generateAiSections(promptPayload, order = null) {
   const totalLength = requiredSections.reduce((sum, key) => sum + countVisibleChars(finalSections[key] || ''), 0);
   console.log('[KIE AI FINAL] merged section keys', JSON.stringify(Object.keys(finalSections)));
   console.log('[KIE AI FINAL] total length', JSON.stringify({ totalLength, requiredSections }));
-  const finalValidation = validateAiSections(finalSections, promptPayload, {
+  const processedFinalSections = postProcessReportSections(promptPayload, finalSections);
+  const finalValidation = validateAiSections(processedFinalSections, promptPayload, {
     rawLength: totalLength,
     detectedFormat: 'merged_sections',
     sourcePath: 'batch_merge'
@@ -3447,7 +3549,7 @@ async function generateAiSections(promptPayload, order = null) {
       failedSections: finalValidation.failedSections || []
     });
   }
-  return finalSections;
+  return processedFinalSections;
 }
 
 
@@ -3476,7 +3578,7 @@ function fallbackAiSections(promptPayload) {
   if (hasCompatibility) {
     sections['관계/궁합 해석'] = `두 사람의 궁합은 단순한 좋고 나쁨보다 서로가 관계에서 어떤 안정감을 원하는지, 갈등이 생겼을 때 어떻게 회복하는지가 핵심입니다. 서로의 속도와 표현 방식이 다를 수 있으므로, 감정을 추측하기보다 말과 행동의 기준을 맞추는 과정이 중요합니다. 상대에 대한 기대가 커질수록 실망도 커질 수 있으니, 관계의 방향을 천천히 확인하면서 신뢰를 쌓아가세요.`;
   }
-  return sections;
+  return postProcessReportSections(promptPayload, sections);
 }
 
 function extractResponsesText(parsed) {

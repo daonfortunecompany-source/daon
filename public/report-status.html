@@ -639,19 +639,14 @@
       receiptMetaBox.hidden = false;
       receiptMetaBox.innerHTML = [
         '<strong>리포트 접수 정보</strong>',
-        `<div>주문번호: <code>${data.orderId || '-'}</code></div>`,
-        `<div>예상 안내: ${expected}</div>`,
-        '<div class="lookup-note">이 화면은 현재 요청 흐름에서만 사용되며, 리포트는 서버에 저장되지 않습니다.</div>'
+        `<div>예상 안내: ${expected}</div>`
       ].join('');
     }
 
     function buildReportText(data) {
       const sections = data.reportSections || {};
       const blocks = [
-        '다온 사주 리포트',
-        '',
-        '이 리포트는 개인정보 보호를 위해 서버에 저장되지 않습니다.',
-        '페이지를 닫거나 새로고침하면 다시 열람할 수 없으니, 전체 내용을 복사해 보관해 주세요.',
+        '프리미엄 사주 리포트',
         ''
       ];
       REPORT_SECTION_ORDER.forEach((title) => {
@@ -659,7 +654,6 @@
         if (!body) return;
         blocks.push(title, body, '');
       });
-      blocks.push('이 리포트는 서버에 저장되지 않습니다. 페이지를 닫기 전에 반드시 전체 내용을 복사해 보관해 주세요.');
       return blocks.join('\n');
     }
 
@@ -727,15 +721,17 @@
       timelinePanel.hidden = true;
       actions.hidden = true;
       detailBox.hidden = true;
-      if (pageTitle) pageTitle.textContent = '다온 사주 리포트';
-      if (statusSub) statusSub.textContent = '리포트는 현재 화면에서만 확인할 수 있습니다. 페이지를 닫거나 새로고침하기 전에 반드시 전체 내용을 복사해 보관해 주세요.';
+      if (pageTitle) pageTitle.textContent = '프리미엄 사주 리포트';
+      document.title = '프리미엄 사주 리포트 | 다온사주';
+      if (statusSub) {
+        statusSub.textContent = '';
+        statusSub.hidden = true;
+      }
       reportView.innerHTML = `
-        <div class="report-notice">이 리포트는 개인정보 보호를 위해 서버에 저장되지 않습니다.<br />페이지를 닫거나 새로고침하면 다시 열람할 수 없으니, 하단의 ‘전체 내용 복사하기’ 버튼을 눌러 내용을 보관해 주세요.</div>
         ${cards}
-        <div class="report-notice">이 리포트는 서버에 저장되지 않습니다.<br />페이지를 닫기 전에 반드시 전체 내용을 복사해 보관해 주세요.</div>
         <div class="report-copy-wrap">
+          <div class="copy-feedback" id="copyFeedback">리포트 내용을 보관하려면 하단의 전체 내용 복사하기 버튼을 눌러 주세요.</div>
           <button class="report-copy-btn" id="copyReportButton" type="button">전체 내용 복사하기</button>
-          <div class="copy-feedback" id="copyFeedback">메모장, 카카오톡 나에게 보내기, 이메일 등에 붙여넣어 보관해 주세요.</div>
         </div>
       `;
       const copyButton = document.getElementById('copyReportButton');
@@ -745,11 +741,11 @@
       copyButton?.addEventListener('click', async () => {
         try {
           await copyReportText(reportText);
-          if (copyFeedback) copyFeedback.textContent = '리포트 전체 내용이 복사되었습니다. 메모장, 카카오톡 나에게 보내기, 이메일 등에 붙여넣어 보관해 주세요.';
-          showCopyToast('리포트 전체 내용이 복사되었습니다. 메모장, 카카오톡 나에게 보내기, 이메일 등에 붙여넣어 보관해 주세요.');
+          if (copyFeedback) copyFeedback.textContent = '리포트 전체 내용이 복사되었습니다. 필요한 곳에 붙여넣어 보관해 주세요.';
+          showCopyToast('리포트 전체 내용이 복사되었습니다. 필요한 곳에 붙여넣어 보관해 주세요.');
         } catch (error) {
-          if (copyFeedback) copyFeedback.textContent = '자동 복사에 실패했습니다. 내용을 직접 선택하여 복사해 주세요.';
-          showCopyToast('자동 복사에 실패했습니다. 내용을 직접 선택하여 복사해 주세요.', true);
+          if (copyFeedback) copyFeedback.textContent = '자동 복사에 실패했습니다. 내용을 직접 선택해 복사해 주세요.';
+          showCopyToast('자동 복사에 실패했습니다. 내용을 직접 선택해 복사해 주세요.', true);
         }
       });
     }
@@ -759,6 +755,7 @@
       const status = rawStatus === 'ready' ? 'completed' : rawStatus;
       const currentStep = data.currentStep || null;
       const progress = Number.isFinite(Number(data.progress)) ? Number(data.progress) : null;
+      if (statusSub) statusSub.hidden = false;
       const currentOrderId = data.orderId || activeOrderId || '';
       const cachedSections = data.reportSections || loadCompletedReport(currentOrderId);
       const hasRenderableSections = Boolean(cachedSections && Object.keys(cachedSections).length);
@@ -788,8 +785,8 @@
           ? '리포트 표시 중 문제가 발생했습니다. 페이지를 새로고침하지 말고 고객센터로 문의해 주세요.'
           : isCompleted
             ? (hasRenderableSections
-                ? '리포트 생성이 완료되었습니다. 현재 화면에서 전체 내용을 복사해 보관해 주세요.'
-                : '이 리포트는 서버에 저장되지 않아 다시 열람할 수 없습니다.')
+                ? '리포트 생성이 완료되었습니다.'
+                : '리포트 표시 중 문제가 발생했습니다. 고객센터로 문의해 주세요.')
             : status === 'failed'
               ? '리포트 생성 중 일시적인 문제가 발생했습니다. 결제는 정상 확인되었으나, 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도하거나 고객센터로 문의해 주세요.'
               : isQueued
@@ -839,8 +836,8 @@
         setStepState(stepGenerating, 'done');
         setStepState(stepDownload, 'pending');
       } else if (isCompleted) {
-        generationStep.textContent = hasRenderableSections ? '리포트 생성이 완료되었습니다.' : '리포트 생성은 완료되었지만, 이 화면에서는 다시 열람할 수 없습니다.';
-        downloadStep.textContent = hasRenderableSections ? '현재 화면 하단에서 전체 내용을 복사해 보관해 주세요.' : '페이지를 닫거나 새로고침하면 다시 열람할 수 없습니다.';
+        generationStep.textContent = hasRenderableSections ? '리포트 생성이 완료되었습니다.' : '리포트 생성은 완료되었지만 화면 표시를 다시 확인해 주세요.';
+        downloadStep.textContent = hasRenderableSections ? '전체 내용 복사하기 버튼으로 내용을 보관할 수 있습니다.' : '리포트 표시를 다시 확인해 주세요.';
         setStepState(stepGenerating, 'done');
         setStepState(stepDownload, 'done');
       } else if (status === 'failed') {
@@ -896,8 +893,8 @@
         ? '리포트 표시 중 문제가 발생했습니다. 페이지를 새로고침하지 말고 고객센터로 문의해 주세요.'
         : isCompleted
           ? (hasRenderableSections
-              ? '리포트 생성이 완료되었습니다. 현재 화면에서 전체 내용을 복사해 보관해 주세요.'
-              : '리포트는 서버에 저장되지 않아 다시 열람할 수 없습니다.')
+              ? '리포트 생성이 완료되었습니다.'
+              : '리포트 표시를 다시 확인해 주세요.')
           : status === 'failed'
             ? '리포트 제작 중 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해주세요.'
             : status === 'payment_cancelled'
