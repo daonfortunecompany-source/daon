@@ -499,11 +499,15 @@ async function generatePremiumReport(orderId) {
       throw error;
     }
 
-    updateOrderProgress(order, { progress: 92, currentStep: 'pdf', failedStep: null });
+    updateOrderProgress(order, { progress: 88, currentStep: 'kie_ai', failedStep: null });
     await saveOrder(order);
     const promptPayload = buildAiPromptPayload(order, apiSnapshots, warnings);
     const aiSections = await generateAiSections(promptPayload);
+
+    updateOrderProgress(order, { progress: 92, currentStep: 'pdf', failedStep: null });
+    await saveOrder(order);
     const pdfFilePath = await renderPremiumPdf(order, promptPayload, aiSections);
+    console.log('[PDF] generated', JSON.stringify({ orderId: order.id, pdfFilePath }));
 
     updateOrderProgress(order, { status: 'completed', progress: 100, currentStep: 'completed', failedStep: null });
     order.artifacts.pdfPath = pdfFilePath;
@@ -511,6 +515,7 @@ async function generatePremiumReport(orderId) {
     order.artifacts.promptPayload = promptPayload;
     order.logs.push(logLine('generation_completed', { pdfFilePath }));
     await saveOrder(order);
+    console.log('[ORDER] status completed', JSON.stringify({ orderId: order.id, status: order.status }));
   } catch (error) {
     const order = await readOrder(orderId);
     if (order) {
@@ -519,6 +524,7 @@ async function generatePremiumReport(orderId) {
       updateOrderProgress(order, { status: 'failed', progress, currentStep: failedStep, failedStep });
       order.logs.push(logLine('generation_failed', { failedStep, message: error.message }));
       await saveOrder(order);
+      console.log('[ORDER] status failed', JSON.stringify({ orderId: order.id, failedStep, progress }));
     }
     await appendLog('generation_failed', { orderId, failedStep: error.failedStep || 'generation', message: error.message });
   } finally {
@@ -789,6 +795,8 @@ function buildFailureMessage(failedStep) {
       return '리포트 생성 중 기간운 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
     case 'compatibility':
       return '궁합 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+    case 'kie_ai':
+      return '리포트 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
     case 'saju':
       return '리포트 생성 중 핵심 사주 해석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
     default:
@@ -1663,120 +1671,358 @@ function defaultTenGodDistribution(payload) {
   };
 }
 
-function buildAiPromptPayload(order, apiSnapshots, warnings) {
-  const now = new Date();
-  const baseline = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const mansaePillars = extractPillars(apiSnapshots.mansae || apiSnapshots.saju, order.applicant);
-  const sajuPillars = extractPillars(apiSnapshots.saju || apiSnapshots.mansae, order.applicant);
-  if ([mansaePillars.year, mansaePillars.month, mansaePillars.day, mansaePillars.hour].join('|') !== [sajuPillars.year, sajuPillars.month, sajuPillars.day, sajuPillars.hour].join('|')) {
-    warnings.push('만세력 API와 사주 API의 간지 표기가 일부 다르게 보여 확인 메모를 함께 남깁니다.');
-  }
+function buildRequiredAiSections(hasCompatibility) {
+  const sections = [
+    '핵심 요약','사주 원국 해석','대운','세운','월운','운성','신살,귀인','십성','재물운','직업운','애정운','자녀운','건강운','실천 조언','주의할 점','고민에 대한 조언'
+  ];
+  if (hasCompatibility) sections.push('관계/궁합 해석');
+  return sections;
+}
 
+function searchLooseValue(root, tokenGroups = []) {
+  const groups = tokenGroups.map((group) => Array.isArray(group) ? group : [group]).filter(Boolean);
+  const queue = [root];
+  let scanned = 0;
+  while (queue.length && scanned < 3000) {
+    const current = queue.shift();
+    scanned += 1;
+    if (!current || typeof current !== 'object') continue;
+    const entries = Array.isArray(current) ? current.map((value, index) => [String(index), value]) : Object.entries(current);
+    for (const [key, value] of entries) {
+      const lower = String(key || '').toLowerCase();
+      if (groups.some((group) => group.every((token) => lower.includes(String(token).toLowerCase())))) return value;
+      if (value && typeof value === 'object') queue.push(value);
+    }
+  }
+  return null;
+}
+
+function summarizeLooseValue(value, limit = 8) {
+  if (value == null) return null;
+  if (typeof value === 'string') return value.trim().slice(0, 1200);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) return value.slice(0, limit).map((item) => summarizeLooseValue(item, 4));
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [key, nested] of Object.entries(value).slice(0, limit)) {
+      out[key] = summarizeLooseValue(nested, 4);
+    }
+    return out;
+  }
+  return String(value).slice(0, 400);
+}
+
+function extractPeriodRows(periodRaw, mode = 'year') {
+  const rows = [];
+  const queue = [periodRaw];
+  let scanned = 0;
+  while (queue.length && scanned < 4000 && rows.length < 12) {
+    const current = queue.shift();
+    scanned += 1;
+    if (!current || typeof current !== 'object') continue;
+    if (Array.isArray(current)) {
+      current.forEach((item) => queue.push(item));
+      continue;
+    }
+    const keys = Object.keys(current);
+    const lowerKeys = keys.map((key) => key.toLowerCase());
+    const hasYear = lowerKeys.some((key) => key.includes('year') || key.includes('연'));
+    const hasMonth = lowerKeys.some((key) => key.includes('month') || key.includes('월'));
+    const hasScore = lowerKeys.some((key) => key.includes('score') || key.includes('point') || key.includes('운세') || key.includes('summary') || key.includes('요약'));
+    const valid = mode === 'month' ? hasYear && hasMonth : hasYear;
+    if (valid && hasScore) {
+      const row = {
+        year: String(findLooseValue(current, ['year','연도']) || findLooseValue(current, ['year']) || '').trim(),
+        month: String(findLooseValue(current, ['month','월']) || findLooseValue(current, ['month']) || '').trim(),
+        score: String(findLooseValue(current, ['score']) || findLooseValue(current, ['point']) || '').trim(),
+        ganji: String(findLooseValue(current, ['ganji']) || findLooseValue(current, ['간지']) || findLooseValue(current, ['label']) || '').trim(),
+        summary: String(findLooseValue(current, ['summary']) || findLooseValue(current, ['요약']) || findLooseValue(current, ['comment']) || findLooseValue(current, ['desc']) || '').trim()
+      };
+      if (row.year || row.summary || row.ganji || row.score) rows.push(row);
+    }
+    for (const value of Object.values(current)) {
+      if (value && typeof value === 'object') queue.push(value);
+    }
+  }
+  return rows.slice(0, mode === 'month' ? 6 : 5);
+}
+
+function collectPromptContext(order, apiSnapshots, warnings) {
+  const apiBase = apiSnapshots.saju || apiSnapshots.mansae || {};
+  const pillars = extractPillars(apiBase, order.applicant);
+  const pillarDetails = buildPillarDetails(pillars, apiBase);
+  const fiveElements = extractDistribution(apiBase, ['오행', 'five', 'element']) || {};
+  const tenGods = extractDistribution(apiBase, ['십성', 'tenGod', 'ten']) || {};
+  const hasCompatibility = Boolean(apiSnapshots.compatibility && order.partner?.name);
   return {
-    baselineDate: baseline,
-    applicant: order.applicant,
-    partner: order.partner,
-    compatibilityRequested: order.compatibilityRequested,
-    mansaeInfo: apiSnapshots.mansae || null,
-    futureFiveYears: apiSnapshots.period || null,
-    futureSixMonths: apiSnapshots.period || null,
-    compatibilityReference: apiSnapshots.compatibility || null,
-    apiSnapshots,
-    sectionsRequired: [
-      '핵심 요약','사주 원국 해석','대운','세운','월운','운성','신살, 귀인','십성','재물운','직업운','애정운','자녀운','건강운','실천 조언','주의할 점','고민에 대한 조언'
-    ].concat(apiSnapshots.compatibility ? ['궁합 참고 해석'] : [])
+    basicInfo: {
+      name: order.applicant?.name || '',
+      gender: order.applicant?.gender || '',
+      birthYear: order.applicant?.birthYear || '',
+      birthMonth: order.applicant?.birthMonth || '',
+      birthDay: order.applicant?.birthDay || '',
+      birthTime: order.applicant?.birthTime || '',
+      calendarType: formatCalendarTypeForLucky(order.applicant?.calendarType || 'solar'),
+      isLeapMonth: order.applicant?.isLeapMonth === true,
+      baselineDate: `${CONFIG.lucky.defaultPeriodYear}-${String(CONFIG.lucky.defaultPeriodMonth).padStart(2, '0')}-${String(CONFIG.lucky.defaultPeriodDay).padStart(2, '0')}`,
+      concern: order.applicant?.concern || ''
+    },
+    partnerInfo: order.partner ? {
+      name: order.partner?.name || '',
+      gender: order.partner?.gender || '',
+      birthYear: order.partner?.birthYear || '',
+      birthMonth: order.partner?.birthMonth || '',
+      birthDay: order.partner?.birthDay || '',
+      birthTime: order.partner?.birthTime || '',
+      calendarType: formatCalendarTypeForLucky(order.partner?.calendarType || 'solar'),
+      isLeapMonth: order.partner?.isLeapMonth === true,
+      memo: order.partner?.memo || ''
+    } : null,
+    pillars,
+    pillarDetails,
+    fiveElements,
+    tenGods,
+    strength: summarizeLooseValue(searchLooseValue(apiSnapshots.saju, [['신강'], ['신약'], ['strength'], ['강약']]), 10),
+    yongsin: summarizeLooseValue(searchLooseValue(apiSnapshots.saju, [['용신'], ['희신'], ['기신'], ['yong']]), 10),
+    johu: summarizeLooseValue(searchLooseValue(apiSnapshots.saju, [['조후'], ['johu'], ['조화']]), 10),
+    daeun: summarizeLooseValue(searchLooseValue(apiSnapshots.saju, [['daeun'], ['대운']]), 12),
+    futureFiveYears: extractPeriodRows(apiSnapshots.period, 'year'),
+    futureSixMonths: extractPeriodRows(apiSnapshots.period, 'month'),
+    compatibility: summarizeLooseValue(apiSnapshots.compatibility, 14),
+    internalWarnings: Array.isArray(warnings) ? warnings.slice(0, 8) : [],
+    hasCompatibility
   };
+}
+
+function buildAiPromptPayload(order, apiSnapshots, warnings) {
+  const promptContext = collectPromptContext(order, apiSnapshots, warnings);
+  return {
+    basicInfo: promptContext.basicInfo,
+    partnerInfo: promptContext.partnerInfo,
+    chartData: {
+      pillars: promptContext.pillars,
+      pillarDetails: promptContext.pillarDetails,
+      fiveElements: promptContext.fiveElements,
+      tenGods: promptContext.tenGods,
+      strength: promptContext.strength,
+      yongsin: promptContext.yongsin,
+      johu: promptContext.johu,
+      daeun: promptContext.daeun,
+      futureFiveYears: promptContext.futureFiveYears,
+      futureSixMonths: promptContext.futureSixMonths,
+      compatibility: promptContext.compatibility
+    },
+    rawBundle: {
+      mansae: apiSnapshots.mansae || null,
+      saju: apiSnapshots.saju || null,
+      period: apiSnapshots.period || null,
+      compatibility: apiSnapshots.compatibility || null
+    },
+    internalReference: {
+      consistencyWarnings: promptContext.internalWarnings,
+      compatibilityRequested: Boolean(order.compatibilityRequested),
+      requiredSections: buildRequiredAiSections(promptContext.hasCompatibility)
+    }
+  };
+}
+
+function splitParagraphs(text) {
+  return String(text || '').split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+}
+
+function countMeaningfulParagraphs(text) {
+  return splitParagraphs(text).length;
+}
+
+function countVisibleChars(text) {
+  return String(text || '').replace(/\s+/g, '').length;
+}
+
+function collectConcernKeywords(concern) {
+  const stop = new Set(['현재','고민','또는','상담받고','싶은','내용','궁금해요','궁금합니다','잘','될까요','어떻게','준비중인데','준비중','그리고','대한','관련','온라인']);
+  return Array.from(new Set(String(concern || '')
+    .replace(/[^0-9A-Za-z가-힣\s]/g, ' ')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2 && !stop.has(token)))).slice(0, 8);
+}
+
+function normalizeAiSections(rawSections, requiredSections) {
+  const aliases = {
+    '신살, 귀인': '신살,귀인',
+    '궁합 참고 해석': '관계/궁합 해석'
+  };
+  if (!rawSections || typeof rawSections !== 'object' || Array.isArray(rawSections)) return null;
+  const normalized = {};
+  for (const [key, value] of Object.entries(rawSections)) {
+    const normalizedKey = aliases[key] || key.trim();
+    normalized[normalizedKey] = typeof value === 'string' ? value.trim() : JSON.stringify(value);
+  }
+  const output = {};
+  requiredSections.forEach((key) => {
+    output[key] = typeof normalized[key] === 'string' ? normalized[key].trim() : '';
+  });
+  return output;
+}
+
+function detectRepeatedSentences(sections) {
+  const map = new Map();
+  for (const value of Object.values(sections || {})) {
+    const sentences = String(value || '').split(/(?<=[.!?다요])\s+/).map((item) => item.replace(/\s+/g, ' ').trim()).filter((item) => item.length >= 18);
+    for (const sentence of sentences) {
+      map.set(sentence, (map.get(sentence) || 0) + 1);
+    }
+  }
+  return Array.from(map.entries()).filter(([, count]) => count >= 3).map(([sentence, count]) => ({ sentence, count }));
+}
+
+function validateAiSections(sections, promptPayload) {
+  const requiredSections = buildRequiredAiSections(Boolean(promptPayload?.partnerInfo?.name && promptPayload?.rawBundle?.compatibility));
+  const errors = [];
+  const paragraphCounts = {};
+  const sectionLengths = {};
+  const banned = /(api|json|system|model|data structure|raw|debug|missingfields|requiredfields|계산 확인 메모|fallback|prompt|engine|content-type)/i;
+  for (const key of requiredSections) {
+    const text = String(sections?.[key] || '').trim();
+    const paragraphs = countMeaningfulParagraphs(text);
+    const length = countVisibleChars(text);
+    paragraphCounts[key] = paragraphs;
+    sectionLengths[key] = length;
+    if (!text) errors.push(`${key} 누락`);
+    const minParagraphs = key === '고민에 대한 조언' ? 5 : key === '관계/궁합 해석' ? 5 : 3;
+    const minLength = key === '고민에 대한 조언' ? 900 : key === '관계/궁합 해석' ? 900 : 260;
+    if (text && paragraphs < minParagraphs) errors.push(`${key} 문단 수 부족`);
+    if (text && length < minLength) errors.push(`${key} 분량 부족`);
+    if (text && banned.test(text)) errors.push(`${key} 개발용 문구 포함`);
+  }
+  const concern = String(promptPayload?.basicInfo?.concern || '').trim();
+  if (concern) {
+    const concernText = String(sections?.['고민에 대한 조언'] || '');
+    const keywords = collectConcernKeywords(concern);
+    if (keywords.length && !keywords.some((token) => concernText.includes(token))) {
+      errors.push('고민에 대한 조언이 사용자 질문에 직접 답하지 않음');
+    }
+    if (/온라인\s*사주\s*사업/.test(concern)) {
+      const checks = [
+        /(사업|창업|운영)/, /(상담형|콘텐츠형|리포트형|브랜딩형)/, /(수익|매출|수익화)/,
+        /(고객|응대|소통)/, /(시작|주의점|리스크)/, /(혼자|협업|파트너)/,
+        /(2026|타이밍|시기)/, /(3개월)/, /(6개월)/, /(1년)/, /(실패 가능성|실패를 줄|리스크를 줄)/, /(최종 결론|결론)/
+      ];
+      const passed = checks.filter((regex) => regex.test(concernText)).length;
+      if (passed < 10) errors.push('온라인 사주 사업 질문 필수 항목 부족');
+    }
+  }
+  if (promptPayload?.partnerInfo?.name && promptPayload?.rawBundle?.compatibility) {
+    const relationText = String(sections?.['관계/궁합 해석'] || '');
+    const relationChecks = [/(일간)/, /(오행)/, /(십성)/, /(감정)/, /(소통)/, /(갈등)/, /(회복)/, /(협업|사업)/, /(금전)/, /(종합|결론)/];
+    if (relationChecks.filter((regex) => regex.test(relationText)).length < 7) {
+      errors.push('관계/궁합 해석 핵심 포인트 부족');
+    }
+  }
+  const repeated = detectRepeatedSentences(sections);
+  if (repeated.length) errors.push('같은 문장 반복 과다');
+  return { ok: errors.length === 0, errors, paragraphCounts, sectionLengths, repeated: repeated.slice(0, 6) };
+}
+
+function buildConcernSpecificInstruction(concern, hasCompatibility) {
+  const lines = [
+    '각 섹션은 최소 3문단 이상 작성하고, 각 섹션의 첫 문단은 짧은 핵심 설명으로 시작하세요.',
+    '추상적인 일반론 대신 실제 상담 장면이 떠오르는 구체 예시를 포함하세요.',
+    '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 자료를 실제 해석 문장에 직접 연결하세요.',
+    '고민에 대한 조언은 최소 5문단 이상 작성하고 사용자의 질문에 직접 답하세요.'
+  ];
+  if (hasCompatibility) lines.push('관계/궁합 해석은 최소 5문단 이상 작성하고, 두 사람의 원국과 compatibility 자료를 함께 반영하세요.');
+  if (/온라인\s*사주\s*사업/.test(String(concern || ''))) {
+    lines.push('사용자 질문이 온라인 사주 사업에 관한 경우, 온라인 사주 사업과 사주 구조의 적합성, 상담형/콘텐츠형/리포트형/브랜딩형 적합도, 수익화 가능성, 고객 응대 스타일, 사업 시작 시 주의점, 혼자 운영 vs 협업, 2026년 기준 실행 타이밍, 3개월 실행 계획, 6개월 실행 계획, 1년 운영 전략, 실패 가능성을 줄이는 조건, 최종 결론을 반드시 모두 포함하세요.');
+  }
+  return lines.join(' ');
 }
 
 async function generateAiSections(promptPayload) {
   if (!CONFIG.ai.apiKey) {
-    if (CONFIG.allowLocalFallback) return fallbackAiSections(promptPayload);
-    throw new Error('AI API 키가 설정되지 않았습니다.');
+    const error = new Error('KIE AI API 키가 설정되지 않았습니다.');
+    error.failedStep = 'kie_ai';
+    error.progress = 88;
+    throw error;
   }
-  const schemaGuide = {
-    '핵심 요약': 'string',
-    '사주 원국 해석': 'string',
-    '대운': 'string',
-    '세운': 'string',
-    '월운': 'string',
-    '운성': 'string',
-    '신살, 귀인': 'string',
-    '십성': 'string',
-    '재물운': 'string',
-    '직업운': 'string',
-    '애정운': 'string',
-    '자녀운': 'string',
-    '건강운': 'string',
-    '실천 조언': 'string',
-    '주의할 점': 'string',
-    '고민에 대한 조언': 'string',
-    '궁합 참고 해석': 'string (optional)'
-  };
-  const systemPrompt = [
-    '당신은 한국어 전문 사주 리포트 작성자입니다.',
-    '반드시 한국어로만 작성합니다.',
-    '실제 상담자가 사람을 마주 보고 설명하듯 자연스럽게 작성합니다.',
-    'API, 데이터, JSON, 시스템, 프롬프트, 모델, 알고리즘, 엔진 같은 기술 표현은 결과물에 절대 노출하지 않습니다.',
-    '광고성 멘트나 면책문 없이 본문 중심으로 작성합니다.',
-    '핵심 요약, 재물운, 직업운, 애정운, 건강운, 고민에 대한 조언은 특히 상세하게 작성합니다.',
-    '대운은 1세부터 100세까지 흐름이 이어지도록 설명합니다.',
-    '세운은 기준 시점 다음 해부터 5년을 해마다 나누어 설명합니다.',
-    '월운은 기준 시점 다음 달부터 6개월을 한 달씩 나누어 설명합니다.',
-    '실제 생활 예시를 포함하고, 조심할 부분도 부드럽지만 분명하게 설명합니다.',
-    '아래 스키마 키를 그대로 사용하는 JSON 객체만 반환합니다.'
-  ].join(' ');
+  const requiredSections = buildRequiredAiSections(Boolean(promptPayload?.partnerInfo?.name && promptPayload?.rawBundle?.compatibility));
+  const schemaGuide = Object.fromEntries(requiredSections.map((key) => [key, 'string']));
+  const concernInstruction = buildConcernSpecificInstruction(promptPayload?.basicInfo?.concern || '', requiredSections.includes('관계/궁합 해석'));
+  let retryReason = '';
+  let lastError = null;
 
-  const userPrompt = {
-    requiredOutputSchema: schemaGuide,
-    input: promptPayload
-  };
-
-  const endpoint = `${CONFIG.ai.baseUrl}${CONFIG.ai.path}`;
-  const style = CONFIG.ai.style || (endpoint.includes('/responses') ? 'responses' : 'chat_completions');
-  const requestBody = style === 'responses'
-    ? {
-        model: CONFIG.ai.model,
-        stream: false,
-        reasoning: { effort: 'medium' },
-        input: [
-          { role: 'system', content: [{ type: 'input_text', text: systemPrompt }] },
-          { role: 'user', content: [{ type: 'input_text', text: JSON.stringify(userPrompt) }] }
-        ]
-      }
-    : {
-        model: CONFIG.ai.model,
-        temperature: CONFIG.ai.temperature,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: JSON.stringify(userPrompt) }
-        ]
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      console.log('[KIE AI] request start', JSON.stringify({ attempt, model: CONFIG.ai.model }));
+      console.log('[KIE AI] input bundle keys', JSON.stringify({
+        basicInfo: Object.keys(promptPayload?.basicInfo || {}),
+        partnerInfo: Object.keys(promptPayload?.partnerInfo || {}),
+        chartData: Object.keys(promptPayload?.chartData || {}),
+        rawBundle: Object.keys(promptPayload?.rawBundle || {}),
+        requiredSections
+      }));
+      const systemPrompt = [
+        '당신은 숙련된 한국어 사주 해석 상담사입니다.',
+        '반드시 한국어로만 작성하세요.',
+        'API, JSON, 시스템, 모델, 데이터 구조 같은 기술 용어는 절대 드러내지 마세요.',
+        '문체는 상담형으로 자연스럽고 친절하게 작성하세요.',
+        '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 데이터를 근거로 프리미엄 리포트 수준의 상세 해석을 작성하세요.',
+        '반드시 JSON 객체만 반환하고, 스키마 키 이름을 한 글자도 바꾸지 마세요.',
+        '각 섹션은 최소 3문단 이상, 관계/궁합 해석과 고민에 대한 조언은 최소 5문단 이상 작성하세요.',
+        '같은 문장을 반복하지 말고, 실제 삶의 장면이 떠오르는 예시와 실행 조언을 포함하세요.',
+        concernInstruction,
+        retryReason ? `이전 응답 보완 지시: ${retryReason}` : ''
+      ].filter(Boolean).join(' ');
+      const userPrompt = {
+        requiredOutputSchema: schemaGuide,
+        requiredSectionOrder: requiredSections,
+        promptPayload
       };
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${CONFIG.ai.apiKey}`
-    },
-    body: JSON.stringify(requestBody)
-  });
-  const raw = await response.text();
-  if (!response.ok) {
-    if (CONFIG.allowLocalFallback) return fallbackAiSections(promptPayload);
-    throw new Error(`AI 호출 실패: ${response.status}`);
+      const endpoint = `${CONFIG.ai.baseUrl}${CONFIG.ai.path}`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.ai.apiKey}` },
+        body: JSON.stringify({
+          model: CONFIG.ai.model,
+          temperature: CONFIG.ai.temperature,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: JSON.stringify(userPrompt) }
+          ]
+        })
+      });
+      const raw = await response.text();
+      console.log('[KIE AI] response received', JSON.stringify({ attempt, status: response.status, rawLength: raw.length }));
+      if (!response.ok) throw new Error(`KIE AI 호출 실패: ${response.status}`);
+      const parsed = safeJsonParse(raw);
+      const content = parsed?.choices?.[0]?.message?.content || parsed?.output_text || raw;
+      const cleaned = typeof content === 'string' ? stripCodeFences(content) : JSON.stringify(content || {});
+      const normalized = normalizeAiSections(safeJsonParse(cleaned), requiredSections);
+      if (!normalized) throw new Error('KIE AI 응답을 JSON 섹션 맵으로 해석하지 못했습니다.');
+      const validation = validateAiSections(normalized, promptPayload);
+      console.log('[KIE AI] section keys', JSON.stringify(Object.keys(normalized)));
+      console.log('[KIE AI] section lengths', JSON.stringify(validation.sectionLengths));
+      console.log('[KIE AI] validation result', JSON.stringify(validation));
+      if (validation.ok) return normalized;
+      retryReason = validation.errors.slice(0, 8).join(' | ');
+      if (attempt < 2) {
+        console.log('[KIE AI] retry start', JSON.stringify({ reason: retryReason }));
+        continue;
+      }
+      throw new Error('KIE AI section validation failed');
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) {
+        console.log('[KIE AI] retry start', JSON.stringify({ reason: error.message || 'unknown' }));
+        continue;
+      }
+    }
   }
-  const parsed = safeJsonParse(raw);
-  const content = style === 'responses'
-    ? extractResponsesText(parsed)
-    : parsed?.choices?.[0]?.message?.content || parsed?.output_text || raw;
-  try {
-    const cleaned = typeof content === 'string' ? stripCodeFences(content) : content;
-    return typeof cleaned === 'string' ? safeJsonParse(cleaned) : cleaned;
-  } catch {
-    if (CONFIG.allowLocalFallback) return fallbackAiSections(promptPayload);
-    throw new Error('AI 응답을 JSON으로 해석하지 못했습니다.');
-  }
+  lastError = lastError || new Error('KIE AI section generation failed');
+  lastError.failedStep = 'kie_ai';
+  lastError.progress = 88;
+  throw lastError;
 }
 
 function fallbackAiSections(promptPayload) {
@@ -1936,16 +2182,7 @@ async function renderPremiumPdf(order, promptPayload, sections) {
     sectionTitle('사주팔자 원국 표');
     drawPillarTable(premiumSections.pillarDetails);
 
-    const orderedSections = [
-      ['오행 분석', premiumSections.ohaengAnalysis],
-      ['십성 분석', premiumSections.sipseongAnalysis],
-      ['핵심 성향', premiumSections.coreAnalysis],
-      ['일/재물/사업운', premiumSections.workMoneyAnalysis],
-      ['관계/궁합', premiumSections.relationshipAnalysis],
-      ['기간운/시기별 조언', premiumSections.periodAnalysis],
-      ['맞춤 답변', premiumSections.customAnswer],
-      ['종합 조언', premiumSections.finalAdvice]
-    ];
+    const orderedSections = premiumSections.orderedSections || [];
 
     for (const [title, body] of orderedSections) {
       sectionTitle(title);
@@ -1960,50 +2197,63 @@ async function renderPremiumPdf(order, promptPayload, sections) {
   return filePath;
 }
 
-function buildPremiumPdfSections(order, promptPayload, aiSections) {
-  const fallbackSections = fallbackAiSections(promptPayload);
-  const mergedSections = { ...fallbackSections, ...(aiSections || {}) };
-  const apiBase = promptPayload.apiSnapshots?.saju || promptPayload.apiSnapshots?.mansae || {};
-  const pillars = extractPillars(apiBase, order.applicant);
-  const pillarDetails = buildPillarDetails(pillars, apiBase);
-  const fiveElements = extractDistribution(apiBase, ['오행', 'five', 'element']) || defaultElementDistribution(order.applicant);
-  const tenGods = extractDistribution(apiBase, ['십성', 'tenGod', 'ten']) || defaultTenGodDistribution(order.applicant);
-  const hasCompatibility = Boolean(promptPayload.apiSnapshots?.compatibility && order.partner?.name);
+function formatLooseProfileText(title, value) {
+  if (value == null || value === '') return '';
+  if (typeof value === 'string') return `${title}: ${value}`;
+  if (Array.isArray(value)) return `${title}:\n${value.map((item) => `- ${typeof item === 'string' ? item : JSON.stringify(item)}`).join('\n')}`;
+  return `${title}:\n${Object.entries(value).map(([key, nested]) => `- ${key}: ${typeof nested === 'string' ? nested : JSON.stringify(nested)}`).join('\n')}`;
+}
 
-  return {
-    pillarDetails,
-    ohaengAnalysis: [
-      buildDistributionSummary('오행', fiveElements),
-      mergedSections['사주 원국 해석']
-    ].filter(Boolean).join('\n\n'),
-    sipseongAnalysis: [
-      buildDistributionSummary('십성', tenGods),
-      mergedSections['십성']
-    ].filter(Boolean).join('\n\n'),
-    coreAnalysis: [
-      mergedSections['핵심 요약'],
-      mergedSections['사주 원국 해석']
-    ].filter(Boolean).join('\n\n'),
-    workMoneyAnalysis: [
-      mergedSections['재물운'],
-      mergedSections['직업운']
-    ].filter(Boolean).join('\n\n'),
-    relationshipAnalysis: [
-      mergedSections['애정운'],
-      hasCompatibility ? mergedSections['궁합 참고 해석'] : '관계에서는 감정의 속도와 생활 리듬을 맞추는 것이 중요합니다. 상대와의 기대치를 미리 조율할수록 안정감이 커집니다.'
-    ].filter(Boolean).join('\n\n'),
-    periodAnalysis: [
-      mergedSections['대운'],
-      mergedSections['세운'],
-      mergedSections['월운']
-    ].filter(Boolean).join('\n\n'),
-    customAnswer: mergedSections['고민에 대한 조언'] || mergedSections['실천 조언'],
-    finalAdvice: [
-      mergedSections['실천 조언'],
-      mergedSections['주의할 점'],
-      mergedSections['건강운']
-    ].filter(Boolean).join('\n\n')
-  };
+function buildTimedFlowText(rows, label) {
+  if (!Array.isArray(rows) || !rows.length) return `${label} 자료는 실제 API 결과를 기준으로 종합 해석에 반영되었습니다.`;
+  return rows.map((row, index) => {
+    const heading = row.month ? `${row.year || '-'}년 ${row.month}월` : `${row.year || index + 1}년`;
+    const detail = [row.ganji || '', row.score ? `점수 ${row.score}` : '', row.summary || ''].filter(Boolean).join(' / ');
+    return `${heading} | ${detail}`;
+  }).join('\n');
+}
+
+function buildDaeunText(daeun) {
+  if (!daeun) return '대운 자료는 원국과 함께 종합 해석에 반영되었습니다.';
+  if (Array.isArray(daeun)) {
+    return daeun.slice(0, 10).map((item) => {
+      if (typeof item === 'string') return `- ${item}`;
+      const span = [item.startAge || item.start || item.age || '', item.endAge || item.end || ''].filter(Boolean).join('~');
+      const title = item.label || item.name || item.ganji || item.period || '';
+      const theme = item.theme || item.summary || item.description || '';
+      return `- ${span ? span + '세' : '흐름'} | ${title} ${theme}`.trim();
+    }).join('\n');
+  }
+  return formatLooseProfileText('대운 핵심', daeun);
+}
+
+function buildSupportProfileText(chartData) {
+  return [
+    formatLooseProfileText('강약', chartData?.strength),
+    formatLooseProfileText('용신/희신/기신', chartData?.yongsin),
+    formatLooseProfileText('조후', chartData?.johu)
+  ].filter(Boolean).join('\n\n');
+}
+
+function buildPremiumPdfSections(order, promptPayload, aiSections) {
+  const apiBase = promptPayload?.rawBundle?.saju || promptPayload?.rawBundle?.mansae || {};
+  const pillarDetails = promptPayload?.chartData?.pillarDetails || buildPillarDetails(extractPillars(apiBase, order.applicant), apiBase);
+  const fiveElements = promptPayload?.chartData?.fiveElements || extractDistribution(apiBase, ['오행', 'five', 'element']) || defaultElementDistribution(order.applicant);
+  const tenGods = promptPayload?.chartData?.tenGods || extractDistribution(apiBase, ['십성', 'tenGod', 'ten']) || defaultTenGodDistribution(order.applicant);
+  const requiredSections = buildRequiredAiSections(Boolean(promptPayload?.partnerInfo?.name && promptPayload?.rawBundle?.compatibility));
+  const orderedSections = [
+    ['오행 분포', [buildDistributionSummary('오행', fiveElements), formatLooseProfileText('원국 핵심', promptPayload?.chartData?.pillars)].filter(Boolean).join('\n\n')],
+    ['십성 분포', [buildDistributionSummary('십성', tenGods), formatLooseProfileText('십성 분포 상세', tenGods)].filter(Boolean).join('\n\n')],
+    ['용신/희신/기신', buildSupportProfileText(promptPayload?.chartData || {})],
+    ['대운 표', buildDaeunText(promptPayload?.chartData?.daeun)],
+    ['세운 흐름', buildTimedFlowText(promptPayload?.chartData?.futureFiveYears, '세운')],
+    ['월운 흐름', buildTimedFlowText(promptPayload?.chartData?.futureSixMonths, '월운')],
+    ...requiredSections.map((title) => [title, aiSections?.[title] || '']),
+    ['종합 마무리', [aiSections?.['실천 조언'] || '', aiSections?.['주의할 점'] || '', aiSections?.['건강운'] || ''].filter(Boolean).join('\n\n')]
+  ].filter(([, body]) => String(body || '').trim());
+  console.log('[PDF SECTION LENGTHS]');
+  console.log(JSON.stringify(Object.fromEntries(orderedSections.map(([title, body]) => [title, countVisibleChars(body)]))));
+  return { pillarDetails, orderedSections };
 }
 
 function buildDistributionSummary(label, valueMap) {
@@ -2017,7 +2267,7 @@ function buildDistributionSummary(label, valueMap) {
 }
 
 function sanitizeCustomerFacingText(text) {
-  const blocked = /(계산 확인 메모|saju api|period api|compatibility api|requiredfields|missingfields|content-type|charset|raw json error|raw json|debug|fallback|mock|source|api 400)/i;
+  const blocked = /(계산 확인 메모|saju api|period api|compatibility api|kie ai|requiredfields|missingfields|content-type|charset|raw json error|raw json|debug|fallback|mock|source|api 400|json|system|model|prompt|engine|raw bundle)/i;
   const parts = String(text || '')
     .split(/\n+/)
     .map((line) => line.trim())
