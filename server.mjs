@@ -66,7 +66,7 @@ const CONFIG = {
     singlePrice: Number(process.env.REPORT_PRICE_SINGLE || 18900),
     compatibilityPrice: Number(process.env.REPORT_PRICE_COMPATIBILITY || 36000),
     singleName: process.env.REPORT_PRODUCT_SINGLE || '프리미엄 사주 리포트',
-    compatibilityName: process.env.REPORT_PRODUCT_COMPATIBILITY || '프리미엄 사주 리포트 (2인,궁합포함)'
+    compatibilityName: process.env.REPORT_PRODUCT_COMPATIBILITY || '2인 사주(궁합 무료 진행)'
   },
   allowLocalFallback: ALLOW_LOCAL_FALLBACK
 };
@@ -467,6 +467,12 @@ async function generatePremiumReport(orderId) {
       console.log('[COMPATIBILITY API] payload check:', JSON.stringify({
         hasPerson1: Boolean(compatibilityPayload.person1),
         hasPerson2: Boolean(compatibilityPayload.person2),
+        person1HasBirthYear: Boolean(compatibilityPayload.person1?.birthYear),
+        person1HasBirthMonth: Boolean(compatibilityPayload.person1?.birthMonth),
+        person1HasBirthDay: Boolean(compatibilityPayload.person1?.birthDay),
+        person2HasBirthYear: Boolean(compatibilityPayload.person2?.birthYear),
+        person2HasBirthMonth: Boolean(compatibilityPayload.person2?.birthMonth),
+        person2HasBirthDay: Boolean(compatibilityPayload.person2?.birthDay),
         person1Keys: Object.keys(compatibilityPayload.person1 || {}),
         person2Keys: Object.keys(compatibilityPayload.person2 || {})
       }));
@@ -687,11 +693,11 @@ async function createPaymentRequest(order) {
     shopname: CONFIG.payapp.shopname,
     goodname: order.product.name,
     price: String(order.product.price),
-    recvphone: order.applicant.phone,
+    recvphone: order.applicant.phone || '',
     feedbackurl: `${BASE_URL}${CONFIG.payapp.feedbackPath}`,
     returnurl: `${BASE_URL}${CONFIG.payapp.returnPath}?order=${encodeURIComponent(order.id)}`,
     var1: order.id,
-    var2: order.applicant.email
+    var2: order.applicant.email || ''
   });
 
   const response = await fetch(CONFIG.payapp.apiUrl, {
@@ -782,7 +788,7 @@ function buildFailureMessage(failedStep) {
     case 'period':
       return '리포트 생성 중 기간운 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
     case 'compatibility':
-      return '리포트 생성 중 궁합 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      return '궁합 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
     case 'saju':
       return '리포트 생성 중 핵심 사주 해석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
     default:
@@ -844,7 +850,7 @@ function normalizeApplicant(raw, isPartner = false) {
     birthTimeUnknown,
     calendarType: normalizeCalendarType(raw.calendarType || raw.calendar || 'solar'),
     isLeapMonth: normalizeLeap(raw.isLeapMonth),
-    phone: isPartner ? '' : cleanDigits(raw.phone || raw.buyerPhone || ''),
+    phone: isPartner ? '' : cleanDigits(raw.phone || ''),
     email: isPartner ? '' : String(raw.email || '').trim(),
     concern: isPartner ? '' : String(raw.concern || '').trim(),
     memo: isPartner ? String(raw.memo || raw.partnerMemo || '').trim() : ''
@@ -856,10 +862,8 @@ function validateOrderInput(input) {
   if (!a.name) throw new Error('이름을 입력해 주세요.');
   if (!a.gender) throw new Error('성별을 선택해 주세요.');
   if (!a.birthYear || !a.birthMonth || !a.birthDay) throw new Error('생년월일을 입력해 주세요.');
-  if (!a.phone) throw new Error('연락처를 입력해 주세요.');
-  if (!a.email) throw new Error('이메일을 입력해 주세요.');
   if (input.compatibilityRequested && !hasPartnerCoreFields(input.partner)) {
-    throw new Error('궁합 포함 리포트는 상대방 핵심 정보를 함께 입력해 주세요.');
+    throw new Error('2인 사주는 상대방 핵심 정보를 함께 입력해 주세요.');
   }
 }
 
@@ -966,29 +970,25 @@ function sanitizeApiErrorBodyForLog(text) {
 function buildCompatibilityPayload(person1, person2, note = '') {
   const a = toLuckyFlatPayload(person1 || {});
   const b = toLuckyFlatPayload(person2 || {});
+  const buildPersonPayload = (sourcePerson, flatPerson) => ({
+    name: String(sourcePerson?.name || '').trim(),
+    gender: flatPerson.gender,
+    birthYear: flatPerson.birthYear,
+    birthMonth: flatPerson.birthMonth,
+    birthDay: flatPerson.birthDay,
+    birthHour: flatPerson.birthHour || '',
+    birthMinute: flatPerson.birthMinute || '00',
+    year: flatPerson.year,
+    month: flatPerson.month,
+    day: flatPerson.day,
+    hour: flatPerson.hour || '',
+    minute: flatPerson.minute || '00',
+    calendarType: flatPerson.calendarType,
+    isLeapMonth: flatPerson.isLeapMonth === true
+  });
   return {
-    person1: {
-      name: String(person1?.name || '').trim(),
-      gender: a.gender,
-      year: a.year,
-      month: String(Number(a.month || 0) || '').trim() || a.month,
-      day: String(Number(a.day || 0) || '').trim() || a.day,
-      hour: a.hour,
-      minute: a.minute || '00',
-      calendarType: a.calendarType,
-      isLeapMonth: a.isLeapMonth === true
-    },
-    person2: {
-      name: String(person2?.name || '').trim(),
-      gender: b.gender,
-      year: b.year,
-      month: String(Number(b.month || 0) || '').trim() || b.month,
-      day: String(Number(b.day || 0) || '').trim() || b.day,
-      hour: b.hour,
-      minute: b.minute || '00',
-      calendarType: b.calendarType,
-      isLeapMonth: b.isLeapMonth === true
-    },
+    person1: buildPersonPayload(person1, a),
+    person2: buildPersonPayload(person2, b),
     note: String(note || '').trim()
   };
 }
@@ -1926,8 +1926,6 @@ async function renderPremiumPdf(order, promptPayload, sections) {
 
     sectionTitle('기본 정보');
     infoRow('상품', order.product.name);
-    infoRow('연락처', order.applicant.phone || '-');
-    infoRow('이메일', order.applicant.email || '-');
     if (order.partner?.name) {
       infoRow('상대방', `${order.partner.name} / ${order.partner.gender === 'male' ? '남성' : '여성'}`);
       infoRow('상대방 생년월일', `${order.partner.birthYear}.${pad2(order.partner.birthMonth)}.${pad2(order.partner.birthDay)} ${order.partner.birthTime || ''}`.trim());
@@ -2019,7 +2017,7 @@ function buildDistributionSummary(label, valueMap) {
 }
 
 function sanitizeCustomerFacingText(text) {
-  const blocked = /(계산 확인 메모|saju api|period api|compatibility api|requiredfields|content-type|charset|raw json error|debug|fallback|mock|source|api 400)/i;
+  const blocked = /(계산 확인 메모|saju api|period api|compatibility api|requiredfields|missingfields|content-type|charset|raw json error|raw json|debug|fallback|mock|source|api 400)/i;
   const parts = String(text || '')
     .split(/\n+/)
     .map((line) => line.trim())

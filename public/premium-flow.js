@@ -90,7 +90,7 @@
   function currentProduct() {
     const compatibility = compatibilityToggle.classList.contains('active') || isPartnerDataPresent();
     return compatibility
-      ? { type: 'compatibility', label: '프리미엄 사주 리포트 (2인,궁합포함)', price: 36000 }
+      ? { type: 'compatibility', label: '2인 사주(궁합 무료 진행)', price: 36000 }
       : { type: 'single', label: '프리미엄 사주 리포트', price: 18900 };
   }
 
@@ -127,8 +127,6 @@
         birthTime: normalizeTime(document.getElementById('premiumTime').value),
         calendarType: document.getElementById('premiumCalendarType').value,
         isLeapMonth: document.getElementById('premiumLeapMonth').value,
-        phone: cleanDigits(document.getElementById('premiumPhone').value),
-        email: document.getElementById('premiumEmail').value.trim(),
         concern: document.getElementById('premiumConcern').value.trim()
       },
       partner: null,
@@ -153,14 +151,14 @@
 
   function validatePayload(payload) {
     const a = payload.applicant;
-    if (!a.name || !a.gender || !a.birthYear || !a.birthMonth || !a.birthDay || !a.phone || !a.email) {
-      throw new Error('이름, 성별, 생년월일, 연락처, 이메일은 필수입니다.');
+    if (!a.name || !a.gender || !a.birthYear || !a.birthMonth || !a.birthDay) {
+      throw new Error('이름, 성별, 생년월일은 필수입니다.');
     }
     if (payload.compatibilityRequested) {
       const p = payload.partner || {};
       const enoughPartner = p.name && p.gender && p.birthYear && p.birthMonth && p.birthDay;
       if (!enoughPartner) {
-        throw new Error('궁합 포함 리포트는 상대방 이름, 성별, 생년월일을 입력해 주세요.');
+        throw new Error('2인 사주는 상대방 이름, 성별, 생년월일을 입력해 주세요.');
       }
     }
   }

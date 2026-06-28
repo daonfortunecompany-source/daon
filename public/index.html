@@ -2355,7 +2355,6 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       const gender = document.querySelector('input[name="gender"]:checked')?.value || '';
       return {
         name: document.getElementById('name').value || '사용자',
-        buyerPhone: '',
         year,
         month: paddedMonth,
         day: paddedDay,
@@ -2775,7 +2774,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         <div class="order-summary">
           <div class="order-summary-row"><span>기본 상품</span><strong id="orderProductName">프리미엄 사주 리포트</strong></div>
           <div class="order-summary-row"><span>결제 금액</span><strong id="orderProductPrice">18,900원</strong></div>
-          <div class="helper-text">상대 정보가 입력되면 궁합 포함 2인 리포트로 자동 전환됩니다.</div>
+          <div class="helper-text">1인 18,900원 / 2인 36,000원</div>
         </div>
 
         <div>
@@ -2830,16 +2829,6 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
                 </select>
               </div>
             </div>
-            <div class="inline-2">
-              <div>
-                <label for="premiumPhone">연락처</label>
-                <input id="premiumPhone" name="phone" inputmode="tel" required placeholder="01012345678" />
-              </div>
-              <div>
-                <label for="premiumEmail">이메일</label>
-                <input id="premiumEmail" name="email" inputmode="email" required placeholder="name@example.com" />
-              </div>
-            </div>
             <div>
               <label for="premiumConcern">현재 고민 또는 상담받고 싶은 내용</label>
               <textarea id="premiumConcern" name="concern" placeholder="예: 이직 시기와 재물 흐름, 연애 방향이 궁금해요."></textarea>
@@ -2850,10 +2839,10 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         <div class="toggle-box">
           <div class="toggle-line">
             <div>
-              <div class="toggle-chip">궁합 분석 포함</div>
-              <div class="helper-text">상대방 정보를 입력하면 2인 궁합 리포트로 자동 전환됩니다.</div>
+              <div class="toggle-chip">2인 사주(궁합 무료 진행)</div>
+              <div class="helper-text">1인 18,900원 / 2인 36,000원</div>
             </div>
-            <button type="button" class="switch" id="compatibilityToggle" aria-pressed="false" aria-label="궁합 분석 포함 전환"></button>
+            <button type="button" class="switch" id="compatibilityToggle" aria-pressed="false" aria-label="2인 사주(궁합 무료 진행) 전환"></button>
           </div>
           <div class="collapsible-fields" id="compatibilityFields">
             <div class="inline-2">
