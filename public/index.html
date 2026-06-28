@@ -2897,7 +2897,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         <button type="button" class="modal-close" id="premiumModalClose" aria-label="닫기">×</button>
       </div>
 
-      <form id="premiumRequestForm" class="premium-form">
+      <form id="premiumRequestForm" class="premium-form" novalidate>
         <div class="order-summary">
           <div class="order-summary-row"><span>기본 상품</span><strong id="orderProductName">프리미엄 사주 리포트</strong></div>
           <div class="order-summary-row"><span>결제 금액</span><strong id="orderProductPrice">18,900원</strong></div>
@@ -2910,6 +2910,10 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
             <div>
               <label for="premiumName">이름</label>
               <input id="premiumName" name="name" required placeholder="예: 김다온" />
+            </div>
+            <div>
+              <label for="premiumPhone">휴대폰 번호</label>
+              <input id="premiumPhone" name="phone" type="tel" inputmode="numeric" autocomplete="tel-national" required placeholder="01012345678" />
             </div>
             <div class="inline-2">
               <div>

@@ -125,6 +125,20 @@
     return String(value || '').replace(/[^0-9]/g, '');
   }
 
+  function normalizePhone(value) {
+    return cleanDigits(value);
+  }
+
+  function isValidKoreanMobilePhone(value) {
+    return /^01[016789]\d{7,8}$/.test(String(value || ''));
+  }
+
+  function getPhoneValidationMessage(phone) {
+    return phone
+      ? '결제 진행을 위해 올바른 휴대폰 번호를 입력해 주세요.'
+      : '결제 진행을 위해 휴대폰 번호를 입력해 주세요.';
+  }
+
   function normalizeTime(value) {
     const raw = String(value || '').trim();
     if (!raw) return '';
@@ -142,6 +156,7 @@
     const applicantBirthTimeUnknown = String(premiumTimeInput?.dataset.birthTimeUnknown || 'false') === 'true' && !normalizedApplicantTime;
     const applicantBirthHour = applicantBirthTimeUnknown ? UNKNOWN_BIRTH_TIME_FALLBACK.hour : (normalizedApplicantTime.split(':')[0] || '');
     const applicantBirthMinute = applicantBirthTimeUnknown ? UNKNOWN_BIRTH_TIME_FALLBACK.minute : (normalizedApplicantTime.split(':')[1] || '');
+    const normalizedPhone = normalizePhone(document.getElementById('premiumPhone')?.value || '');
     const applicant = {
       name: document.getElementById('premiumName').value.trim(),
       gender: document.querySelector('input[name="premiumGender"]:checked')?.value || '',
@@ -155,6 +170,8 @@
       displayBirthTime: applicantBirthTimeUnknown ? UNKNOWN_BIRTH_TIME_FALLBACK.label : normalizedApplicantTime,
       calendarType: document.getElementById('premiumCalendarType').value,
       isLeapMonth: document.getElementById('premiumLeapMonth').value,
+      phone: normalizedPhone,
+      customerPhone: normalizedPhone,
       concern: document.getElementById('premiumConcern').value.trim()
     };
     const payload = {
@@ -163,6 +180,8 @@
       person1: { ...applicant },
       partner: null,
       person2: null,
+      phone: normalizedPhone,
+      customerPhone: normalizedPhone,
       compatibilityRequested: product.type === 'compatibility'
     };
 
@@ -188,6 +207,9 @@
     if (!a.name || !a.gender || !a.birthYear || !a.birthMonth || !a.birthDay) {
       throw new Error('이름, 성별, 생년월일은 필수입니다.');
     }
+    if (!a.phone || !isValidKoreanMobilePhone(a.phone)) {
+      throw new Error(getPhoneValidationMessage(a.phone));
+    }
     if (payload.compatibilityRequested) {
       const p = payload.partner || {};
       const enoughPartner = p.name && p.gender && p.birthYear && p.birthMonth && p.birthDay;
@@ -201,7 +223,7 @@
     const response = await fetch(url, options);
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(data.error || '요청 처리 중 오류가 발생했습니다.');
+      throw new Error(data.message || data.error || '요청 처리 중 오류가 발생했습니다.');
     }
     return data;
   }
@@ -226,6 +248,9 @@
       }
       if (data.paymentMode === 'live' && /\/mock-pay\//i.test(String(data.paymentUrl))) {
         throw new Error('실제 결제 모드에서 mock 결제 URL이 반환되었습니다. 서버 결제 설정을 확인해 주세요.');
+      }
+      if (data.paymentMode === 'live' && /(localhost|127\.0\.0\.1)/i.test(String(data.paymentUrl))) {
+        throw new Error('실제 결제 모드에서 잘못된 결제 URL이 반환되었습니다. 잠시 후 다시 시도해 주세요.');
       }
       showStatus('결제창으로 이동합니다. 결제 완료 후 현재 화면에서 리포트 생성 상태를 확인하실 수 있습니다.');
       window.location.href = data.paymentUrl;
@@ -338,6 +363,13 @@
   });
   document.querySelectorAll('input[name="partnerGender"]').forEach((input) => input.addEventListener('change', updateOrderSummary));
   document.querySelectorAll('input[name="premiumGender"]').forEach((input) => input.addEventListener('change', updateOrderSummary));
+  document.getElementById('premiumPhone')?.addEventListener('input', (event) => {
+    const normalized = normalizePhone(event.target?.value || '');
+    event.target.value = normalized;
+    if (statusInline?.classList.contains('show') && /휴대폰 번호/.test(String(statusInline.textContent || ''))) {
+      clearStatus();
+    }
+  });
   document.getElementById('premiumTime')?.addEventListener('input', (event) => {
     const value = String(event.target?.value || '').trim();
     if (value) {

@@ -25,6 +25,30 @@ const ALLOW_LOCAL_FALLBACK = process.env.ALLOW_LOCAL_FALLBACK != null
 const UNKNOWN_BIRTH_TIME_DISPLAY = '출생시간 미상';
 const UNKNOWN_BIRTH_TIME_REPORT_DISPLAY = '미상';
 const UNKNOWN_BIRTH_TIME_FALLBACK = Object.freeze({ hour: '12', minute: '00', time: '12:00' });
+const KOREAN_MOBILE_PHONE_REGEX = /^01[016789]\d{7,8}$/;
+
+function normalizePhoneNumber(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function isValidKoreanMobilePhone(value) {
+  return KOREAN_MOBILE_PHONE_REGEX.test(String(value || ''));
+}
+
+function getPhoneValidationMessage(phone) {
+  return phone
+    ? '결제 진행을 위해 올바른 휴대폰 번호를 입력해 주세요.'
+    : '결제 진행을 위해 휴대폰 번호를 입력해 주세요.';
+}
+
+function sanitizePaymentErrorMessage(message) {
+  const raw = String(message || '').trim();
+  if (!raw) return '결제 요청 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+  if (/recvphone\s*값을\s*확인하세요/i.test(raw)) {
+    return '휴대폰 번호를 확인한 뒤 다시 시도해 주세요.';
+  }
+  return raw;
+}
 
 function parseOptionalBoolean(value) {
   if (value == null || value === '') return null;
@@ -350,8 +374,9 @@ app.post('/api/orders/create', async (req, res) => {
       statusUrl: buildOrderStatusPageUrl(orderId, order.publicBaseUrl)
     });
   } catch (error) {
-    await appendLog('order_create_error', { message: error.message });
-    res.status(400).json({ error: error.message || '주문 생성에 실패했습니다.' });
+    const userMessage = sanitizePaymentErrorMessage(error.message || '주문 생성에 실패했습니다.');
+    await appendLog('order_create_error', { message: error.message, userMessage });
+    res.status(400).json({ ok: false, error: userMessage, message: userMessage });
   }
 });
 
@@ -932,6 +957,11 @@ async function createPaymentRequest(order, options = {}) {
   if (!CONFIG.payapp.userid) throw new Error('PAYAPP_USERID가 설정되지 않았습니다.');
   if (!CONFIG.payapp.linkValue) throw new Error('PAYAPP_LINK_VALUE가 설정되지 않았습니다.');
 
+  const recvphone = normalizePhoneNumber(order.applicant.phone || order.customerPhone || '');
+  if (!isValidKoreanMobilePhone(recvphone)) {
+    throw new Error(getPhoneValidationMessage(recvphone));
+  }
+
   const callbackUrl = `${publicBaseUrl}${CONFIG.payapp.feedbackPath}`;
   const returnUrl = `${publicBaseUrl}${CONFIG.payapp.returnPath}?orderId=${encodeURIComponent(order.id)}`;
   const form = new URLSearchParams({
@@ -940,7 +970,7 @@ async function createPaymentRequest(order, options = {}) {
     shopname: CONFIG.payapp.shopname,
     goodname: order.product.name,
     price: String(order.product.price),
-    recvphone: order.applicant.phone || '',
+    recvphone,
     feedbackurl: callbackUrl,
     returnurl: returnUrl,
     var1: order.id,
@@ -949,6 +979,14 @@ async function createPaymentRequest(order, options = {}) {
   if (CONFIG.payapp.linkKey) form.set('linkkey', CONFIG.payapp.linkKey);
   if (CONFIG.payapp.linkValue) form.set('linkval', CONFIG.payapp.linkValue);
 
+  console.log('[PAYAPP REQUEST]', JSON.stringify({
+    orderId: order.id,
+    mode: CONFIG.payapp.mode,
+    recvphone,
+    callbackUrl,
+    returnUrl
+  }));
+
   const response = await fetch(CONFIG.payapp.apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
@@ -956,15 +994,23 @@ async function createPaymentRequest(order, options = {}) {
   });
   const raw = await response.text();
   if (!response.ok) {
+    console.error('[PAYAPP RESPONSE ERROR]', raw || `HTTP ${response.status}`);
     throw new Error(`PayApp 요청 실패: ${response.status}`);
   }
   const parsed = Object.fromEntries(new URLSearchParams(raw));
-  if (String(parsed.state) !== '1' || !parsed.payurl) {
-    throw new Error(parsed.errorMessage || parsed.message || 'PayApp 결제 URL을 생성하지 못했습니다.');
+  const payUrl = String(parsed.payurl || '').trim();
+  if (String(parsed.state) !== '1' || !payUrl) {
+    console.error('[PAYAPP RESPONSE ERROR]', raw);
+    throw new Error(sanitizePaymentErrorMessage(parsed.errorMessage || parsed.message || 'PayApp 결제 URL을 생성하지 못했습니다.'));
+  }
+  if (/(localhost|127\.0\.0\.1)/i.test(payUrl) || /\/mock-pay\//i.test(payUrl)) {
+    console.error('[PAYAPP RESPONSE ERROR]', `Invalid live payUrl: ${payUrl}`);
+    throw new Error('실제 결제 URL 설정이 올바르지 않습니다. 잠시 후 다시 시도해 주세요.');
   }
   return {
     mulNo: parsed.mul_no || null,
-    payUrl: parsed.payurl,
+    payUrl,
+    recvphone,
     callbackUrl,
     returnUrl
   };
@@ -1137,7 +1183,11 @@ function buildStatusMessage(order) {
 }
 
 function normalizeOrderInput(input) {
-  const applicantSource = input.applicant || input.person1 || {};
+  const applicantSource = {
+    ...(input.applicant || input.person1 || {}),
+    phone: input?.applicant?.phone || input?.person1?.phone || input.customerPhone || input.phone || '',
+    customerPhone: input?.applicant?.customerPhone || input?.person1?.customerPhone || input.customerPhone || input.phone || ''
+  };
   const partnerSource = input.partner || input.person2 || null;
   const applicant = normalizeApplicant(applicantSource);
   const partner = partnerSource ? normalizeApplicant(partnerSource, true) : null;
@@ -1146,7 +1196,9 @@ function normalizeOrderInput(input) {
     applicant,
     partner,
     person1: applicant,
-    person2: partner
+    person2: partner,
+    phone: applicant.phone,
+    customerPhone: applicant.phone
   };
 }
 
@@ -1182,7 +1234,7 @@ function normalizeApplicant(raw, isPartner = false) {
     fallbackBirthMinute: birthTimeUnknown ? UNKNOWN_BIRTH_TIME_FALLBACK.minute : '',
     calendarType: normalizeCalendarType(raw.calendarType || raw.calendar || 'solar'),
     isLeapMonth: normalizeLeap(raw.isLeapMonth),
-    phone: isPartner ? '' : cleanDigits(raw.phone || ''),
+    phone: isPartner ? '' : normalizePhoneNumber(raw.phone || raw.customerPhone || ''),
     email: isPartner ? '' : String(raw.email || '').trim(),
     concern: isPartner ? '' : String(raw.concern || '').trim(),
     memo: isPartner ? String(raw.memo || raw.partnerMemo || '').trim() : ''
@@ -1194,6 +1246,8 @@ function validateOrderInput(input) {
   if (!a.name) throw new Error('이름을 입력해 주세요.');
   if (!a.gender) throw new Error('성별을 선택해 주세요.');
   if (!a.birthYear || !a.birthMonth || !a.birthDay) throw new Error('생년월일을 입력해 주세요.');
+  if (!a.phone) throw new Error(getPhoneValidationMessage(''));
+  if (!isValidKoreanMobilePhone(a.phone)) throw new Error(getPhoneValidationMessage(a.phone));
   if (input.compatibilityRequested && !hasPartnerCoreFields(input.partner)) {
     throw new Error('2인 사주는 상대방 핵심 정보를 함께 입력해 주세요.');
   }
