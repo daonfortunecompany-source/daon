@@ -2196,7 +2196,7 @@ function collectPromptContext(order, apiSnapshots, warnings) {
       concern: order.applicant?.concern || ''
     },
     partnerInfo: order.partner ? {
-      name: order.partner?.name || '',
+      name: stripHonorificSuffix(order.partner?.name || ''),
       gender: order.partner?.gender || '',
       birthYear: order.partner?.birthYear || '',
       birthMonth: order.partner?.birthMonth || '',
@@ -2424,26 +2424,193 @@ function prependSectionIntro(section, text) {
   return `${intro}\n\n${body}`;
 }
 
-function applyHonorificsToText(text, names = []) {
-  let output = String(text || '');
-  const filteredNames = Array.from(new Set((Array.isArray(names) ? names : []).map((item) => String(item || '').trim()).filter(Boolean))).sort((a, b) => b.length - a.length);
-  for (const name of filteredNames) {
-    const escaped = escapeRegex(name);
-    const particlePattern = new RegExp(`(^|[^가-힣A-Za-z0-9])(${escaped})(?!님)(?=(은|는|이|가|을|를|의|과|와|도|만|께서|께|에게|한테|처럼|보다|부터|까지|랑|으로|로|에|이나|나|이며|인데|입니다|입니까|일|적||\s|[.,!?;:()"'“”‘’]|$))`, 'g');
-    output = output.replace(particlePattern, (match, prefix, found) => `${prefix}${found}님`);
-    const barePattern = new RegExp(`(^|[^가-힣A-Za-z0-9])(${escaped})(?!님)(?=\s|[.,!?;:()"'“”‘’]|$)`, 'g');
-    output = output.replace(barePattern, (match, prefix, found) => `${prefix}${found}님`);
-  }
-  return output.replace(/님님/g, '님');
+
+function stripHonorificSuffix(name) {
+  return String(name || '').replace(/\s+/g, ' ').trim().replace(/\s*님+$/g, '').trim();
 }
 
-function convertMonthlySectionToFormalStyle(text) {
+function formatHonorificName(name) {
+  const base = stripHonorificSuffix(name);
+  return base ? `${base}님` : '';
+}
+
+function normalizeHonorificSpacing(text) {
+  return String(text || '')
+    .replace(/([가-힣A-Za-z0-9]+)님\s+님/g, '$1님')
+    .replace(/([가-힣A-Za-z0-9]+)\s+님/g, '$1님')
+    .replace(/님님+/g, '님')
+    .replace(/님\s+(?=(은|는|이|가|을|를|의|과|와|도|만|께서|께|에게|한테|처럼|보다|부터|까지|랑|으로|로|에|이나|나|이며|인데|입니다|입니까|일|적))/g, '님')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function applyHonorificsToText(text, names = []) {
+  let output = normalizeHonorificSpacing(text);
+  const filteredNames = Array.from(new Set((Array.isArray(names) ? names : [])
+    .map((item) => stripHonorificSuffix(item))
+    .filter(Boolean)))
+    .sort((a, b) => b.length - a.length);
+  for (const name of filteredNames) {
+    const escaped = escapeRegex(name);
+    const honorific = `${name}님`;
+    output = output.replace(new RegExp(`${escaped}\\s*님\\s*님+`, 'g'), honorific);
+    const particlePattern = new RegExp(`(^|[^가-힣A-Za-z0-9])(${escaped})(?!\\s*님)(?=(은|는|이|가|을|를|의|과|와|도|만|께서|께|에게|한테|처럼|보다|부터|까지|랑|으로|로|에|이나|나|이며|인데|입니다|입니까|일|적|\\s|[.,!?;:()"'“”‘’]|$))`, 'g');
+    output = output.replace(particlePattern, (match, prefix, found) => `${prefix}${found}님`);
+    const barePattern = new RegExp(`(^|[^가-힣A-Za-z0-9])(${escaped})(?!\\s*님)(?=\\s|[.,!?;:()"'“”‘’]|$)`, 'g');
+    output = output.replace(barePattern, (match, prefix, found) => `${prefix}${found}님`);
+  }
+  return normalizeHonorificSpacing(output);
+}
+
+function splitReportSentences(text) {
+  return String(text || '')
+    .replace(/\r/g, '')
+    .split(/(?<=[.!?]|다\.|요\.)\s+/)
+    .map((item) => item.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+const TERM_EXPLANATION_MAP = {
+  '편관격': '쉽게 말하면 책임과 압박이 오히려 추진력으로 바뀌기 쉬운 구조입니다',
+  '신약': '쉽게 말하면 에너지가 쉽게 소모되어 주변 환경의 영향을 민감하게 받기 쉬운 상태입니다',
+  '용신': '쉽게 말하면 사주의 균형을 잡아주는 핵심 요소입니다',
+  '희신': '쉽게 말하면 용신을 도와 흐름을 부드럽게 만드는 보조 요소입니다',
+  '재성': '쉽게 말하면 돈, 현실 감각, 결과물을 다루는 힘입니다',
+  '관성': '쉽게 말하면 책임, 규칙, 직장과 사회적 역할을 다루는 힘입니다',
+  '비겁': '쉽게 말하면 나와 비슷한 기질, 자존감, 경쟁심, 동료 에너지를 뜻합니다'
+};
+
+const SECTION_PERSPECTIVE_GUIDE = {
+  '핵심 요약': '핵심 요약에서는 전체 분위기와 지금 가장 먼저 붙잡아야 할 우선순위를 요약합니다.',
+  '사주 원국 해석': '사주 원국 해석에서는 타고난 기질과 기본 성향, 반복되기 쉬운 반응 패턴을 설명합니다.',
+  '대운': '대운에서는 10년 안팎의 장기 흐름, 인생 방향 전환, 기반 형성 여부를 중심으로 설명합니다.',
+  '세운': '세운에서는 해당 연도의 상반기와 하반기, 또는 일·돈·관계·건강의 연간 포인트를 중심으로 설명합니다.',
+  '월운': '월운에서는 이번 달에 바로 적용할 수 있는 일정 관리, 감정 관리, 관계 조율 같은 실천 포인트를 중심으로 설명합니다.',
+  '운성': '운성에서는 에너지의 리듬과 속도 조절, 회복과 확장의 균형을 설명합니다.',
+  '신살,귀인': '신살과 귀인에서는 사람과 환경 변수, 도움을 주는 인연, 조심해야 할 상황을 설명합니다.',
+  '십성': '십성에서는 관계에서 맡기 쉬운 역할과 일 처리 방식, 심리적 반응 습관을 설명합니다.',
+  '재물운': '재물운에서는 수입보다도 관리 습관, 소비 기준, 위험 관리 방식에 초점을 맞춥니다.',
+  '직업운': '직업운에서는 일하는 방식, 조직 적응, 역할 선택, 커리어 방향성을 설명합니다.',
+  '애정운': '애정운에서는 감정 표현과 안정감, 관계 유지 방식, 현실적인 만남 기준을 설명합니다.',
+  '자녀운': '자녀운에서는 돌봄 태도, 책임감, 가족 안에서의 역할과 양육 관점을 설명합니다.',
+  '건강운': '건강운에서는 생활 리듬, 피로 누적 패턴, 회복 습관과 컨디션 관리 포인트를 설명합니다.',
+  '실천 조언': '실천 조언에서는 당장 적용 가능한 행동 기준과 생활 루틴을 구체적으로 제안합니다.',
+  '주의할 점': '주의할 점에서는 실수하기 쉬운 패턴과 결정 전에 다시 확인해야 할 부분을 설명합니다.',
+  '고민에 대한 조언': '고민에 대한 조언에서는 사용자의 질문에 직접 연결되는 현실적인 선택 기준을 제시합니다.',
+  '관계/궁합 해석': '관계/궁합 해석에서는 두 사람의 차이를 어떻게 조율하면 좋은지에 초점을 맞춥니다.'
+};
+
+const REPEAT_NORMALIZATION_PATTERNS = [
+  [/신약\s*[,은는이가을를의]*/g, '신약'],
+  [/편관격\s*[,은는이가을를의]*/g, '편관격'],
+  [/용신\s*금/g, '용신금'],
+  [/희신\s*토/g, '희신토'],
+  [/혼자\s*감당하지\s*말[^.!?]*[.!?]?/g, '혼자 감당하지 말 것'],
+  [/무리한\s*투자\s*주의[^.!?]*[.!?]?/g, '무리한 투자 주의']
+];
+
+function buildRepeatKey(sentence) {
+  const normalized = String(sentence || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  let key = normalized;
+  for (const [pattern, replacement] of REPEAT_NORMALIZATION_PATTERNS) {
+    key = key.replace(pattern, replacement);
+  }
+  return key.replace(/["'“”‘’.,!?;:()\-]/g, '').trim();
+}
+
+function annotateJargonFirstUse(text, explainedTerms = new Set()) {
+  let output = String(text || '');
+  for (const [term, explanation] of Object.entries(TERM_EXPLANATION_MAP)) {
+    if (explainedTerms.has(term)) continue;
+    const pattern = new RegExp(`${escapeRegex(term)}(?!\\s*\\(|[^\\n]{0,40}쉽게\\s*말하면)`, '');
+    if (!pattern.test(output)) continue;
+    output = output.replace(pattern, `${term}(${explanation})`);
+    explainedTerms.add(term);
+  }
+  return output;
+}
+
+function splitLongParagraphsForMobile(text) {
+  const paragraphs = String(text || '').split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  const rebuilt = [];
+  for (const paragraph of paragraphs) {
+    const sentences = splitReportSentences(paragraph);
+    if (sentences.length <= 4) {
+      rebuilt.push(paragraph);
+      continue;
+    }
+    for (let index = 0; index < sentences.length; index += 3) {
+      rebuilt.push(sentences.slice(index, index + 3).join(' ').trim());
+    }
+  }
+  return rebuilt.join('\n\n').trim();
+}
+
+function removeRepeatedSentencesFromText(text, seenSentences = new Map()) {
+  const paragraphs = String(text || '').split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  const rebuilt = [];
+  for (const paragraph of paragraphs) {
+    const kept = [];
+    for (const sentence of splitReportSentences(paragraph)) {
+      const normalized = sentence.replace(/\s+/g, ' ').trim();
+      const repeatKey = buildRepeatKey(normalized);
+      if ((normalized.length >= 25 || repeatKey) && repeatKey && (seenSentences.get(repeatKey) || 0) >= 1) continue;
+      kept.push(sentence);
+      if (repeatKey) seenSentences.set(repeatKey, (seenSentences.get(repeatKey) || 0) + 1);
+    }
+    if (kept.length) rebuilt.push(kept.join(' ').trim());
+  }
+  return rebuilt.join('\n\n').trim();
+}
+
+const SECTION_SUMMARY_MAP = {
+  '핵심 요약': '정리하면, 지금은 전체 흐름을 한 번에 바꾸기보다 우선순위를 정하고 차분히 밀어가는 태도가 중요합니다.',
+  '사주 원국 해석': '정리하면, 타고난 성향을 억지로 바꾸기보다 강점을 살리고 약한 부분을 생활 습관으로 보완하는 방식이 잘 맞습니다.',
+  '대운': '정리하면, 대운은 단기 성과보다 몇 년 단위 방향과 기반 정비를 먼저 보는 것이 중요합니다.',
+  '세운': '정리하면, 세운은 올해의 선택 우선순위를 분명히 하고 일·돈·관계의 균형을 맞추는 데 초점을 두는 것이 좋습니다.',
+  '월운': '정리하면, 월운은 이번 달 바로 실천할 수 있는 한두 가지를 꾸준히 지키는 것이 핵심입니다.',
+  '운성': '정리하면, 운성은 속도를 올리는 시기와 숨을 고르는 시기를 구분해 리듬을 맞추는 것이 중요합니다.',
+  '신살,귀인': '정리하면, 사람과 기회가 들어오는 흐름일수록 조건 확인과 기록 습관이 더 중요합니다.',
+  '십성': '정리하면, 십성 해석은 성향을 고정적으로 단정하기보다 관계와 일에서 어떤 역할을 편하게 수행하는지 이해하는 데 도움이 됩니다.',
+  '재물운': '정리하면, 재물운은 큰 한 방보다 새는 지출을 줄이고 지속 가능한 관리 기준을 세우는 쪽이 유리합니다.',
+  '직업운': '정리하면, 직업운은 겉으로 좋아 보이는 자리보다 실제 역할과 성장 가능성을 먼저 보는 것이 좋습니다.',
+  '애정운': '정리하면, 애정운은 설렘보다 생활 리듬과 약속을 지키는 안정감이 오래 가는 관계를 만듭니다.',
+  '자녀운': '정리하면, 자녀운은 책임감과 애정을 균형 있게 쓰되 통제보다 대화 중심으로 풀어가는 태도가 중요합니다.',
+  '건강운': '정리하면, 건강운은 버티는 힘보다 회복 리듬을 만드는 생활 관리가 더 중요합니다.',
+  '실천 조언': '정리하면, 실천 조언은 계획을 많이 세우는 것보다 지금 바로 지속할 수 있는 작은 행동을 정하는 데 의미가 있습니다.',
+  '주의할 점': '정리하면, 주의할 점은 조급함으로 결정을 앞당기지 말고 확인과 정리를 한 번 더 거치는 습관을 들이는 것입니다.',
+  '고민에 대한 조언': '정리하면, 현재 고민은 운의 좋고 나쁨보다 무엇을 먼저 정리하고 어디에 힘을 모을지 결정하는 과정이 더 중요합니다.',
+  '관계/궁합 해석': '정리하면, 관계/궁합 해석은 좋고 나쁨의 판정보다 서로의 차이를 어떻게 조율할지에 초점을 맞춰 보는 것이 좋습니다.'
+};
+
+function appendSectionSummary(section, text) {
+  const output = String(text || '').trim();
+  if (!output) return output;
+  if (/정리하면[,:]?/.test(output)) return output;
+  const summary = SECTION_SUMMARY_MAP[section] || '정리하면, 현재 흐름은 무리하게 단정하기보다 생활 속에서 조절하고 실천하는 방식으로 풀어가는 것이 좋습니다.';
+  return `${output}\n\n${summary}`.trim();
+}
+
+function appendHealthDisclaimer(text) {
+  const output = String(text || '').trim();
+  if (!output) return output;
+  const disclaimer = '건강운은 의학적 진단이 아니라 생활 습관을 점검하기 위한 참고용 해석입니다. 불편한 증상이 있다면 전문의 상담을 권장드립니다.';
+  if (output.includes(disclaimer)) return output;
+  return `${output}\n\n${disclaimer}`.trim();
+}
+
+function stripCustomerFacingArtifacts(text) {
+  let output = String(text || '');
+  output = output.replace(/[^\n.!?]*(downloadUrl|pdfPath|pdf|debug)[^\n.!?]*(?:[.!?]|$)/gi, ' ');
+  output = output.replace(/\s{2,}/g, ' ').replace(/\n{3,}/g, '\n\n');
+  return output.trim();
+}
+
+function normalizeFormalKoreanStyle(text) {
   let output = String(text || '').trim();
   if (!output) return output;
   const replacements = [
-    [/감정 기복이 커진다/g, '감정 기복이 커질 수 있습니다'],
-    [/오해가 생긴다/g, '오해가 생길 수 있습니다'],
-    [/지출 관리가 필요하다/g, '지출 관리가 필요합니다'],
     [/좋다\./g, '좋습니다.'],
     [/필요하다\./g, '필요합니다.'],
     [/중요하다\./g, '중요합니다.'],
@@ -2458,16 +2625,43 @@ function convertMonthlySectionToFormalStyle(text) {
     [/된다\./g, '됩니다.'],
     [/맞다\./g, '맞습니다.'],
     [/권한다\./g, '권합니다.'],
-    [/좋아진다\./g, '좋아질 수 있습니다.']
+    [/좋아진다\./g, '좋아질 수 있습니다.'],
+    [/일어난다\./g, '일어날 수 있습니다.'],
+    [/늘어난다\./g, '늘어날 수 있습니다.'],
+    [/줄어든다\./g, '줄어들 수 있습니다.']
   ];
   for (const [pattern, replacement] of replacements) output = output.replace(pattern, replacement);
   return output;
+}
+
+function convertMonthlySectionToFormalStyle(text) {
+  let output = normalizeFormalKoreanStyle(text);
+  if (!output) return output;
+  const replacements = [
+    [/감정 기복이 커진다/g, '감정 기복이 커질 수 있습니다'],
+    [/오해가 생긴다/g, '오해가 생길 수 있습니다'],
+    [/지출 관리가 필요하다/g, '지출 관리가 필요합니다']
+  ];
+  for (const [pattern, replacement] of replacements) output = output.replace(pattern, replacement);
+  return output;
+}
+
+function ensureSectionPerspective(section, text) {
+  const output = String(text || '').trim();
+  if (!output) return output;
+  const hint = SECTION_PERSPECTIVE_GUIDE[section] || '';
+  const firstParagraph = output.split(/\n{2,}/)[0] || '';
+  if (!hint || firstParagraph.includes(hint)) return output;
+  if (/무엇을 의미|살펴보는 항목|중심으로 설명합니다|초점을 맞춥니다/.test(firstParagraph)) return output;
+  return `${hint}\n\n${output}`.trim();
 }
 
 function postProcessReportSections(promptPayload, sections) {
   const inputNames = [promptPayload?.basicInfo?.name, promptPayload?.applicant?.name, promptPayload?.partnerInfo?.name, promptPayload?.partner?.name]
     .map((item) => String(item || '').trim())
     .filter(Boolean);
+  const explainedTerms = new Set();
+  const seenSentences = new Map();
   const output = {};
   for (const [section, rawText] of Object.entries(sections || {})) {
     let nextText = String(rawText || '').trim();
@@ -2475,9 +2669,18 @@ function postProcessReportSections(promptPayload, sections) {
       output[section] = '';
       continue;
     }
+    nextText = stripCustomerFacingArtifacts(nextText);
     nextText = prependSectionIntro(section, nextText);
+    nextText = ensureSectionPerspective(section, nextText);
+    nextText = annotateJargonFirstUse(nextText, explainedTerms);
+    nextText = normalizeFormalKoreanStyle(nextText);
     if (section === '월운') nextText = convertMonthlySectionToFormalStyle(nextText);
     nextText = applyHonorificsToText(nextText, inputNames);
+    nextText = removeRepeatedSentencesFromText(nextText, seenSentences);
+    nextText = splitLongParagraphsForMobile(nextText);
+    nextText = appendSectionSummary(section, nextText);
+    if (section === '건강운') nextText = appendHealthDisclaimer(nextText);
+    nextText = normalizeHonorificSpacing(nextText);
     output[section] = nextText.replace(/\n{3,}/g, '\n\n').trim();
   }
   return output;
@@ -2620,12 +2823,15 @@ function parseKieSectionMap(raw, requiredSections) {
 function detectRepeatedSentences(sections) {
   const map = new Map();
   for (const value of Object.values(sections || {})) {
-    const sentences = String(value || '').split(/(?<=[.!?다요])\s+/).map((item) => item.replace(/\s+/g, ' ').trim()).filter((item) => item.length >= 18);
+    const sentences = splitReportSentences(String(value || ''))
+      .map((item) => item.replace(/\s+/g, ' ').trim())
+      .filter((item) => item.length >= 25 || buildRepeatKey(item));
     for (const sentence of sentences) {
-      map.set(sentence, (map.get(sentence) || 0) + 1);
+      const key = buildRepeatKey(sentence) || sentence;
+      map.set(key, { sentence, count: (map.get(key)?.count || 0) + 1 });
     }
   }
-  return Array.from(map.entries()).filter(([, count]) => count >= 25).map(([sentence, count]) => ({ sentence, count }));
+  return Array.from(map.values()).filter((item) => item.count >= 2);
 }
 
 function hasCompatibilityPromptPayload(promptPayload) {
@@ -2830,7 +3036,7 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
   }
   const paragraphCounts = {};
   const sectionLengths = {};
-  const banned = /(api|json|system|model|data structure|raw|debug|missingfields|requiredfields|계산 확인 메모|fallback|prompt|engine|content-type|status\s*500|error)/i;
+  const banned = /(api|json|system|model|data structure|raw|debug|missingfields|requiredfields|계산 확인 메모|fallback|prompt|engine|content-type|status\s*500|error|downloadurl|pdfpath|pdf)/i;
   for (const key of requiredSections) {
     const text = String(sections?.[key] || '').trim();
     const paragraphs = countMeaningfulParagraphs(text);
@@ -2859,6 +3065,11 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
     if (text && metaResponse.detected) {
       sectionErrors[key].push('메타 응답 포함');
       errors.push(`${key} 메타 응답 포함`);
+    }
+
+    if (text && /(님\s+님|님님)/.test(text)) {
+      sectionErrors[key].push('중복 호칭 포함');
+      errors.push(`${key} 중복 호칭 포함`);
     }
   }
   const totalLength = Object.values(sectionLengths).reduce((sum, value) => sum + Number(value || 0), 0);
@@ -2941,9 +3152,13 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
 function buildConcernSpecificInstruction(concern, hasCompatibility, birthTimeUnknown = false) {
   const lines = [
     '각 섹션은 최소 3문단 이상 작성하고, 각 섹션의 첫 부분에 해당 주제가 무엇을 의미하는지 1~2문장으로 짧게 설명한 뒤 실제 풀이를 이어가세요.',
+    '각 섹션은 의미 설명, 핵심 해석, 실제 생활 예시, 주의할 점, 실천 조언 2~3개, 정리하면 요약 순서를 자연스럽게 반영하세요.',
+    '한 문단은 2~4문장 이내로 유지하고 모바일에서 읽기 쉽게 긴 문단은 나누세요.',
     '추상적인 일반론 대신 실제 상담 장면이 떠오르는 구체 예시를 포함하세요.',
     '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 자료를 실제 해석 문장에 직접 연결하세요.',
-    '고민에 대한 조언은 최소 5문단 이상 작성하고 사용자의 질문에 직접 답하세요.'
+    '편관격, 신약, 용신, 희신, 재성, 관성, 비겁 같은 용어가 처음 나오면 쉬운 설명과 "쉽게 말하면" 풀이를 반드시 붙이세요.',
+    '같은 문장과 조언이 여러 섹션에서 반복되지 않도록 관점과 표현을 바꾸고, 대운·세운·월운은 서로 다른 역할로 구분해 쓰세요.',
+    '고민에 대한 조언은 최소 5문단 이상 작성하고 사용자의 질문에 직접 답하세요. 같은 문장을 복사하지 말고 현실적인 선택 기준과 행동 순서를 제시하세요.'
   ];
   if (birthTimeUnknown) lines.push('사용자가 출생시간을 모르는 상태입니다. 따라서 시주를 확정하지 말고, 생년월일 중심으로 해석하세요. 시주 기반의 세부 해석, 자녀운, 말년운, 시간대에 민감한 신살 해석은 단정하지 말고 보수적으로 작성하세요. 리포트에는 출생시간이 확인되지 않아 시주를 기준으로 한 일부 세부 해석은 제한적으로 참고하는 것이 좋다는 취지의 안내를 자연스럽게 반영하세요.');
   if (hasCompatibility) lines.push('관계/궁합 해석은 최소 5문단 이상 작성하고, 두 사람의 원국과 compatibility 자료를 함께 반영하세요. 이름을 언급할 때는 반드시 이름 뒤에 님을 붙여 작성하세요.');
@@ -2959,7 +3174,7 @@ function buildRetryInstruction(reason, outputMode = 'json', requiredSections = [
     const base = `이전 응답은 실패했습니다. 이번에는 JSON이 아니라 순수 텍스트만 반환하세요. 코드블록, 마크다운 설명문, 사전 안내 문구를 금지합니다. 각 제목은 반드시 \`## 제목\` 형식을 쓰고, 제목 아래 본문만 작성하세요. 요청받은 섹션만 작성하고 다른 섹션은 절대 쓰지 마세요. ${sectionGuide}`;
     return reason ? `${base} 이전 실패 사유: ${reason}` : base;
   }
-  const base = `이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 요청받은 섹션 key만 포함하고 각 value는 빈 문자열 없이 충분한 문단과 분량으로 작성하세요. 각 문단은 2~3문장 이상으로 쓰고 실제 생활 예시, 주의점, 실천 조언을 포함하세요. 모든 섹션은 존댓말 설명체(합니다/입니다/할 수 있습니다)로 작성하고, 이름을 언급할 때는 반드시 님을 붙이세요. ${sectionGuide}`;
+  const base = `이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 요청받은 섹션 key만 포함하고 각 value는 빈 문자열 없이 충분한 문단과 분량으로 작성하세요. 각 문단은 2~4문장 이내로 쓰고 실제 생활 예시, 주의점, 실천 조언 2~3개를 포함하세요. 처음 나오는 사주 용어는 쉬운 설명과 쉽게 말하면 풀이를 붙이세요. 같은 문장 반복을 피하고, 신약·편관격·용신·희신 같은 핵심 표현도 같은 문장으로 복사하지 말며, 섹션 끝에는 정리하면 요약을 넣으세요. 모든 섹션은 존댓말 설명체(합니다/입니다/할 수 있습니다)로 작성하고, 이름을 언급할 때는 반드시 님을 붙이되 중복 호칭은 금지합니다. ${sectionGuide}`;
   return reason ? `${base} 이전 실패 사유: ${reason}` : base;
 }
 
@@ -3136,12 +3351,16 @@ function buildSingleSectionPromptGuide(section) {
     `이번 호출에서는 "${section}" 섹션 하나만 작성하세요.`,
     `최소 ${getSectionPromptTargetChars(section)}자 이상 작성하세요.`,
     `반드시 ${getSectionPromptTargetParagraphs(section)}문단 이상 작성하세요.`,
-    '각 문단은 2~3문장 이상으로 작성하세요.',
+    '각 문단은 2~4문장 이내로 작성하고, 너무 긴 문단은 나누세요.',
+    '각 섹션은 ① 해당 주제가 무엇을 의미하는지 짧은 설명 ② 사주에서 보이는 핵심 ③ 실제 생활에서 나타날 수 있는 모습 ④ 주의할 점 ⑤ 실천 조언 2~3개 ⑥ 정리하면 요약 순서를 따르세요.',
     '짧게 요약하지 말고 실제 생활 예시, 주의점, 실천 조언을 반드시 포함하세요.',
+    '편관격, 신약, 용신, 희신, 재성, 관성, 비겁 같은 사주 용어가 처음 나오면 반드시 쉬운 설명을 덧붙이고, "쉽게 말하면" 식의 풀이를 포함하세요.',
+    '같은 문장과 같은 조언을 반복하지 말고, 신약·편관격·용신·희신 같은 핵심 표현도 필요한 맥락에서만 언급하며 섹션 주제에 맞게 표현과 관점을 바꾸세요.',
+    '섹션 끝에는 반드시 "정리하면"으로 시작하는 짧은 요약을 넣으세요.',
     `반드시 {"${section}":"본문"} 형식의 JSON 객체만 반환하세요.`,
     '해당 섹션이 무엇을 살펴보는 항목인지 1~2문장으로 짧게 설명한 뒤 본문 풀이를 이어가세요.',
     '모든 문장은 존댓말 설명체(합니다/입니다/할 수 있습니다)로 작성하세요.',
-    '이름을 언급할 때는 반드시 이름 뒤에 님을 붙이세요.'
+    '이름을 언급할 때는 반드시 이름 뒤에 님을 붙이되, 이미 님이 붙은 이름에 님을 다시 붙이지 마세요.'
   ];
   if (section === '관계/궁합 해석') {
     base.push('관계 성향, 소통 방식, 갈등 포인트, 보완점, 현실 조언을 모두 포함하세요.');
@@ -3154,7 +3373,7 @@ function buildSingleSectionPromptGuide(section) {
 function buildSectionRequirementGuide(sections, isolated = false) {
   return sections.map((section) => isolated
     ? buildSingleSectionPromptGuide(section)
-    : `${section}: 최소 ${getSectionPromptTargetParagraphs(section)}문단, 최소 ${getSectionPromptTargetChars(section)}자, 각 문단 2~3문장 이상, 실제 예시/주의점/실천 조언 포함, 섹션 시작 전에 1~2문장의 짧은 주제 설명 포함, 존댓말 설명체 유지, 이름 언급 시 반드시 님 사용`).join(' | ');
+    : `${section}: 최소 ${getSectionPromptTargetParagraphs(section)}문단, 최소 ${getSectionPromptTargetChars(section)}자, 각 문단 2~4문장 이내, 실제 예시/주의점/실천 조언 2~3개 포함, 섹션 시작 전에 1~2문장의 짧은 주제 설명 포함, 처음 나오는 사주 용어는 쉬운 설명 추가, 같은 표현 반복 금지, 섹션 끝에 정리하면 요약 추가, 존댓말 설명체 유지, 이름 언급 시 반드시 님 사용`).join(' | ');
 }
 
 function isCompatibilityOnlyBatch(batch) {
@@ -3247,10 +3466,16 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       '반드시 한국어로만 작성하세요.',
       '반드시 JSON 객체만 반환하세요.',
       '마크다운 코드블록 금지, 설명문 금지, 사과문 금지, 안내문 금지입니다.',
-      'API, JSON, 시스템, 모델, 데이터 구조 같은 기술 용어는 절대 드러내지 마세요.',
+      'API, JSON, 시스템, 모델, 데이터 구조, debug, downloadUrl, PDF 같은 기술/개발 문구는 절대 드러내지 마세요.',
       '모든 섹션은 존댓말 설명체로 작성하세요. "합니다", "입니다", "할 수 있습니다" 말투를 사용하고 "한다", "된다", "좋다", "필요하다" 같은 단정형 어미는 피하세요.',
       '각 섹션의 첫 부분에는 해당 주제가 무엇을 보는 항목인지 1~2문장으로 짧게 설명한 뒤 실제 풀이를 이어가세요.',
-      '이름을 언급할 때는 반드시 이름 뒤에 "님"을 붙여 작성하세요. 이름 뒤에 바로 조사를 붙이는 표현은 금지합니다.',
+      '각 섹션은 핵심 해석, 실제 생활 예시, 주의할 점, 실천 조언 2~3개가 자연스럽게 드러나도록 구성하세요.',
+      '한 문단은 2~4문장 이내로 유지하고, 너무 긴 문단은 나누세요.',
+      '이름을 언급할 때는 반드시 이름 뒤에 "님"을 붙여 작성하되, 이미 님이 붙은 이름에 님을 다시 붙이지 마세요. "님 님", "님님" 같은 중복은 금지합니다.',
+      '편관격, 신약, 용신, 희신, 재성, 관성, 비겁 같은 사주 용어가 처음 나오면 쉬운 설명과 "쉽게 말하면" 풀이를 반드시 붙이세요.',
+      '같은 문장과 조언을 여러 섹션에서 반복하지 말고, 섹션마다 관점과 예시를 다르게 쓰세요. 신약, 편관격, 용신, 희신 등은 필요한 곳에서만 간결하게 언급하고 같은 설명을 복사하지 마세요.',
+      '대운은 장기 흐름, 세운은 해당 연도의 일·돈·관계·건강 또는 상반기/하반기 흐름, 월운은 이번 달 실천 포인트 중심으로 서로 다르게 작성하세요.',
+      '건강운 끝에는 건강운은 의학적 진단이 아니라 생활 습관을 점검하기 위한 참고용 해석이며, 불편한 증상이 있다면 전문의 상담을 권장한다는 안내를 자연스럽게 포함하세요.',
       '반드시 요청받은 섹션 key만 포함하세요. 다른 섹션은 절대 작성하지 마세요.',
       '각 섹션 값에는 실제 리포트 본문만 작성하세요.',
       '"한 번에 작성할 수 없습니다" 같은 메타 문장을 절대 쓰지 마세요.',
@@ -3805,7 +4030,7 @@ async function generateAiSections(promptPayload, order = null) {
 function fallbackAiSections(promptPayload) {
   const applicantInfo = promptPayload?.basicInfo || promptPayload?.applicant || {};
   const partnerInfo = promptPayload?.partnerInfo || promptPayload?.partner || null;
-  const name = applicantInfo.name || '고객';
+  const name = stripHonorificSuffix(applicantInfo.name || '') || '고객';
   const concern = applicantInfo.concern || '현재 삶의 방향';
   const birthTimeUnknown = applicantInfo.birthTimeUnknown === true || promptPayload?.analysisNotes?.birthTimeUnknown === true;
   const hasCompatibility = Boolean(promptPayload.compatibilityReference || hasPartnerCoreFields(partnerInfo));
