@@ -1102,15 +1102,15 @@ function updateOrderProgress(order, updates = {}) {
 function buildFailureMessage(failedStep) {
   switch (failedStep) {
     case 'period':
-      return '리포트 생성 중 기간운 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      return '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.';
     case 'compatibility':
-      return '궁합 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      return '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.';
     case 'kie_ai':
-      return '리포트 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      return '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.';
     case 'saju':
-      return '리포트 생성 중 핵심 사주 해석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      return '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.';
     default:
-      return '리포트 생성 중 일시적인 문제가 발생했습니다. 결제는 정상 확인되었으나, 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도하거나 고객센터로 문의해 주세요.';
+      return '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.';
   }
 }
 
@@ -2853,14 +2853,19 @@ const REPORT_BATCHES = [
 ];
 
 const SECTION_PROMPT_TARGET_CHARS = {
-  '핵심 요약': 900,
-  '사주 원국 해석': 1300,
-  '대운': 1000,
-  '세운': 1000,
-  '월운': 1000,
-  '운성': 800,
-  '고민에 대한 조언': 1600,
-  '관계/궁합 해석': 1600
+  '핵심 요약': 800,
+  '사주 원국 해석': 1100,
+  '대운': 850,
+  '세운': 900,
+  '월운': 900,
+  '운성': 700,
+  '재물운': 850,
+  '직업운': 850,
+  '건강운': 850,
+  '실천 조언': 850,
+  '주의할 점': 850,
+  '고민에 대한 조언': 1200,
+  '관계/궁합 해석': 1400
 };
 
 const SECTION_PROMPT_TARGET_PARAGRAPHS = {
@@ -2887,23 +2892,33 @@ const KIE_BATCH_TIMEOUT_MS = {
   default: 120000
 };
 
+const KIE_BATCH_MAX_TOKENS = {
+  core: 8000,
+  timing: 12000,
+  analysis: 12000,
+  life: 12000,
+  concern: 8000,
+  compatibility: 10000,
+  default: 8000
+};
+
 const SECTION_MIN_VISIBLE_CHARS = {
   '핵심 요약': 600,
-  '사주 원국 해석': 900,
-  '대운': 700,
-  '세운': 700,
-  '월운': 700,
+  '사주 원국 해석': 800,
+  '대운': 600,
+  '세운': 600,
+  '월운': 600,
   '운성': 500,
   '신살,귀인': 500,
-  '십성': 700,
-  '재물운': 700,
-  '직업운': 700,
-  '애정운': 600,
+  '십성': 500,
+  '재물운': 600,
+  '직업운': 600,
+  '애정운': 500,
   '자녀운': 500,
-  '건강운': 500,
-  '실천 조언': 700,
+  '건강운': 600,
+  '실천 조언': 600,
   '주의할 점': 600,
-  '고민에 대한 조언': 1200,
+  '고민에 대한 조언': 800,
   '관계/궁합 해석': 1000
 };
 
@@ -2980,6 +2995,34 @@ function getSectionMinParagraphs(section) {
 
 function getSectionPromptTargetParagraphs(section) {
   return SECTION_PROMPT_TARGET_PARAGRAPHS[section] || getSectionMinParagraphs(section);
+}
+
+function getSectionOwningBatchName(section = '') {
+  const match = REPORT_BATCHES.find((batch) => Array.isArray(batch?.sections) && batch.sections.includes(section));
+  return match?.batchName || null;
+}
+
+function getPrimaryFailedBatchName(failedSections = [], fallbackBatchName = 'kie_ai') {
+  const orderedBatchNames = REPORT_BATCHES.map((batch) => batch.batchName);
+  const candidates = Array.from(new Set((Array.isArray(failedSections) ? failedSections : [])
+    .map((section) => getSectionOwningBatchName(section))
+    .filter(Boolean)));
+  if (!candidates.length) return getBatchRootName(fallbackBatchName || 'kie_ai') || 'kie_ai';
+  const prioritized = orderedBatchNames.find((batchName) => candidates.includes(batchName));
+  return prioritized || candidates[0] || getBatchRootName(fallbackBatchName || 'kie_ai') || 'kie_ai';
+}
+
+function canAcceptSectionLengthShortfall(section, length, minLength, paragraphCount, totalLength, minimumTotal) {
+  const safeSection = String(section || '');
+  if (!minLength || length >= minLength) return true;
+  if (['고민에 대한 조언', '관계/궁합 해석', '핵심 요약', '사주 원국 해석'].includes(safeSection)) return false;
+  const shortfall = minLength - length;
+  const paragraphMinimum = getSectionMinParagraphs(safeSection);
+  const paragraphOk = Number(paragraphCount || 0) >= paragraphMinimum;
+  const totalOk = Number(totalLength || 0) >= Number(minimumTotal || 0);
+  const withinAbsoluteTolerance = shortfall <= 40;
+  const withinRatioTolerance = length >= Math.floor(minLength * 0.94);
+  return paragraphOk && totalOk && (withinAbsoluteTolerance || withinRatioTolerance);
 }
 
 function getBatchRootName(batchName = '') {
@@ -3074,6 +3117,18 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
   }
   const totalLength = Object.values(sectionLengths).reduce((sum, value) => sum + Number(value || 0), 0);
   const minimumTotal = requiredSections.reduce((sum, key) => sum + getSectionMinVisibleChars(key), 0);
+  for (const key of requiredSections) {
+    if (!sectionErrors[key]?.includes('분량 부족')) continue;
+    const paragraphCount = paragraphCounts[key] || 0;
+    const currentLength = sectionLengths[key] || 0;
+    const minLength = getSectionMinVisibleChars(key);
+    if (!canAcceptSectionLengthShortfall(key, currentLength, minLength, paragraphCount, totalLength, minimumTotal)) continue;
+    sectionErrors[key] = sectionErrors[key].filter((item) => item !== '분량 부족');
+    const errorLabel = `${key} 분량 부족`;
+    const errorIndex = errors.indexOf(errorLabel);
+    if (errorIndex >= 0) errors.splice(errorIndex, 1);
+    console.log('[KIE AI VALIDATION] accepted slight shortfall', JSON.stringify({ section: key, length: currentLength, minLength, totalLength, minimumTotal }));
+  }
   if (requireRawLength && Number(meta.rawLength || 0) < 500) errors.push('raw_response_too_short_or_parse_failed');
   if (enforceTotalLength && totalLength < minimumTotal) errors.push('total_section_length_too_short');
   if (Object.values(sectionLengths).every((value) => Number(value || 0) === 0)) errors.push('all_sections_empty_parser_error');
@@ -3306,19 +3361,36 @@ function getAiEndpointCandidates(style = 'chat_completions') {
   return Array.from(new Set(candidates.filter(Boolean)));
 }
 
-function buildAiAttemptPlan(attempt) {
+function getBatchMaxTokens(batchName = '') {
+  const root = getBatchRootName(batchName);
+  const configured = Number(CONFIG.ai.maxTokens) || KIE_BATCH_MAX_TOKENS.default;
+  const preferred = KIE_BATCH_MAX_TOKENS[root] || KIE_BATCH_MAX_TOKENS.default;
+  return Math.min(configured, preferred);
+}
+
+function buildAiAttemptPlan(batch, attempt) {
+  const root = getBatchRootName(batch?.batchName || '');
+  const batchMaxTokens = getBatchMaxTokens(root);
   if (attempt === 1) {
     return {
       mode: 'compact_report',
       outputMode: 'json',
-      maxTokens: Math.min(CONFIG.ai.maxTokens, 8000),
+      maxTokens: batchMaxTokens,
+      includeRawBundle: false
+    };
+  }
+  if (attempt === 2) {
+    return {
+      mode: 'compact_report',
+      outputMode: 'json',
+      maxTokens: batchMaxTokens,
       includeRawBundle: false
     };
   }
   return {
     mode: 'compact_report',
     outputMode: 'json',
-    maxTokens: Math.min(CONFIG.ai.maxTokens, 6500),
+    maxTokens: Math.min(batchMaxTokens, root === 'concern' ? 8000 : batchMaxTokens),
     includeRawBundle: false
   };
 }
@@ -3362,6 +3434,12 @@ function buildSingleSectionPromptGuide(section) {
     '모든 문장은 존댓말 설명체(합니다/입니다/할 수 있습니다)로 작성하세요.',
     '이름을 언급할 때는 반드시 이름 뒤에 님을 붙이되, 이미 님이 붙은 이름에 님을 다시 붙이지 마세요.'
   ];
+  if (section === '고민에 대한 조언') {
+    base.push('반드시 {"고민에 대한 조언":"..."} 형식의 JSON만 반환하세요. 다른 key는 금지합니다.');
+    base.push('최소 800자 이상, 최소 5문단 이상 작성하고 사용자의 질문에 직접 답하세요.');
+    base.push('단정적 표현을 피하고 현실적인 선택 기준, 행동 순서, 실천 조언을 분명하게 제시하세요.');
+    base.push('이름 뒤에는 반드시 님을 붙이되 "님 님", "님님" 같은 중복 호칭은 금지합니다.');
+  }
   if (section === '관계/궁합 해석') {
     base.push('관계 성향, 소통 방식, 갈등 포인트, 보완점, 현실 조언을 모두 포함하세요.');
     base.push('결혼/이별/성공/실패를 단정하지 말고, 운명론적 표현과 확정적 예언을 금지하세요.');
@@ -3381,7 +3459,11 @@ function isCompatibilityOnlyBatch(batch) {
 }
 
 function getBatchMaxAttempts(batch) {
-  return isCompatibilityOnlyBatch(batch) ? 3 : 2;
+  const root = getBatchRootName(batch?.batchName || '');
+  if (isCompatibilityOnlyBatch(batch)) return 3;
+  if (Array.isArray(batch?.sections) && batch.sections.length === 1) return 3;
+  if (['core', 'timing', 'analysis', 'life', 'concern', 'compatibility'].includes(root)) return 3;
+  return 3;
 }
 
 function detectKiePolicyRefusal(text) {
@@ -3458,7 +3540,7 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       console.log('[KIE AI COMPATIBILITY] start', JSON.stringify({ batchName: batch.batchName }));
       console.log('[KIE AI COMPATIBILITY]', attemptLabel);
     }
-    const plan = buildAiAttemptPlan(attempt);
+    const plan = buildAiAttemptPlan(batch, attempt);
     const payloadForAi = buildAiPayloadForMode(promptPayload, batch.sections, plan.mode);
     plan.payloadForAi = payloadForAi;
     const systemPrompt = [
@@ -3633,7 +3715,30 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
 }
 
 async function generateKieBatchOrSplit(promptPayload, batch, endpointPath, order = null) {
-  const batchResult = await generateKieBatch(promptPayload, batch, endpointPath, order);
+  const rootBatchName = getBatchRootName(batch?.batchName || '');
+  const concernFallback = () => {
+    console.log('[KIE AI BATCH] concern fallback activated', JSON.stringify({ batchName: batch.batchName }));
+    return { '고민에 대한 조언': buildConcernFallbackText(promptPayload) };
+  };
+  const throwWithPartialSections = (error, partialSections = {}, failedSections = []) => {
+    const nextError = error instanceof Error ? error : createKieBatchError(String(error || 'KIE AI batch failure'), { batchName: batch.batchName });
+    if (!nextError.failedStep) nextError.failedStep = 'kie_ai';
+    if (!nextError.currentStep) nextError.currentStep = rootBatchName || 'kie_ai';
+    if (!nextError.failedBatch) nextError.failedBatch = rootBatchName || batch.batchName;
+    if (!Array.isArray(nextError.failedSections) || !nextError.failedSections.length) nextError.failedSections = failedSections.length ? failedSections : batch.sections.slice();
+    if (!Number.isFinite(Number(nextError.progress))) nextError.progress = getBatchProgress(batch.batchName);
+    nextError.partialSections = { ...(nextError.partialSections || {}), ...(partialSections || {}) };
+    throw nextError;
+  };
+
+  let batchResult;
+  try {
+    batchResult = await generateKieBatch(promptPayload, batch, endpointPath, order);
+  } catch (error) {
+    if (rootBatchName === 'concern') return concernFallback();
+    throwWithPartialSections(error, {}, Array.isArray(error?.failedSections) ? error.failedSections : batch.sections.slice());
+  }
+
   if (batchResult?.ok) return batchResult.sections;
   if (batchResult?.splitRecommended && batch.sections.length > 1) {
     const validation = batchResult.validation || {};
@@ -3655,24 +3760,23 @@ async function generateKieBatchOrSplit(promptPayload, batch, endpointPath, order
       try {
         singleResult = await generateKieBatch(promptPayload, singleBatch, endpointPath, order);
       } catch (error) {
-        if (!error.failedStep) error.failedStep = 'kie_ai';
-        if (!error.currentStep) error.currentStep = getBatchRootName(batch.batchName);
-        if (!error.failedBatch) error.failedBatch = getBatchRootName(batch.batchName);
-        if (!Array.isArray(error.failedSections) || !error.failedSections.length) error.failedSections = [section];
-        if (!Number.isFinite(Number(error.progress))) error.progress = getBatchProgress(batch.batchName);
-        throw error;
+        throwWithPartialSections(error, merged, [section]);
       }
       if (!singleResult?.ok) {
-        throw createKieBatchError(`KIE AI single-section batch failed: ${section}`, {
+        throwWithPartialSections(createKieBatchError(`KIE AI single-section batch failed: ${section}`, {
           batchName: batch.batchName,
           failedSections: [section]
-        });
+        }), merged, [section]);
       }
       Object.assign(merged, singleResult.sections || {});
     }
     return merged;
   }
-  throw createKieBatchError(`KIE AI batch failed: ${batch.batchName}`, { batchName: batch.batchName, failedSections: batch.sections });
+  if (rootBatchName === 'concern') return concernFallback();
+  throwWithPartialSections(createKieBatchError(`KIE AI batch failed: ${batch.batchName}`, {
+    batchName: batch.batchName,
+    failedSections: batch.sections.slice()
+  }), batchResult?.partialSections || {}, batch.sections.slice());
 }
 
 function buildAiRequestBody({ style, systemPrompt, userText, outputMode, maxTokens }) {
@@ -3980,6 +4084,15 @@ async function generateAiSections(promptPayload, order = null) {
         });
       } else {
         const error = result.reason instanceof Error ? result.reason : new Error(String(result.reason || 'unknown'));
+        if (error.partialSections && typeof error.partialSections === 'object' && Object.keys(error.partialSections).length) {
+          const preservedSections = postProcessReportSections(promptPayload, error.partialSections);
+          Object.assign(finalSections, preservedSections);
+          console.log('[KIE AI BATCH] preserved completed sections after partial failure', JSON.stringify({
+            batchName: batch.batchName,
+            preservedSections: Object.keys(preservedSections),
+            failedSections: error.failedSections || []
+          }));
+        }
         failures.push({ batch, error });
       }
     }
@@ -3996,7 +4109,11 @@ async function generateAiSections(promptPayload, order = null) {
       if (!error.failedStep) error.failedStep = 'kie_ai';
       if (!error.currentStep) error.currentStep = getBatchRootName(firstFailure.batch.batchName);
       if (!error.failedBatch) error.failedBatch = getBatchRootName(firstFailure.batch.batchName);
-      if (!Array.isArray(error.failedSections) || !error.failedSections.length) error.failedSections = firstFailure.batch.sections.slice();
+      if (!Array.isArray(error.failedSections) || !error.failedSections.length) {
+        error.failedSections = Array.isArray(firstFailure.error?.failedSections) && firstFailure.error.failedSections.length
+          ? Array.from(new Set(firstFailure.error.failedSections.filter(Boolean)))
+          : firstFailure.batch.sections.slice();
+      }
       if (!Number.isFinite(Number(error.progress))) error.progress = getBatchProgress(firstFailure.batch.batchName);
       throw error;
     }
@@ -4018,14 +4135,32 @@ async function generateAiSections(promptPayload, order = null) {
   });
   console.log('[KIE AI FINAL] validation result', JSON.stringify(finalValidation));
   if (!finalValidation.ok) {
+    const failedSections = Array.isArray(finalValidation.failedSections) ? finalValidation.failedSections : [];
+    const failedBatchName = getPrimaryFailedBatchName(failedSections, batches[batches.length - 1]?.batchName || 'kie_ai');
     throw createKieBatchError('KIE AI final validation failed', {
-      batchName: batches[batches.length - 1]?.batchName || 'kie_ai',
-      failedSections: finalValidation.failedSections || []
+      batchName: failedBatchName,
+      failedBatch: failedBatchName,
+      currentStep: failedBatchName,
+      progress: getBatchProgress(failedBatchName),
+      failedSections
     });
   }
   return processedFinalSections;
 }
 
+
+function buildConcernFallbackText(promptPayload) {
+  const applicantInfo = promptPayload?.basicInfo || promptPayload?.applicant || {};
+  const name = stripHonorificSuffix(applicantInfo.name || '') || '고객';
+  const concern = String(applicantInfo.concern || '현재 삶의 방향').trim();
+  return [
+    `${name}님이 적어주신 고민인 "${concern}"은 단순히 운의 좋고 나쁨만으로 결론을 내리기보다, 지금 어떤 기준으로 선택하고 어떤 순서로 움직일지 정하는 일이 더 중요합니다. 사주에서는 타고난 성향과 현재 흐름을 함께 보는데, 쉽게 말하면 지금은 결과를 서두르기보다 방향과 우선순위를 먼저 정리할수록 흔들림이 줄어들 수 있는 시기입니다.`,
+    `${name}님에게 필요한 핵심은 한 번에 모든 문제를 해결하려는 방식보다, 가장 체감이 큰 한 가지를 먼저 정하고 그것과 연결된 일정·관계·지출을 함께 점검하는 접근입니다. 실제 생활에서는 해야 할 일이 많을수록 오히려 판단이 늦어지거나, 반대로 급하게 결론을 내리고 나중에 다시 수정하는 형태로 나타날 수 있습니다. 그래서 중요한 선택일수록 오늘 바로 결정할 일과 조금 더 확인할 일을 분리하는 기준이 필요합니다.`,
+    `주의할 점은 불안이 커질 때 주변 말에 쉽게 흔들리거나, 반대로 혼자 감당하려는 마음이 강해질 수 있다는 점입니다. 특히 고민이 일이나 진로, 돈, 관계와 연결되어 있다면 겉으로 좋아 보이는 제안보다 실제로 오래 유지할 수 있는 구조인지 먼저 확인하는 태도가 필요합니다. 단정적으로 좋다 나쁘다를 나누기보다, 지금의 선택이 다음 한두 달 뒤에도 감당 가능한지 살펴보는 것이 더 현실적인 기준이 됩니다.`,
+    `실천 조언으로는 첫째, 고민과 관련된 선택지를 종이에 두세 개만 적고 각각의 장단점을 짧게 비교해 보시길 권합니다. 둘째, 이번 주 안에 바로 실행할 행동 한 가지와 보류할 행동 한 가지를 나눠서 일정에 넣어 보시면 좋습니다. 셋째, 중요한 결정은 혼자 오래 끌지 말고 믿을 수 있는 사람에게 현재 상황과 원하는 결과를 짧게 설명한 뒤 피드백을 받아 보시는 것이 도움이 됩니다.`,
+    `정리하면, ${name}님의 고민은 운세의 단정적인 결론보다 지금 무엇을 먼저 정리하고 어디에 힘을 모아야 하는지에 대한 문제에 가깝습니다. 서두르지 않고 기준을 세운 뒤 한 단계씩 움직이면 불안은 줄이고 선택의 정확도는 높일 수 있습니다. 지금은 큰 결심 하나보다 작더라도 계속 이어갈 수 있는 행동 기준을 만드는 것이 가장 중요합니다.`
+  ].join('\n\n');
+}
 
 function fallbackAiSections(promptPayload) {
   const applicantInfo = promptPayload?.basicInfo || promptPayload?.applicant || {};
@@ -4050,7 +4185,7 @@ function fallbackAiSections(promptPayload) {
     '건강운': `건강운에서는 과로와 누적 피로 관리가 가장 중요합니다. 몸이 크게 무너지기 전에 신호를 보내는 타입일 가능성이 높아, 수면 패턴, 위장 컨디션, 어깨·목 긴장처럼 반복되는 부분을 초기에 다루는 것이 좋습니다. 컨디션이 떨어질 때는 무리해서 버티기보다 생활 리듬을 회복하는 것이 결과적으로 더 빠릅니다.`,
     '실천 조언': `지금 시기에는 해야 할 일을 늘리는 것보다, 이미 하고 있는 일 중에서 남길 것과 덜어낼 것을 정리하는 실천이 중요합니다. 한 달 단위 목표를 작게 쪼개고, 일정·돈·감정 사용량을 함께 기록해 보세요. 기록은 불안감을 줄이고 방향 감각을 되찾는 데 큰 도움이 됩니다.`,
     '주의할 점': `가장 주의할 점은 조급함 때문에 준비가 덜 된 상태에서 큰 결정을 밀어붙이는 것입니다. 사람을 믿는 것과 검증 없이 맡기는 것은 다르니, 중요한 계약이나 약속은 반드시 문서와 일정 기준으로 다시 확인하세요. 감정적으로 지친 상태에서 관계를 정리하면 후회가 남을 수 있으니 하루 정도 숨을 고른 뒤 판단하는 것이 좋습니다.`,
-    '고민에 대한 조언': `${name}님이 적어주신 고민인 "${concern}"은 단순히 운의 좋고 나쁨보다, 지금 무엇을 먼저 정리하고 어디에 힘을 모을지와 더 깊이 연결되어 있습니다. 지금은 모든 문제를 한 번에 해결하려 하기보다, 가장 체감이 큰 한 가지를 먼저 명확히 정하고 그 다음 단계를 설계하는 방식이 맞습니다. 원하는 결과를 얻기 위해서는 타이밍도 중요하지만, 그 타이밍을 받아낼 준비를 갖추는 것이 더 중요합니다.`
+    '고민에 대한 조언': buildConcernFallbackText(promptPayload)
   };
   if (birthTimeUnknown) {
     sections['사주 원국 해석'] = `${sections['사주 원국 해석']} 출생시간이 확인되지 않아 시주를 기준으로 한 일부 세부 해석은 제한적으로 참고하는 것이 좋습니다.`;
