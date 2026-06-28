@@ -1,13 +1,14 @@
 {
-  "name": "daon-saju-live",
+  "name": "daon-premium-saju-service",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.13.3",
-    "manseryeok": "^2.0.0"
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
   }
 }

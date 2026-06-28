@@ -343,22 +343,88 @@
       width: 100%;
       border: 1px solid #e9ddcf;
       background: rgba(255,255,255,.98);
-      border-radius: 16px;
+      border-radius: 14px;
+      height: 52px;
       min-height: 52px;
-      padding: 14px 14px;
-      font-size: 16px;
+      padding: 0 14px;
+      font-size: 15px;
+      line-height: 1.2;
       color: var(--text);
       outline: none;
+      box-sizing: border-box;
     }
     input:focus, select:focus {
       border-color: #dfa18f;
       box-shadow: 0 0 0 4px rgba(233,154,141,.16);
     }
 
+    select {
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: linear-gradient(45deg, transparent 50%, #8a7063 50%), linear-gradient(135deg, #8a7063 50%, transparent 50%);
+      background-position: calc(100% - 18px) calc(50% - 2px), calc(100% - 12px) calc(50% - 2px);
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
+      padding-right: 34px;
+    }
+
     .time-selects {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
+      align-items: stretch;
+    }
+
+    .time-selects select,
+    .calendar-select-unified {
+      position: relative;
+      z-index: 1;
+      pointer-events: auto;
+      touch-action: manipulation;
+      height: 52px;
+      min-height: 52px;
+      padding: 0 14px;
+      border-radius: 14px;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .time-field-stack,
+    .calendar-field-stack {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .time-calendar-row {
+      align-items: start;
+    }
+
+    .time-unknown-option {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: #6a5a50;
+      cursor: pointer;
+    }
+
+    .time-unknown-option input {
+      width: 18px;
+      height: 18px;
+      min-height: 18px;
+      margin: 0;
+      accent-color: #cf8f7a;
+      cursor: pointer;
+    }
+
+    .time-unknown-note {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.55;
+      color: #8a7568;
     }
 
     .gender-choice {
@@ -679,6 +745,29 @@
       color: #6b5649;
     }
 
+    .surface-element-summary {
+      display: grid;
+      gap: 6px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: #faf6f1;
+      border: 1px solid #eee1d5;
+    }
+
+    .surface-element-label {
+      font-size: 11px;
+      font-weight: 800;
+      color: #8a7467;
+      letter-spacing: 0.01em;
+    }
+
+    .surface-element-values {
+      font-size: 12px;
+      line-height: 1.55;
+      color: #5c4e47;
+      word-break: keep-all;
+    }
+
     .donut-shell-v2 {
       width: min(188px, 100%);
       aspect-ratio: 1 / 1;
@@ -700,7 +789,7 @@
     .donut-chart-v2::after {
       content: '';
       position: absolute;
-      inset: 26px;
+      inset: 22px;
       border-radius: 50%;
       background: #fff;
       box-shadow: inset 0 0 0 1px #efe4d9;
@@ -713,18 +802,18 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 8px;
+      gap: 4px;
       text-align: center;
       z-index: 1;
-      padding: 0 34px;
+      padding: 0 28px;
       pointer-events: none;
     }
 
     .donut-center-v2 strong {
       display: block;
       max-width: 100%;
-      font-size: clamp(22px, 5vw, 24px);
-      line-height: 1.1;
+      font-size: clamp(18px, 4vw, 20px);
+      line-height: 1.15;
       color: #4f433c;
       word-break: keep-all;
     }
@@ -732,34 +821,55 @@
     .donut-center-v2 span {
       display: block;
       max-width: 100%;
-      font-size: 12px;
-      line-height: 1.35;
+      font-size: 14px;
+      line-height: 1.1;
       color: #857265;
-      font-weight: 700;
+      font-weight: 800;
       margin-top: 0;
       word-break: keep-all;
     }
 
     .stats-table-v2 {
       display: grid;
-      gap: 8px;
+      gap: 10px;
       width: 100%;
       max-width: 100%;
+    }
+
+    .analysis-footnote {
+      margin-top: -2px;
+      color: #857265;
+      font-size: 12px;
+      line-height: 1.6;
+      word-break: keep-all;
     }
 
     .stats-row-v2 {
       display: grid;
       grid-template-columns: minmax(0,1fr) auto;
-      gap: 10px;
+      gap: 12px;
       align-items: center;
-      padding: 8px 10px;
+      padding: 11px 12px;
       border-radius: 12px;
       background: #faf6f1;
-      font-size: 13px;
+      font-size: 14px;
+      line-height: 1.45;
     }
 
-    .stats-row-v2 strong { font-size: 13px; }
-    .stats-row-v2 span { color: #6d5c52; font-weight: 700; }
+    .stats-row-v2 strong {
+      font-size: 14px;
+      font-weight: 800;
+      display: block;
+      min-width: 0;
+      word-break: keep-all;
+    }
+    .stats-row-v2 span {
+      color: #6d5c52;
+      font-weight: 800;
+      font-size: 14px;
+      white-space: nowrap;
+      text-align: right;
+    }
 
     .reading-grid-v2 {
       display: grid;
@@ -789,13 +899,27 @@
       word-break: keep-all;
     }
 
+    .result-cta-wrap {
+      display: grid;
+      gap: 12px;
+      margin-top: 4px;
+    }
+
+    .result-cta-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+      text-align: center;
+    }
+
     .wood { color: #4e8fb4; }
     .fire { color: #e67a7a; }
     .earth { color: #c89a52; }
     .metal { color: #6f7287; }
     .water { color: #394b66; }
 
-    @media (max-width: 920px) {
+    @media (max-width: 1024px) {
       .analysis-grid-v2 { grid-template-columns: 1fr; }
     }
 
@@ -805,8 +929,8 @@
       .pillar-matrix .row-head { width: 58px; }
       .pillar-main strong { font-size: 24px; }
       .pillar-matrix th, .pillar-matrix td { padding: 8px 4px; }
-      .donut-shell-v2 { width: min(170px, 100%); }
-      .donut-chart-v2::after { inset: 24px; }
+      .donut-shell-v2 { width: min(176px, 100%); }
+      .donut-chart-v2::after { inset: 20px; }
     }
 
     .summary-box {
@@ -1421,6 +1545,7 @@
       .card { padding: 16px; }
       .card h2 { font-size: 21px; }
       .inline-2 { grid-template-columns: 1fr; }
+      .time-calendar-row.inline-2 { grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr); align-items: start; }
       .inline-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .result-hero { padding: 16px 14px; }
       .result-hero h3 { font-size: 24px; }
@@ -1445,16 +1570,18 @@
       .pillar-main strong { font-size: 20px; }
       .pillar-main small, .mini-cell { font-size: 11px; }
       .analysis-box-head { font-size: 13px; }
-      .donut-shell-v2 { width: min(148px, 100%); }
-      .donut-center-v2 { padding: 0 20px; gap: 6px; }
-      .donut-center-v2 strong { font-size: 18px; }
-      .donut-center-v2 span, .stats-row-v2 span, .stats-row-v2 strong { font-size: 11px; }
+      .donut-shell-v2 { width: min(156px, 100%); }
+      .donut-center-v2 { padding: 0 18px; gap: 4px; }
+      .donut-center-v2 strong { font-size: 17px; }
+      .donut-center-v2 span { font-size: 13px; }
+      .stats-row-v2 strong, .stats-row-v2 span { font-size: 13px; }
     }
 
     @media (max-width: 360px) {
       .hero h1 { font-size: 26px; }
       .card { padding: 15px; }
       .inline-3 { grid-template-columns: 1fr; }
+      .time-calendar-row.inline-2 { grid-template-columns: 1fr; }
       .pillars { grid-template-columns: 1fr 1fr; }
       .feature-scroll { grid-auto-columns: 84%; }
       .bottom-cta button { font-size: 14px; }
@@ -1467,6 +1594,382 @@
       .pillars { grid-template-columns: repeat(4, minmax(0, 1fr)); }
       .ring-wrap { grid-template-columns: 1fr; justify-items: center; text-align: center; }
     }
+  
+
+    .review-section .card,
+    .faq-section .card {
+      overflow: hidden;
+    }
+
+    .review-slider-shell {
+      position: relative;
+      margin-top: 8px;
+      padding: 2px 0 8px;
+    }
+
+    .review-slider-viewport {
+      overflow: hidden;
+      margin: 0 -4px;
+    }
+
+    .review-slider-track {
+      display: flex;
+      gap: 14px;
+      transition: transform .45s ease;
+      will-change: transform;
+      padding: 4px;
+    }
+
+    .review-slide {
+      min-width: calc(100% - 8px);
+      flex: 0 0 calc(100% - 8px);
+      background: linear-gradient(180deg, #fffefd, #fff8f4);
+      border: 1px solid #efe0d5;
+      border-radius: 24px;
+      padding: 10px;
+      box-shadow: 0 12px 24px rgba(70, 53, 44, .06);
+    }
+
+    .review-slide img {
+      width: 100%;
+      height: auto;
+      border-radius: 18px;
+      border: 1px solid #f0e6dd;
+      background: #fff;
+      object-fit: contain;
+    }
+
+    .review-slider-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .review-arrow-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .review-arrow {
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      border: 1px solid #eadfd2;
+      background: rgba(255,255,255,.94);
+      color: #5d514a;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      cursor: pointer;
+      box-shadow: 0 6px 16px rgba(70,53,44,.06);
+    }
+
+    .review-arrow:disabled {
+      opacity: .45;
+      cursor: default;
+    }
+
+    .review-dots {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      flex: 1;
+    }
+
+    .review-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #dfd2c6;
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+      transition: transform .2s ease, background .2s ease, width .2s ease;
+    }
+
+    .review-dot.active {
+      width: 22px;
+      background: var(--primary);
+    }
+
+    .trust-note {
+      margin-top: 10px;
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .faq-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .faq-item {
+      border: 1px solid #eadfd2;
+      border-radius: 18px;
+      background: rgba(255,255,255,.9);
+      overflow: hidden;
+    }
+
+    .faq-question {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+      font-weight: 800;
+      text-align: left;
+      padding: 18px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      cursor: pointer;
+    }
+
+    .faq-question span:last-child {
+      color: var(--primary-deep);
+      font-size: 18px;
+      transition: transform .25s ease;
+    }
+
+    .faq-item.open .faq-question span:last-child {
+      transform: rotate(45deg);
+    }
+
+    .faq-answer-wrap {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows .3s ease;
+    }
+
+    .faq-item.open .faq-answer-wrap {
+      grid-template-rows: 1fr;
+    }
+
+    .faq-answer {
+      overflow: hidden;
+    }
+
+    .faq-answer p {
+      margin: 0;
+      padding: 0 18px 18px;
+      color: var(--muted);
+      line-height: 1.75;
+      font-size: 14px;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(31, 25, 23, .58);
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 120;
+      padding: 16px;
+      backdrop-filter: blur(8px);
+    }
+
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .modal-card {
+      width: min(100%, 430px);
+      max-height: min(88vh, 920px);
+      overflow: auto;
+      border-radius: 28px;
+      background: #fffdfb;
+      border: 1px solid #efe1d5;
+      box-shadow: 0 30px 60px rgba(40, 31, 28, .18);
+      padding: 20px;
+      position: relative;
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .modal-head h3 {
+      font-size: 22px;
+      letter-spacing: -.04em;
+    }
+
+    .modal-head p {
+      margin-top: 6px;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 14px;
+    }
+
+    .modal-close {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      border: 1px solid #eadfd2;
+      background: rgba(255,255,255,.9);
+      font-size: 20px;
+      cursor: pointer;
+      color: #5a4d46;
+      flex: 0 0 auto;
+    }
+
+    .premium-form {
+      display: grid;
+      gap: 14px;
+    }
+
+    textarea {
+      width: 100%;
+      border: 1px solid #e9ddcf;
+      background: rgba(255,255,255,.98);
+      border-radius: 16px;
+      min-height: 120px;
+      padding: 14px 14px;
+      font-size: 15px;
+      color: var(--text);
+      outline: none;
+      resize: vertical;
+      font-family: inherit;
+      line-height: 1.6;
+    }
+
+    textarea:focus {
+      border-color: #dfa18f;
+      box-shadow: 0 0 0 4px rgba(233,154,141,.16);
+    }
+
+    .helper-text {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+      margin-top: 6px;
+    }
+
+    .section-title-mini {
+      font-size: 13px;
+      font-weight: 800;
+      color: #6b5c55;
+      margin-bottom: 8px;
+    }
+
+    .toggle-box {
+      border: 1px solid #eadfd2;
+      border-radius: 18px;
+      background: #fff;
+      padding: 14px 14px;
+    }
+
+    .toggle-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .toggle-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #4f433d;
+    }
+
+    .switch {
+      position: relative;
+      width: 52px;
+      height: 31px;
+      border-radius: 999px;
+      background: #e6ddd4;
+      transition: background .2s ease;
+      flex: 0 0 auto;
+    }
+
+    .switch::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 25px;
+      height: 25px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 3px 8px rgba(0,0,0,.14);
+      transition: transform .2s ease;
+    }
+
+    .switch.active {
+      background: #dba08e;
+    }
+
+    .switch.active::after {
+      transform: translateX(21px);
+    }
+
+    .collapsible-fields {
+      display: none;
+      margin-top: 14px;
+    }
+
+    .collapsible-fields.open {
+      display: grid;
+      gap: 12px;
+    }
+
+    .order-summary {
+      border: 1px solid #ecdccf;
+      border-radius: 20px;
+      padding: 14px;
+      background: linear-gradient(180deg, #fffefc, #fff7f1);
+      display: grid;
+      gap: 8px;
+    }
+
+    .order-summary-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 14px;
+    }
+
+    .order-summary-row strong {
+      font-size: 16px;
+      color: #352c29;
+    }
+
+    .status-inline {
+      margin-top: 8px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: #f8f3ee;
+      color: #6f625b;
+      font-size: 13px;
+      line-height: 1.65;
+      display: none;
+    }
+
+    .status-inline.show {
+      display: block;
+    }
+
+    @media (min-width: 480px) {
+      .review-slide {
+        min-width: calc(100% - 8px);
+        flex-basis: calc(100% - 8px);
+      }
+    }
+
   </style>
 </head>
 <body>
@@ -1508,21 +2011,110 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
               <input id="day" inputmode="numeric" placeholder="21" value="21" />
             </div>
           </div>
-          <div class="inline-2">
-            <div>
+          <div class="inline-2 time-calendar-row">
+            <div class="time-field-stack">
               <label for="timeHour">출생 시각 (24시간 기준)</label>
               <div class="time-selects">
                 <select id="timeHour" aria-label="출생 시각 시">
                   <option value="">시</option>
+                  <option value="00">00</option>
+                  <option value="01">01</option>
+                  <option value="02">02</option>
+                  <option value="03">03</option>
+                  <option value="04">04</option>
+                  <option value="05">05</option>
+                  <option value="06">06</option>
+                  <option value="07">07</option>
+                  <option value="08">08</option>
+                  <option value="09">09</option>
+                  <option value="10">10</option>
+                  <option value="11">11</option>
+                  <option value="12">12</option>
+                  <option value="13">13</option>
+                  <option value="14">14</option>
+                  <option value="15">15</option>
+                  <option value="16">16</option>
+                  <option value="17">17</option>
+                  <option value="18">18</option>
+                  <option value="19">19</option>
+                  <option value="20">20</option>
+                  <option value="21">21</option>
+                  <option value="22">22</option>
+                  <option value="23">23</option>
                 </select>
                 <select id="timeMinute" aria-label="출생 시각 분">
                   <option value="">분</option>
+                  <option value="00">00</option>
+                  <option value="01">01</option>
+                  <option value="02">02</option>
+                  <option value="03">03</option>
+                  <option value="04">04</option>
+                  <option value="05">05</option>
+                  <option value="06">06</option>
+                  <option value="07">07</option>
+                  <option value="08">08</option>
+                  <option value="09">09</option>
+                  <option value="10">10</option>
+                  <option value="11">11</option>
+                  <option value="12">12</option>
+                  <option value="13">13</option>
+                  <option value="14">14</option>
+                  <option value="15">15</option>
+                  <option value="16">16</option>
+                  <option value="17">17</option>
+                  <option value="18">18</option>
+                  <option value="19">19</option>
+                  <option value="20">20</option>
+                  <option value="21">21</option>
+                  <option value="22">22</option>
+                  <option value="23">23</option>
+                  <option value="24">24</option>
+                  <option value="25">25</option>
+                  <option value="26">26</option>
+                  <option value="27">27</option>
+                  <option value="28">28</option>
+                  <option value="29">29</option>
+                  <option value="30">30</option>
+                  <option value="31">31</option>
+                  <option value="32">32</option>
+                  <option value="33">33</option>
+                  <option value="34">34</option>
+                  <option value="35">35</option>
+                  <option value="36">36</option>
+                  <option value="37">37</option>
+                  <option value="38">38</option>
+                  <option value="39">39</option>
+                  <option value="40">40</option>
+                  <option value="41">41</option>
+                  <option value="42">42</option>
+                  <option value="43">43</option>
+                  <option value="44">44</option>
+                  <option value="45">45</option>
+                  <option value="46">46</option>
+                  <option value="47">47</option>
+                  <option value="48">48</option>
+                  <option value="49">49</option>
+                  <option value="50">50</option>
+                  <option value="51">51</option>
+                  <option value="52">52</option>
+                  <option value="53">53</option>
+                  <option value="54">54</option>
+                  <option value="55">55</option>
+                  <option value="56">56</option>
+                  <option value="57">57</option>
+                  <option value="58">58</option>
+                  <option value="59">59</option>
                 </select>
               </div>
+              <label class="time-unknown-option" for="birthTimeUnknown">
+                <input type="checkbox" id="birthTimeUnknown" />
+                <span>출생시간 모름</span>
+              </label>
+              <div class="time-unknown-note">출생시간을 모르는 경우, 시주를 제외한 생년월일 중심으로 분석합니다.</div>
             </div>
-            <div>
+            <div class="calendar-field-stack">
               <label for="calendarType">양력 / 음력</label>
-              <select id="calendarType">
+              <select id="calendarType" class="calendar-select-unified">
                 <option value="solar">양력</option>
                 <option value="lunar">음력</option>
               </select>
@@ -1558,7 +2150,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
             <h2>무료 분석 결과</h2>
             <p class="sub" id="resultIntro">입력한 생년월일시를 바탕으로 네 기둥 구조와 핵심 해석을 한 화면에 정리했습니다.</p>
           </div>
-          <span class="source-badge" id="sourceBadge">만세력 API</span>
+          <span class="source-badge" id="sourceBadge">데이터 확인 중</span>
         </div>
 
         <div class="result-summary-v2">
@@ -1575,19 +2167,23 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         <section class="reference-panel">
           <div class="panel-title-row">
             <h3>사주 원국 구조</h3>
-            <span class="panel-note">참고 이미지를 바탕으로 재구성한 표 형식</span>
+            <span class="panel-note">년주·월주·일주·시주를 보기 쉽게 정리했습니다.</span>
           </div>
           <div id="pillarMatrix"></div>
         </section>
 
         <section class="reference-panel">
           <div class="panel-title-row">
-            <h3>오행 · 십성 분포</h3>
-            <span class="panel-note">무료 결과용 간단 비중 분석</span>
+            <h3>오행 · 십성 종합 분포</h3>
+            <span class="panel-note hidden" id="distributionNote"></span>
           </div>
           <div class="analysis-grid-v2">
             <div class="analysis-box-v2">
-              <div class="analysis-box-head">오행 중심</div>
+              <div class="analysis-box-head">오행 종합 분포</div>
+              <div class="surface-element-summary hidden" id="surfaceElementSummary">
+                <span class="surface-element-label">표면 오행</span>
+                <span class="surface-element-values" id="surfaceElementValues"></span>
+              </div>
               <div class="donut-shell-v2">
                 <div class="donut-chart-v2" id="elementRing"></div>
                 <div class="donut-center-v2">
@@ -1596,10 +2192,11 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
                 </div>
               </div>
               <div class="stats-table-v2" id="elementTable"></div>
+              <div class="analysis-footnote hidden" id="elementDistributionHint"></div>
             </div>
 
             <div class="analysis-box-v2">
-              <div class="analysis-box-head">십성 중심</div>
+              <div class="analysis-box-head">십성 분포</div>
               <div class="donut-shell-v2">
                 <div class="donut-chart-v2" id="starRing"></div>
                 <div class="donut-center-v2">
@@ -1610,49 +2207,85 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
               <div class="stats-table-v2" id="starTable"></div>
             </div>
           </div>
-          <div class="notice" id="premiumHint"></div>
         </section>
 
         <section class="reference-panel">
           <div class="panel-title-row">
-            <h3>핵심 해석 메모</h3>
-            
+            <h3>핵심 해석 카드</h3>
           </div>
           <div class="reading-grid-v2">
             <article class="reading-card-v2">
-              <div class="reading-kicker" id="traitTitle">타고난 기질</div>
+              <div class="reading-kicker" id="coreSummaryTitle">사주의 중심 흐름</div>
+              <p id="coreSummaryText"></p>
+            </article>
+            <article class="reading-card-v2">
+              <div class="reading-kicker" id="traitTitle">성향 분석</div>
               <p id="traitText"></p>
             </article>
             <article class="reading-card-v2">
-              <div class="reading-kicker" id="loveTitle">관계 포인트</div>
+              <div class="reading-kicker" id="loveTitle">연애·관계 분석</div>
               <p id="loveText"></p>
             </article>
             <article class="reading-card-v2">
-              <div class="reading-kicker" id="workTitle">일·재물 포인트</div>
+              <div class="reading-kicker" id="workTitle">일·재물 분석</div>
               <p id="workText"></p>
             </article>
           </div>
+          <div class="result-cta-wrap">
+            <p class="result-cta-copy" id="premiumHint"></p>
+            <button class="btn btn-pay" id="resultPremiumButton" type="button">프리미엄 리포트로 더 자세히 보기</button>
+          </div>
         </section>
+      </div>
+    </section>
+
+    
+
+    <section class="section review-section" id="premium-reviews">
+      <div class="card">
+        <h2>많은 사람들이 만족한 프리미엄 리포트</h2>
+        <div class="review-slider-shell" data-review-slider>
+          <div class="review-slider-viewport">
+            <div class="review-slider-track" id="reviewSliderTrack">
+              <article class="review-slide"><img src="./reviews/review-1.jpg" alt="프리미엄 리포트 후기 1" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-2.jpg" alt="프리미엄 리포트 후기 2" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-3.jpg" alt="프리미엄 리포트 후기 3" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-4.jpg" alt="프리미엄 리포트 후기 4" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-5.jpg" alt="프리미엄 리포트 후기 5" loading="lazy" /></article>
+            </div>
+          </div>
+          <div class="review-slider-nav">
+            <div class="review-arrow-group">
+              <button class="review-arrow" id="reviewPrev" type="button" aria-label="이전 후기">‹</button>
+              <button class="review-arrow" id="reviewNext" type="button" aria-label="다음 후기">›</button>
+            </div>
+            <div class="review-dots" id="reviewDots" aria-label="후기 슬라이드 페이지"></div>
+          </div>
+        </div>
       </div>
     </section>
 
     <section class="section" id="pricing">
       <div class="card">
         <h2>상세 사주 보고서</h2>
-        <p class="sub premium-copy">타고난 재능과 성향, 인간관계의 특징, 재물과 직업의 흐름, 연애와 결혼운,향후 10년 대운의 변화 등 좋은 부분뿐 아니라 조심해야 할 부분까지 객관적으로 정밀하게 분석해 드립니다</p>
+        <p class="sub premium-copy">타고난 재능과 성향, 인간관계의 특징, 재물과 직업의 흐름, 연애와 결혼운,대운,세운,월운, 좋은 부분뿐 아니라 조심해야 할 부분까지 객관적으로 정밀하게 분석해 드립니다</p>
         <div class="price-grid">
           <div class="price-card highlight">
             <div class="ribbon">추천</div>
             <h3>프리미엄 리포트</h3>
             <ul class="dash-list">
               <li>나의 타고난 성격과 기질</li>
-              <li>인생의 황금기와 조심해야할 시기(대운과 세운)</li>
-              <li>연애운과 결혼운</li>
-              <li>재물운과 직업(사업)운</li>
+              <li>대운,세운,월운</li>
+              <li>애정운</li>
+              <li>궁합(2인 진행시)</li>
+              <li>자녀운</li>
+              <li>재물운</li>
+              <li>직업(사업)운</li>
               <li>건강운</li>
-              <li>향후 10년의 대운 흐름</li>
+              <li>실천 조언</li>
+              <li>주의할 점</li>
               <li>고민에 대한 조언</li>
-              <li>평생 보관 가능한 100P 이상의 PDF파일 제공</li>
+              <li>복사하여 평생 보관 가능한 리포트 제공</li>
             </ul>
             <button class="btn btn-pay" id="payButton">상세 사주풀이 신청하기</button>
           </div>
@@ -1660,12 +2293,42 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       </div>
     </section>
 
+    <section class="section faq-section" id="faq">
+      <div class="card">
+        <h2>자주 묻는 질문</h2>
+        <p class="sub">신청 전 가장 많이 궁금해하시는 내용을 정리했습니다.</p>
+        <div class="faq-list" id="faqList">
+          <article class="faq-item">
+            <button type="button" class="faq-question" aria-expanded="false">
+              <span>프리미엄 리포트는 어떤 방식으로 나오나요?</span>
+              <span>+</span>
+            </button>
+            <div class="faq-answer-wrap">
+              <div class="faq-answer">
+                <p>프리미엄 사주 리포트는 보통의 AI가 아닌 전문 명리학자의 자문으로 설계하고 50만명이 검증한 알고리즘을 사용하여 모바일 화면에서 바로 확인하고 전체 내용을 복사해 보관할 수 있는 긴 리포트 형태로 제공됩니다.</p>
+              </div>
+            </div>
+          </article>
+          <article class="faq-item">
+            <button type="button" class="faq-question" aria-expanded="false">
+              <span>환불이 가능한가요?</span>
+              <span>+</span>
+            </button>
+            <div class="faq-answer-wrap">
+              <div class="faq-answer">
+                <p>콘텐츠 서비스의 특성상 결과를 받아보신 후 환불은 어렵습니다. 오류로 인해 결과물을 받아보지 못하셨다면 daon.fortune.company@gmail.com 으로 문의해주세요.</p>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
 
 
   </div>
 
   <div class="bottom-cta">
-    <button onclick="window.location.href='http://pf.kakao.com/_dhIxfX/chat'">상세 사주풀이 신청하기</button>
+    <button id="bottomApplyButton" type="button">상세 사주풀이 신청하기</button>
   </div>
 
   <script>
@@ -1681,6 +2344,9 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     const summaryHeadline = document.getElementById('summaryHeadline');
     const summaryText = document.getElementById('summaryText');
     const premiumHint = document.getElementById('premiumHint');
+    const distributionNote = document.getElementById('distributionNote');
+    const coreSummaryTitle = document.getElementById('coreSummaryTitle');
+    const coreSummaryText = document.getElementById('coreSummaryText');
     const traitTitle = document.getElementById('traitTitle');
     const traitText = document.getElementById('traitText');
     const loveTitle = document.getElementById('loveTitle');
@@ -1693,29 +2359,99 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     const elementCorePct = document.getElementById('elementCorePct');
     const elementCopy = document.getElementById('elementCopy');
     const elementTable = document.getElementById('elementTable');
+    const elementDistributionHint = document.getElementById('elementDistributionHint');
+    const surfaceElementSummary = document.getElementById('surfaceElementSummary');
+    const surfaceElementValues = document.getElementById('surfaceElementValues');
     const starRing = document.getElementById('starRing');
     const starCoreLabel = document.getElementById('starCoreLabel');
     const starCorePct = document.getElementById('starCorePct');
     const starCopy = document.getElementById('starCopy');
     const starTable = document.getElementById('starTable');
     const payButton = document.getElementById('payButton');
+    const resultPremiumButton = document.getElementById('resultPremiumButton');
+    const birthTimeUnknown = document.getElementById('birthTimeUnknown');
+    const timeHourSelect = document.getElementById('timeHour');
+    const timeMinuteSelect = document.getElementById('timeMinute');
     let latestSummary = null;
+    window.__freeSummarySeed = null;
+    window.__getLatestSummaryState = () => ({ summary: latestSummary, seed: window.__freeSummarySeed || null });
+
+    function isBirthTimeUnknown() {
+      return Boolean(birthTimeUnknown?.checked);
+    }
+
+    function syncBirthTimeState() {
+      const unknown = isBirthTimeUnknown();
+      if (timeHourSelect) {
+        if (unknown && timeHourSelect.value) timeHourSelect.dataset.previousValue = timeHourSelect.value;
+        timeHourSelect.disabled = unknown;
+        if (unknown) {
+          timeHourSelect.value = '';
+        } else if (!timeHourSelect.value && timeHourSelect.dataset.previousValue) {
+          timeHourSelect.value = timeHourSelect.dataset.previousValue;
+        }
+      }
+      if (timeMinuteSelect) {
+        if (unknown && timeMinuteSelect.value) timeMinuteSelect.dataset.previousValue = timeMinuteSelect.value;
+        timeMinuteSelect.disabled = unknown;
+        if (unknown) {
+          timeMinuteSelect.value = '';
+        } else if (!timeMinuteSelect.value && timeMinuteSelect.dataset.previousValue) {
+          timeMinuteSelect.value = timeMinuteSelect.dataset.previousValue;
+        }
+      }
+    }
+
+    function cleanNumeric(value, maxLength) {
+      return String(value || '').replace(/[^0-9]/g, '').slice(0, maxLength);
+    }
+
+    function normalizeTimeSelectValue(value, max) {
+      const digits = cleanNumeric(value, 2);
+      if (!digits) return '';
+      const number = Number(digits);
+      if (!Number.isFinite(number) || number < 0 || number > max) return '';
+      return String(number).padStart(2, '0');
+    }
+
+    const UNKNOWN_BIRTH_TIME_FALLBACK = Object.freeze({ hour: '12', minute: '00', label: '출생시간 미상' });
 
     function getFormPayload() {
-      const year = document.getElementById('year').value;
-      const month = document.getElementById('month').value;
-      const day = document.getElementById('day').value;
+      const year = cleanNumeric(document.getElementById('year')?.value, 4);
+      const month = cleanNumeric(document.getElementById('month')?.value, 2);
+      const day = cleanNumeric(document.getElementById('day')?.value, 2);
+      const paddedMonth = month ? month.padStart(2, '0') : '';
+      const paddedDay = day ? day.padStart(2, '0') : '';
+      const unknown = isBirthTimeUnknown();
+      const selectedHour = normalizeTimeSelectValue(timeHourSelect?.value || '', 23);
+      const selectedMinute = normalizeTimeSelectValue(timeMinuteSelect?.value || '', 59);
+      const birthHour = unknown ? UNKNOWN_BIRTH_TIME_FALLBACK.hour : selectedHour;
+      const birthMinute = unknown ? UNKNOWN_BIRTH_TIME_FALLBACK.minute : selectedMinute;
+      const calendarType = document.getElementById('calendarType').value;
+      const gender = document.querySelector('input[name="gender"]:checked')?.value || '';
+      const displayBirthTime = unknown
+        ? UNKNOWN_BIRTH_TIME_FALLBACK.label
+        : (birthHour && birthMinute ? `${birthHour}:${birthMinute}` : '');
       return {
         name: document.getElementById('name').value || '사용자',
-        buyerPhone: '',
         year,
-        month,
-        day,
-        birthDate: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-        birthTime: `${String(document.getElementById('timeHour').value || '00').padStart(2, '0')}:${String(document.getElementById('timeMinute').value || '00').padStart(2, '0')}`,
-        calendar: document.getElementById('calendarType').value,
+        month: paddedMonth,
+        day: paddedDay,
+        birthYear: year,
+        birthMonth: paddedMonth,
+        birthDay: paddedDay,
+        hour: birthHour,
+        minute: birthMinute,
+        birthHour,
+        birthMinute,
+        birthDate: year && paddedMonth && paddedDay ? `${year}-${paddedMonth}-${paddedDay}` : '',
+        birthTimeUnknown: unknown,
+        birthTime: unknown ? '' : (birthHour && birthMinute ? `${birthHour}:${birthMinute}` : ''),
+        displayBirthTime,
+        calendar: calendarType,
+        calendarType,
         isLeapMonth: document.getElementById('leapMonth').value === 'true',
-        gender: document.querySelector('input[name="gender"]:checked')?.value || ''
+        gender
       };
     }
 
@@ -1726,6 +2462,17 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         throw new Error(data.error || data.detail || '요청 처리 중 오류가 발생했습니다.');
       }
       return data;
+    }
+
+    function validateSummaryPayload(payload) {
+      if (!payload.name?.trim()) throw new Error('이름 또는 닉네임을 입력해 주세요.');
+      if (!String(payload.year || '').trim() || !String(payload.month || '').trim() || !String(payload.day || '').trim()) {
+        throw new Error('출생 연도, 월, 일을 입력해 주세요.');
+      }
+      if (!payload.gender) throw new Error('성별을 선택해 주세요.');
+      if (!payload.birthTimeUnknown && (!payload.birthHour || !payload.birthMinute)) {
+        throw new Error('출생시간을 선택하거나 출생시간 모름을 체크해 주세요.');
+      }
     }
 
     function normalizePercent(rawValues) {
@@ -1750,29 +2497,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     }
 
     function populateTimeSelectors() {
-      const hourSelect = document.getElementById('timeHour');
-      const minuteSelect = document.getElementById('timeMinute');
-      if (!hourSelect || !minuteSelect) return;
-      if (hourSelect.options.length <= 1) {
-        Array.from({ length: 24 }, (_, hour) => {
-          const value = String(hour).padStart(2, '0');
-          const option = document.createElement('option');
-          option.value = value;
-          option.textContent = `${value}시`;
-          hourSelect.appendChild(option);
-        });
-      }
-      if (minuteSelect.options.length <= 1) {
-        Array.from({ length: 60 }, (_, minute) => {
-          const value = String(minute).padStart(2, '0');
-          const option = document.createElement('option');
-          option.value = value;
-          option.textContent = `${value}분`;
-          minuteSelect.appendChild(option);
-        });
-      }
-      if (!hourSelect.value) hourSelect.value = '09';
-      if (!minuteSelect.value) minuteSelect.value = '30';
+      syncBirthTimeState();
     }
 
     function pillarToHanja(pillar) {
@@ -1903,27 +2628,54 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       }));
     }
 
+    function buildStatsFromMap(sourceMap, order, palette, formatter = (label) => label) {
+      if (!sourceMap || typeof sourceMap !== 'object') return [];
+      const rows = order.map((key) => {
+        const matchedEntry = Object.entries(sourceMap).find(([sourceKey]) => sourceKey === key || sourceKey.includes(key));
+        const raw = Number(matchedEntry?.[1] || 0);
+        const label = formatter(key);
+        return {
+          key,
+          label,
+          raw,
+          color: palette[label] || palette[key] || '#d6c8bb'
+        };
+      }).filter((item) => item.raw > 0);
+      const total = rows.reduce((sum, item) => sum + item.raw, 0) || 1;
+      return rows.map((item) => ({ ...item, value: Number(((item.raw / total) * 100).toFixed(1)) }));
+    }
+
     function buildAnalysisStats(result) {
       const details = result.pillarDetails || buildFallbackPillarDetails({ year: result.year, month: result.month, day: result.day, hour: result.hour });
       const detailList = [details.year, details.month, details.day, details.hour].filter(Boolean);
       const elementItems = [];
       const tenGodItems = [];
       detailList.forEach((detail) => {
-        if (detail?.ohaeng?.gan) elementItems.push(detail.ohaeng.gan);
-        if (detail?.ohaeng?.ji) elementItems.push(detail.ohaeng.ji);
-        if (detail?.sipseong?.gan) tenGodItems.push(detail.sipseong.gan);
-        if (detail?.sipseong?.ji) tenGodItems.push(detail.sipseong.ji);
+        if (detail?.ohaeng?.gan && detail.ohaeng.gan !== '-') elementItems.push(detail.ohaeng.gan);
+        if (detail?.ohaeng?.ji && detail.ohaeng.ji !== '-') elementItems.push(detail.ohaeng.ji);
+        if (detail?.sipseong?.gan && detail.sipseong.gan !== '-') tenGodItems.push(detail.sipseong.gan);
+        if (detail?.sipseong?.ji && detail.sipseong.ji !== '-') tenGodItems.push(detail.sipseong.ji);
       });
 
-      const elementOrder = ['목(木)', '화(火)', '토(土)', '금(金)', '수(水)'];
-      const elementMap = { 목: '목(木)', 화: '화(火)', 토: '토(土)', 금: '금(金)', 수: '수(水)' };
-      const elementStats = countBy(elementItems.map((item) => elementMap[item] || item), elementOrder, getElementPalette());
+      const elementPalette = getElementPalette();
+      const tenGodPalette = getTenGodPalette();
+      const elementOrderRaw = ['목', '화', '토', '금', '수'];
+      const elementDisplayMap = { 목: '목(木)', 화: '화(火)', 토: '토(土)', 금: '금(金)', 수: '수(水)' };
+      let elementStats = buildStatsFromMap(result.fiveElements, elementOrderRaw, elementPalette, (key) => elementDisplayMap[key]);
+      if (!elementStats.length) {
+        const fallbackElementStats = countBy(elementItems.map((item) => elementDisplayMap[item] || item), Object.values(elementDisplayMap), elementPalette);
+        elementStats = fallbackElementStats.filter((item) => item.count > 0).map((item) => ({ ...item, raw: item.count }));
+      }
 
       const tenGodOrder = ['비견', '겁재', '식신', '상관', '편재', '정재', '편관', '정관', '편인', '정인', '일간'];
-      const tenGodStats = countBy(tenGodItems, tenGodOrder, getTenGodPalette()).filter((item) => item.count > 0);
+      let tenGodStats = buildStatsFromMap(result.tenGods, tenGodOrder, tenGodPalette);
+      if (!tenGodStats.length) {
+        const fallbackTenGodStats = countBy(tenGodItems, tenGodOrder, tenGodPalette).filter((item) => item.count > 0);
+        tenGodStats = fallbackTenGodStats.map((item) => ({ ...item, raw: item.count }));
+      }
 
-      const elementCore = elementStats.slice().sort((a, b) => b.value - a.value)[0] || { label: '-', value: 0 };
-      const starCore = tenGodStats.slice().sort((a, b) => b.value - a.value)[0] || { label: '-', value: 0 };
+      const elementCore = elementStats.slice().sort((a, b) => b.raw - a.raw)[0] || { label: '-', raw: 0, value: 0 };
+      const starCore = tenGodStats.slice().sort((a, b) => b.raw - a.raw)[0] || { label: '-', raw: 0, value: 0 };
       return { elementStats, tenGodStats, elementCore, starCore, details };
     }
 
@@ -1946,10 +2698,13 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
 
     function renderStatsTable(target, stats, type) {
       if (!target) return;
-      target.innerHTML = stats.filter((item) => item.value > 0).map((item) => {
-        const labelClass = type === 'element' ? getElementClass(item.label[0]) : '';
-        return `<div class="stats-row-v2"><strong class="${labelClass}" style="color:${item.color}">${item.label}</strong><span>${item.value.toFixed(1)}%</span></div>`;
-      }).join('');
+      target.innerHTML = stats
+        .filter((item) => item.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .map((item) => {
+          const labelClass = type === 'element' ? getElementClass(item.label[0]) : '';
+          return `<div class="stats-row-v2"><strong class="${labelClass}" style="color:${item.color}">${item.label}</strong><span>${item.value.toFixed(1)}%</span></div>`;
+        }).join('');
     }
 
     function buildPillarMatrixHtml(result) {
@@ -1987,36 +2742,98 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         </div>`;
     }
 
+    function buildVisibleElementSummary(result) {
+      const details = result?.pillarDetails || {};
+      const order = ['목', '화', '토', '금', '수'];
+      const counts = Object.fromEntries(order.map((key) => [key, 0]));
+      ['year', 'month', 'day', 'hour'].forEach((pillarKey) => {
+        const detail = details[pillarKey];
+        if (!detail) return;
+        if (result?.inputEcho?.birthTimeUnknown && pillarKey === 'hour') return;
+        [detail?.ohaeng?.gan, detail?.ohaeng?.ji].forEach((element) => {
+          if (counts[element] != null) counts[element] += 1;
+        });
+      });
+      const shown = order.filter((key) => counts[key] > 0).map((key) => `${key} ${counts[key]}`);
+      if (!shown.length) return '';
+      if (counts.토 === 0) shown.push('토 없음');
+      return shown.join(' · ');
+    }
+
+    function getDistributionGuide(result, isFallback) {
+      const meta = result.distributionMeta || {};
+      if (meta.panelNote || meta.elementHint) {
+        return {
+          panelNote: meta.panelNote || '',
+          elementHint: meta.elementHint || ''
+        };
+      }
+      if (isFallback) {
+        return {
+          panelNote: '현재 화면은 대체 분포 기준으로 정리한 참고 비율입니다.',
+          elementHint: '실제 Lucky API 종합 분포와는 차이가 있을 수 있습니다.'
+        };
+      }
+      return {
+        panelNote: '지장간 포함 기준으로 계산된 종합 비율입니다.',
+        elementHint: '겉으로 토가 없어 보여도 지지 속 지장간에 토 기운이 있으면 분포에 반영될 수 있어요.'
+      };
+    }
+
     function renderSummary(name, payload, result) {
       const ui = result.ui || {};
       const analysis = buildAnalysisStats(result);
+      const isFallback = result.source === 'local' || result.source === 'mock' || result.usingFallback;
+      const distributionGuide = getDistributionGuide(result, isFallback);
 
       if (pillarMatrix) pillarMatrix.innerHTML = buildPillarMatrixHtml(result);
 
-      sourceBadge.textContent = ui.sourceLabel || '만세력 API';
+      sourceBadge.textContent = ui.sourceLabel || (isFallback ? 'LOCAL FALLBACK' : 'Lucky API');
       sourceBadge.style.display = 'inline-flex';
       tagRow.innerHTML = (result.tags || []).map((tag) => `<div class="tag">${tag}</div>`).join('');
       resultIntro.textContent = ui.intro || `${name}님의 네 기둥을 중심으로 요약한 무료 결과입니다.`;
-      summaryHeadline.textContent = ui.summaryTitle || '사주의 중심 흐름';
-      summaryText.textContent = ui.summaryBody || `${name}님의 사주는 ${result.summary || ''}`;
-      premiumHint.textContent = '현재 무료 결과는 만세력 API에서 제공되는 네 기둥·오행·십성 데이터를 중심으로 보여드립니다. 상세 풀이는 프리미엄 리포트에서 더 깊게 이어집니다.';
+      summaryHeadline.textContent = ui.summaryTitle || '무료 요약 결과';
+      summaryText.textContent = isFallback
+        ? '현재 화면은 대체 데이터로 구성되었을 수 있습니다. 아래 카드에서 실제 반환값 기준 요약을 먼저 확인해 주세요.'
+        : '사주 원국, 오행·십성 경향, 핵심 해석을 아래 카드에서 확인해보세요.';
+      if (distributionNote) {
+        distributionNote.textContent = distributionGuide.panelNote || '';
+        distributionNote.classList.toggle('hidden', !distributionGuide.panelNote);
+        distributionNote.style.display = distributionGuide.panelNote ? 'inline-flex' : 'none';
+      }
+      const visibleElementSummary = buildVisibleElementSummary(result);
+      if (surfaceElementSummary) {
+        surfaceElementSummary.classList.toggle('hidden', !visibleElementSummary);
+      }
+      if (surfaceElementValues) {
+        surfaceElementValues.textContent = visibleElementSummary;
+      }
+      if (elementDistributionHint) {
+        elementDistributionHint.textContent = distributionGuide.elementHint || '';
+        elementDistributionHint.classList.toggle('hidden', !distributionGuide.elementHint);
+      }
+      premiumHint.textContent = isFallback
+        ? '현재 결과는 Lucky API 원문이 아닌 로컬 대체 요약일 수 있습니다. 재시도 후에도 동일하면 Lucky 연동 상태를 먼저 확인해 주세요.'
+        : '무료 결과는 핵심 구조와 요약 해석 중심입니다. 프리미엄 리포트에서는 대운·세운·월운과 상세 상담형 해설까지 이어집니다.';
 
-      traitTitle.textContent = ui.traitTitle || '타고난 기질';
-      traitText.textContent = ui.traitBody || result.trait || '';
-      loveTitle.textContent = ui.loveTitle || '관계 포인트';
-      loveText.textContent = ui.loveBody || result.love || '';
-      workTitle.textContent = ui.workTitle || '일·재물 포인트';
-      workText.textContent = ui.workBody || result.work || '';
+      if (coreSummaryTitle) coreSummaryTitle.textContent = '사주의 중심 흐름';
+      if (coreSummaryText) coreSummaryText.textContent = result.summary || ui.summaryBody || '';
+      traitTitle.textContent = '성향 분석';
+      traitText.textContent = result.trait || ui.traitBody || '';
+      loveTitle.textContent = '연애·관계 분석';
+      loveText.textContent = result.love || ui.loveBody || '';
+      workTitle.textContent = '일·재물 분석';
+      workText.textContent = result.work || ui.workBody || '';
 
       renderRing(elementRing, analysis.elementStats);
       renderStatsTable(elementTable, analysis.elementStats, 'element');
       elementCoreLabel.textContent = analysis.elementCore.label;
-      elementCorePct.textContent = `${analysis.elementCore.value.toFixed(1)}% · 중심 오행`;
+      elementCorePct.textContent = `${analysis.elementCore.value.toFixed(1)}%`;
 
       renderRing(starRing, analysis.tenGodStats);
       renderStatsTable(starTable, analysis.tenGodStats, 'star');
       starCoreLabel.textContent = analysis.starCore.label;
-      starCorePct.textContent = `${analysis.starCore.value.toFixed(1)}% · 중심 십성`;
+      starCorePct.textContent = `${analysis.starCore.value.toFixed(1)}%`;
 
       resultCard.classList.remove('hidden');
       resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2031,40 +2848,187 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       submitButton.textContent = '사주 계산 중...';
 
       try {
+        validateSummaryPayload(payload);
         const data = await requestJson('/api/saju/summary', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
         latestSummary = data.result;
+        window.__freeSummarySeed = { ...payload };
         if (data.result.notice) {
-          alert(data.result.notice);
+          console.info('[FREE SUMMARY NOTICE]', data.result.notice);
         }
         renderSummary(payload.name, payload, data.result);
       } catch (error) {
-        console.error(error);
-        const demoResult = buildDemoResult(payload);
-        latestSummary = demoResult;
-        renderSummary(payload.name, payload, demoResult);
-        alert('사주 계산 서버 연결이 일시적으로 불안정해 데모 결과로 먼저 보여드렸습니다. 잠시 후 다시 시도하면 실제 계산 결과를 확인할 수 있습니다.');
+        latestSummary = null;
+        window.__freeSummarySeed = null;
+        resultCard.classList.add('hidden');
+        const rawMessage = error?.message || '';
+        const userMessage = payload.birthTimeUnknown && /생시주|출생\s*생시주|hour\s*pillar/i.test(rawMessage)
+          ? '출생정보를 확인하는 중 일시적인 문제가 발생했습니다. 입력값을 확인한 뒤 다시 시도해 주세요.'
+          : (rawMessage || '무료 분석 결과를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        alert(userMessage);
       } finally {
         submitButton.disabled = false;
         submitButton.textContent = originalText;
       }
     });
 
-    payButton.addEventListener('click', () => {
-      if (!latestSummary) {
-        alert('무료 분석 결과를 먼저 확인한 뒤 상세 풀이로 이어가면 더 자연스럽게 상담을 받을 수 있어요.');
-      }
-      window.location.href = KAKAO_CHANNEL_URL;
-    });
 
     window.addEventListener('DOMContentLoaded', () => {
       populateTimeSelectors();
+      birthTimeUnknown?.addEventListener('change', syncBirthTimeState);
+      timeHourSelect?.addEventListener('change', syncBirthTimeState);
+      timeMinuteSelect?.addEventListener('change', syncBirthTimeState);
       latestSummary = null;
     });
   </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+
+
+  <div class="modal-overlay" id="premiumModal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="premiumModalTitle">
+      <div class="modal-head">
+        <div>
+          <h3 id="premiumModalTitle">프리미엄 리포트 신청</h3>
+          <p>필요한 정보를 입력한 뒤 결제를 진행하면 결제 완료 확인 후 리포트 생성이 시작됩니다.</p>
+        </div>
+        <button type="button" class="modal-close" id="premiumModalClose" aria-label="닫기">×</button>
+      </div>
+
+      <form id="premiumRequestForm" class="premium-form" novalidate>
+        <div class="order-summary">
+          <div class="order-summary-row"><span>기본 상품</span><strong id="orderProductName">프리미엄 사주 리포트</strong></div>
+          <div class="order-summary-row"><span>결제 금액</span><strong id="orderProductPrice">18,900원</strong></div>
+          <div class="helper-text">1인 18,900원 / 2인 36,000원</div>
+        </div>
+
+        <div>
+          <div class="section-title-mini">신청자 정보</div>
+          <div class="form-grid">
+            <div>
+              <label for="premiumName">이름</label>
+              <input id="premiumName" name="name" required placeholder="예: 김다온" />
+            </div>
+            <div>
+              <label for="premiumPhone">휴대폰 번호</label>
+              <input id="premiumPhone" name="phone" type="tel" inputmode="numeric" autocomplete="tel-national" required placeholder="01012345678" />
+            </div>
+            <div class="inline-2">
+              <div>
+                <label>성별</label>
+                <div class="gender-choice" role="radiogroup" aria-label="프리미엄 성별 선택">
+                  <label class="gender-option"><input type="radio" name="premiumGender" value="female" required /><span>여성</span></label>
+                  <label class="gender-option"><input type="radio" name="premiumGender" value="male" required /><span>남성</span></label>
+                </div>
+              </div>
+              <div>
+                <label for="premiumCalendarType">양력 / 음력</label>
+                <select id="premiumCalendarType" name="calendarType">
+                  <option value="solar">양력</option>
+                  <option value="lunar">음력</option>
+                </select>
+              </div>
+            </div>
+            <div class="inline-3">
+              <div>
+                <label for="premiumYear">생년</label>
+                <input id="premiumYear" name="year" inputmode="numeric" required placeholder="1994" />
+              </div>
+              <div>
+                <label for="premiumMonth">월</label>
+                <input id="premiumMonth" name="month" inputmode="numeric" required placeholder="08" />
+              </div>
+              <div>
+                <label for="premiumDay">일</label>
+                <input id="premiumDay" name="day" inputmode="numeric" required placeholder="21" />
+              </div>
+            </div>
+            <div class="inline-2">
+              <div>
+                <label for="premiumTime">태어난 시간</label>
+                <input id="premiumTime" name="birthTime" placeholder="예: 09:30" />
+                <div class="helper-text">시간을 모르면 비워둘 수 있습니다.</div>
+              </div>
+              <div>
+                <label for="premiumLeapMonth">윤달 여부</label>
+                <select id="premiumLeapMonth" name="isLeapMonth">
+                  <option value="false">아니오</option>
+                  <option value="true">예</option>
+                  <option value="unknown">모름</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label for="premiumConcern">현재 고민 또는 상담받고 싶은 내용</label>
+              <textarea id="premiumConcern" name="concern" placeholder="예: 이직 시기와 재물 흐름, 연애 방향이 궁금해요."></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="toggle-box">
+          <div class="toggle-line">
+            <div>
+              <div class="toggle-chip">2인 사주(궁합 무료 진행)</div>
+              <div class="helper-text">1인 18,900원 / 2인 36,000원</div>
+            </div>
+            <button type="button" class="switch" id="compatibilityToggle" aria-pressed="false" aria-label="2인 사주(궁합 무료 진행) 전환"></button>
+          </div>
+          <div class="collapsible-fields" id="compatibilityFields">
+            <div class="inline-2">
+              <div>
+                <label for="partnerName">상대방 이름</label>
+                <input id="partnerName" name="partnerName" placeholder="예: 박도윤" />
+              </div>
+              <div>
+                <label>상대방 성별</label>
+                <div class="gender-choice" role="radiogroup" aria-label="상대방 성별 선택">
+                  <label class="gender-option"><input type="radio" name="partnerGender" value="female" /><span>여성</span></label>
+                  <label class="gender-option"><input type="radio" name="partnerGender" value="male" /><span>남성</span></label>
+                </div>
+              </div>
+            </div>
+            <div class="inline-3">
+              <div>
+                <label for="partnerYear">상대방 생년</label>
+                <input id="partnerYear" name="partnerYear" inputmode="numeric" placeholder="1993" />
+              </div>
+              <div>
+                <label for="partnerMonth">월</label>
+                <input id="partnerMonth" name="partnerMonth" inputmode="numeric" placeholder="06" />
+              </div>
+              <div>
+                <label for="partnerDay">일</label>
+                <input id="partnerDay" name="partnerDay" inputmode="numeric" placeholder="05" />
+              </div>
+            </div>
+            <div class="inline-2">
+              <div>
+                <label for="partnerCalendarType">상대방 양력 / 음력</label>
+                <select id="partnerCalendarType" name="partnerCalendarType">
+                  <option value="solar">양력</option>
+                  <option value="lunar">음력</option>
+                </select>
+              </div>
+              <div>
+                <label for="partnerTime">상대방 태어난 시간</label>
+                <input id="partnerTime" name="partnerTime" placeholder="예: 18:30" />
+              </div>
+            </div>
+            <div>
+              <label for="partnerMemo">궁합 관련 메모</label>
+              <textarea id="partnerMemo" name="partnerMemo" placeholder="예: 결혼 시기, 가치관 차이, 관계 흐름이 궁금해요."></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="status-inline" id="premiumStatusInline"></div>
+        <button type="submit" class="btn btn-pay">결제하고 리포트 신청하기</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="./premium-flow.js"></script>
 </body>
 </html>
