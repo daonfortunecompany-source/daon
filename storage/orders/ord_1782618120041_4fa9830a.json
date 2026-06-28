@@ -1,0 +1,63 @@
+{
+  "id": "ord_1782618120041_4fa9830a",
+  "createdAt": "2026-06-28T03:42:00.041Z",
+  "updatedAt": "2026-06-28T03:42:00.043Z",
+  "status": "payment_pending",
+  "product": {
+    "type": "single",
+    "name": "프리미엄 사주 리포트",
+    "price": 18900
+  },
+  "applicant": {
+    "name": "수연",
+    "gender": "male",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "온라인 사주 사업을 준비중인데 잘 될까요?",
+    "memo": ""
+  },
+  "partner": null,
+  "person1": {
+    "name": "수연",
+    "gender": "male",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "온라인 사주 사업을 준비중인데 잘 될까요?",
+    "memo": ""
+  },
+  "person2": null,
+  "compatibilityRequested": false,
+  "warnings": [],
+  "payment": {
+    "price": 18900,
+    "productName": "프리미엄 사주 리포트",
+    "mulNo": "mock_1782618120042",
+    "payState": 1,
+    "method": "mock",
+    "payUrl": "http://localhost:3114/mock-pay/ord_1782618120041_4fa9830a"
+  },
+  "artifacts": {},
+  "logs": [
+    {
+      "at": "2026-06-28T03:42:00.043Z",
+      "type": "payment_request_created",
+      "detail": {
+        "mulNo": "mock_1782618120042"
+      }
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "id": "ord_1782623211206_5a9e5cfd",
+  "createdAt": "2026-06-28T05:06:51.206Z",
+  "updatedAt": "2026-06-28T05:06:51.207Z",
+  "status": "payment_pending",
+  "product": {
+    "type": "compatibility",
+    "name": "2인 사주(궁합 무료 진행)",
+    "price": 36000
+  },
+  "applicant": {
+    "name": "수연",
+    "gender": "male",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "온라인 사주 사업을 준비중인데 잘 될까요?",
+    "memo": ""
+  },
+  "partner": {
+    "name": "정수라",
+    "gender": "female",
+    "birthYear": "1995",
+    "birthMonth": "05",
+    "birthDay": "14",
+    "birthTime": "21:45",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "",
+    "memo": ""
+  },
+  "person1": {
+    "name": "수연",
+    "gender": "male",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "온라인 사주 사업을 준비중인데 잘 될까요?",
+    "memo": ""
+  },
+  "person2": {
+    "name": "정수라",
+    "gender": "female",
+    "birthYear": "1995",
+    "birthMonth": "05",
+    "birthDay": "14",
+    "birthTime": "21:45",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "",
+    "memo": ""
+  },
+  "compatibilityRequested": true,
+  "warnings": [],
+  "payment": {
+    "price": 36000,
+    "productName": "2인 사주(궁합 무료 진행)",
+    "mulNo": "mock_1782623211207",
+    "payState": 1,
+    "method": "mock",
+    "payUrl": "http://localhost:3121/mock-pay/ord_1782623211206_5a9e5cfd"
+  },
+  "artifacts": {},
+  "logs": [
+    {
+      "at": "2026-06-28T05:06:51.207Z",
+      "type": "payment_request_created",
+      "detail": {
+        "mulNo": "mock_1782623211207"
+      }
+    }
+  ]
+}

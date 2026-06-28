@@ -1,0 +1,91 @@
+{
+  "id": "ord_1782584324900_2af98d2f",
+  "createdAt": "2026-06-27T18:18:44.901Z",
+  "updatedAt": "2026-06-27T18:18:44.902Z",
+  "status": "payment_pending",
+  "product": {
+    "type": "compatibility",
+    "name": "2인 사주(궁합 무료 진행)",
+    "price": 36000
+  },
+  "applicant": {
+    "name": "수연",
+    "gender": "male",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "테스트",
+    "memo": ""
+  },
+  "partner": {
+    "name": "정수라",
+    "gender": "female",
+    "birthYear": "1995",
+    "birthMonth": "05",
+    "birthDay": "14",
+    "birthTime": "21:45",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "",
+    "memo": ""
+  },
+  "person1": {
+    "name": "수연",
+    "gender": "male",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "테스트",
+    "memo": ""
+  },
+  "person2": {
+    "name": "정수라",
+    "gender": "female",
+    "birthYear": "1995",
+    "birthMonth": "05",
+    "birthDay": "14",
+    "birthTime": "21:45",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "",
+    "memo": ""
+  },
+  "compatibilityRequested": true,
+  "warnings": [],
+  "payment": {
+    "price": 36000,
+    "productName": "2인 사주(궁합 무료 진행)",
+    "mulNo": "mock_1782584324902",
+    "payState": 1,
+    "method": "mock",
+    "payUrl": "http://127.0.0.1:3111/mock-pay/ord_1782584324900_2af98d2f"
+  },
+  "artifacts": {},
+  "logs": [
+    {
+      "at": "2026-06-27T18:18:44.902Z",
+      "type": "payment_request_created",
+      "detail": {
+        "mulNo": "mock_1782584324902"
+      }
+    }
+  ]
+}

@@ -26,6 +26,7 @@ const LUCKY_API_BASE_URL = (process.env.LUCKY_API_BASE_URL || 'https://luckylove
 const DEFAULT_PERIOD_YEAR = Number(process.env.DEFAULT_PERIOD_YEAR || 2026);
 const DEFAULT_PERIOD_MONTH = Number(process.env.DEFAULT_PERIOD_MONTH || 6);
 const DEFAULT_PERIOD_DAY = Number(process.env.DEFAULT_PERIOD_DAY || 1);
+const DEBUG_MODE = String(process.env.DEBUG_MODE || 'false').toLowerCase() === 'true';
 const ALLOW_LOCAL_FALLBACK = process.env.ALLOW_LOCAL_FALLBACK != null
   ? String(process.env.ALLOW_LOCAL_FALLBACK).toLowerCase() === 'true'
   : String(process.env.USE_MOCK_DATA || 'false').toLowerCase() === 'true';
@@ -45,14 +46,16 @@ const CONFIG = {
     defaultPeriodDay: DEFAULT_PERIOD_DAY
   },
   ai: {
-    apiKey: process.env.KIE_AI_API_KEY || '',
+    provider: process.env.AI_PROVIDER || 'kie',
+    apiKey: process.env.KIE_AI_API_KEY || process.env.AI_API_KEY || '',
     baseUrl: (process.env.AI_API_BASE_URL || 'https://api.kie.ai').replace(/\/$/, ''),
-    path: process.env.AI_API_PATH || '/gpt-5-2/v1/chat/completions',
+    path: process.env.AI_API_PATH || '/v1/chat/completions',
     style: process.env.AI_API_STYLE || 'chat_completions',
     model: process.env.AI_MODEL || 'gpt-5-2',
     temperature: Number(process.env.AI_TEMPERATURE || 0.4),
     maxTokens: Number(process.env.AI_MAX_TOKENS || 12000),
-    timeoutMs: Number(process.env.AI_TIMEOUT_MS || 180000)
+    timeoutMs: Number(process.env.AI_TIMEOUT_MS || 180000),
+    debugMode: DEBUG_MODE
   },
   payapp: {
     apiUrl: process.env.PAYAPP_API_URL || 'https://api.payapp.kr/oapi/apiLoad.html',
@@ -89,6 +92,21 @@ app.get('/api/health', async (_req, res) => {
     time: new Date().toISOString()
   });
 });
+
+
+if (CONFIG.ai.debugMode) {
+  app.get('/api/debug/kie-smoke', async (req, res) => {
+    try {
+      const mode = ['smoke', 'compact_report', 'full_report'].includes(String(req.query.mode || ''))
+        ? String(req.query.mode)
+        : 'smoke';
+      const result = await runKieSmokeTest(mode);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error.message || 'KIE smoke test failed' });
+    }
+  });
+}
 
 app.post('/api/saju/summary', async (req, res) => {
   const rawBody = req.body || {};
@@ -909,6 +927,8 @@ function toLuckyFlatPayload(person) {
     day,
     hour,
     minute,
+    time: person.birthTime || '',
+    birthTime: person.birthTime || '',
     birthYear: year,
     birthMonth: month,
     birthDay: day,
@@ -1316,6 +1336,15 @@ function validateBirthPillarSelection(pillarDebug, payload) {
   const expectedHourBranch = guessExpectedHourBranch(payload.birthTime || '');
   if (hourBranch && expectedHourBranch && hourBranch !== expectedHourBranch) {
     console.log(`[SAJU VALIDATION] hour branch mismatch detected: input=${payload.birthTime || ''}, expected=${expectedHourBranch}, actual=${hourBranch}`);
+    console.log('[SAJU VALIDATION] hour branch mismatch detail', JSON.stringify({
+      inputBirthTime: payload.birthTime || '',
+      inputHour: String(payload.birthTime || '').split(':')[0] || '',
+      inputMinute: String(payload.birthTime || '').split(':')[1] || '',
+      expectedHourBranch,
+      actualHourBranch: hourBranch,
+      selectedHourPath: pillarDebug?.selectedPaths?.hour || '',
+      selectedHourPillar: pillarDebug?.pillars?.hour || ''
+    }));
   }
 }
 
@@ -1857,12 +1886,52 @@ function collectConcernKeywords(concern) {
     .filter((token) => token.length >= 2 && !stop.has(token)))).slice(0, 8);
 }
 
-function tryParseJsonText(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
+function extractBalancedJsonCandidate(text) {
+  const source = String(text || '').trim();
+  if (!source) return '';
+  const first = source.indexOf('{');
+  if (first < 0) return '';
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = first; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(first, index + 1);
+    }
   }
+  return '';
+}
+
+function tryParseJsonText(text) {
+  if (text == null) return null;
+  const raw = String(text).trim();
+  if (!raw) return null;
+  const candidates = [raw, stripCodeFences(raw), extractBalancedJsonCandidate(stripCodeFences(raw))].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
 }
 
 function sanitizeKiePreviewText(text, limit = 500) {
@@ -1870,7 +1939,7 @@ function sanitizeKiePreviewText(text, limit = 500) {
     .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer [redacted]')
     .replace(/sk-[A-Za-z0-9_-]+/g, '[redacted-key]')
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[redacted-email]')
-    .replace(/"(name|birthYear|birthMonth|birthDay|birthHour|birthMinute|year|month|day|hour|minute|phone|email|concern|note|memo)"\s*:\s*"[^"]*"/gi, '"$1":"[redacted]"')
+    .replace(/"(name|birthYear|birthMonth|birthDay|birthHour|birthMinute|year|month|day|hour|minute|phone|email|concern|note|memo|birthTime)"\s*:\s*"[^"]*"/gi, '"$1":"[redacted]"')
     .slice(0, limit);
 }
 
@@ -1889,6 +1958,7 @@ function extractTextFromMessageContent(content) {
     if (part?.text && typeof part.text === 'string') return part.text;
     if (part?.output_text && typeof part.output_text === 'string') return part.output_text;
     if (typeof part?.content === 'string') return part.content;
+    if (Array.isArray(part?.content)) return extractTextFromMessageContent(part.content);
     return '';
   }).filter(Boolean).join('\n');
 }
@@ -1953,13 +2023,40 @@ function extractNestedJsonStringCandidates(parsed) {
   return values.filter((item) => item.value);
 }
 
+function normalizeSectionHeading(label) {
+  return String(label || '').replace(/^#+\s*/, '').replace(/\s+/g, ' ').replace(/\s*,\s*/g, ',').trim();
+}
+
+function parseTextTitleSections(raw, requiredSections) {
+  const lines = String(raw || '').replace(/\r/g, '').split('\n');
+  const headingMap = new Map();
+  requiredSections.forEach((title) => {
+    headingMap.set(normalizeSectionHeading(title), title);
+    if (title === '신살,귀인') headingMap.set('신살, 귀인', title);
+  });
+  const sections = Object.fromEntries(requiredSections.map((title) => [title, '']));
+  let current = '';
+  for (const line of lines) {
+    const normalizedHeading = normalizeSectionHeading(line);
+    if (headingMap.has(normalizedHeading)) {
+      current = headingMap.get(normalizedHeading) || '';
+      continue;
+    }
+    if (!current) continue;
+    sections[current] = `${sections[current]}${sections[current] ? '\n' : ''}${line}`.trim();
+  }
+  return Object.values(sections).some(Boolean) ? sections : null;
+}
+
 function detectKieResponseFormat(raw, parsed, requiredSections) {
   const trimmed = String(raw || '').trim();
   if (!trimmed) return 'empty';
   if (/^```/m.test(trimmed)) return 'markdown';
+  if (/^##\s+/m.test(trimmed)) return 'text_titles';
   if (hasLikelySectionKeys(parsed, requiredSections)) return 'json';
   if (parsed?.sections || parsed?.data?.sections || parsed?.result?.sections) return 'json';
   if (parsed && typeof parsed === 'object') return 'json_wrapper';
+  if (/server exception|try again later|error/i.test(trimmed)) return 'error_message';
   return 'plain_text';
 }
 
@@ -2000,6 +2097,22 @@ function parseKieSectionMap(raw, requiredSections) {
       result.sections = normalizeAiSections(winner.value, requiredSections);
       return result;
     }
+    const textSections = parseTextTitleSections(candidate.value, requiredSections);
+    if (textSections) {
+      result.sourcePath = `${candidate.label} -> text_titles`;
+      result.preview = sanitizeKiePreviewText(candidate.value);
+      result.foundSectionKeys = requiredSections.filter((key) => textSections[key]);
+      result.sections = normalizeAiSections(textSections, requiredSections);
+      return result;
+    }
+  }
+
+  const rawTextSections = parseTextTitleSections(rawTrimmed, requiredSections);
+  if (rawTextSections) {
+    result.sourcePath = 'raw_text_titles';
+    result.foundSectionKeys = requiredSections.filter((key) => rawTextSections[key]);
+    result.sections = normalizeAiSections(rawTextSections, requiredSections);
+    return result;
   }
 
   result.parseFailureReason = parsedRaw
@@ -2022,8 +2135,17 @@ function detectRepeatedSentences(sections) {
   return Array.from(map.entries()).filter(([, count]) => count >= 3).map(([sentence, count]) => ({ sentence, count }));
 }
 
+function hasCompatibilityPromptPayload(promptPayload) {
+  return Boolean(
+    promptPayload?.partnerInfo?.name
+    || promptPayload?.chartData?.compatibility
+    || promptPayload?.compatibilitySummary
+    || promptPayload?.rawBundle?.compatibility
+  );
+}
+
 function validateAiSections(sections, promptPayload, meta = {}) {
-  const requiredSections = buildRequiredAiSections(Boolean(promptPayload?.partnerInfo?.name && promptPayload?.rawBundle?.compatibility));
+  const requiredSections = buildRequiredAiSections(hasCompatibilityPromptPayload(promptPayload));
   const errors = [];
   const paragraphCounts = {};
   const sectionLengths = {};
@@ -2045,7 +2167,7 @@ function validateAiSections(sections, promptPayload, meta = {}) {
   if (Number(meta.rawLength || 0) < 1000) errors.push('raw_response_too_short_or_parse_failed');
   if (totalLength < 5000) errors.push('total_section_length_too_short');
   if (Object.values(sectionLengths).every((value) => Number(value || 0) === 0)) errors.push('all_sections_empty_parser_error');
-  const concern = String(promptPayload?.basicInfo?.concern || '').trim();
+  const concern = String(promptPayload?.basicInfo?.concern || promptPayload?.concern || '').trim();
   if (concern) {
     const concernText = String(sections?.['고민에 대한 조언'] || '');
     const keywords = collectConcernKeywords(concern);
@@ -2062,7 +2184,7 @@ function validateAiSections(sections, promptPayload, meta = {}) {
       if (passed < 10) errors.push('온라인 사주 사업 질문 필수 항목 부족');
     }
   }
-  if (promptPayload?.partnerInfo?.name && promptPayload?.rawBundle?.compatibility) {
+  if (hasCompatibilityPromptPayload(promptPayload)) {
     const relationText = String(sections?.['관계/궁합 해석'] || '');
     const relationChecks = [/(일간)/, /(오행)/, /(십성)/, /(감정)/, /(소통)/, /(갈등)/, /(회복)/, /(협업|사업)/, /(금전)/, /(종합|결론)/];
     if (relationChecks.filter((regex) => regex.test(relationText)).length < 7) {
@@ -2101,127 +2223,462 @@ function buildConcernSpecificInstruction(concern, hasCompatibility) {
   return lines.join(' ');
 }
 
-function buildRetryInstruction(reason) {
+function buildRetryInstruction(reason, outputMode = 'json') {
+  if (outputMode === 'text_titles') {
+    const base = '이전 응답은 실패했습니다. 이번에는 JSON이 아니라 순수 텍스트만 반환하세요. 코드블록, 마크다운 설명문, 사전 안내 문구를 금지합니다. 각 제목은 반드시 `## 제목` 형식을 쓰고, 제목 아래 본문만 작성하세요. 각 섹션은 빈 내용 없이 최소 3문단 이상, 관계/궁합 해석과 고민에 대한 조언은 최소 5문단 이상 작성하세요.';
+    return reason ? `${base} 이전 실패 사유: ${reason}` : base;
+  }
   const base = '이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 모든 필수 섹션 key를 빠짐없이 포함하고, 각 key의 value는 빈 문자열 없이 최소 3문단 이상 작성하세요. "핵심 요약", "사주 원국 해석" 등 key 이름을 정확히 사용하세요.';
   return reason ? `${base} 이전 실패 사유: ${reason}` : base;
 }
 
+function estimateApproxTokens(value) {
+  const chars = typeof value === 'string' ? value.length : JSON.stringify(value || {}).length;
+  return Math.ceil(chars / 2.4);
+}
+
+function buildAiPayloadForMode(promptPayload, requiredSections, mode = 'full_report') {
+  const chartData = promptPayload?.chartData || {};
+  const compact = {
+    basicInfo: promptPayload?.basicInfo || {},
+    partnerInfo: promptPayload?.partnerInfo || null,
+    pillars: chartData.pillars || {},
+    pillarDetails: chartData.pillarDetails || {},
+    fiveElements: chartData.fiveElements || {},
+    tenGods: chartData.tenGods || {},
+    strength: chartData.strength || null,
+    yongsin: chartData.yongsin || null,
+    johu: chartData.johu || null,
+    daeunSummary: chartData.daeun || null,
+    futureFiveYearsSummary: chartData.futureFiveYears || [],
+    futureSixMonthsSummary: chartData.futureSixMonths || [],
+    compatibilitySummary: chartData.compatibility || null,
+    concern: promptPayload?.basicInfo?.concern || '',
+    consistencyWarnings: promptPayload?.internalReference?.consistencyWarnings || [],
+    requiredSections
+  };
+  if (mode === 'full_report') {
+    return {
+      ...compact,
+      rawBundle: promptPayload?.rawBundle || {}
+    };
+  }
+  return compact;
+}
+
+function buildTextTitleTemplate(requiredSections) {
+  return requiredSections.map((title) => `## ${title}`).join('\n\n');
+}
+
+function buildAiRequestSizeSummary({ systemPrompt, userText, requestBody, payloadMode, payloadForAi }) {
+  const rawBundleKeys = Object.keys(payloadForAi?.rawBundle || {});
+  const messagesCount = Array.isArray(requestBody?.messages)
+    ? requestBody.messages.length
+    : Array.isArray(requestBody?.input)
+      ? requestBody.input.length
+      : 0;
+  return {
+    payloadMode,
+    promptChars: systemPrompt.length + userText.length,
+    messagesCount,
+    approxTokens: estimateApproxTokens(systemPrompt) + estimateApproxTokens(userText),
+    rawBundleKeys,
+    hasRawMansae: Boolean(payloadForAi?.rawBundle?.mansae),
+    hasRawSaju: Boolean(payloadForAi?.rawBundle?.saju),
+    hasRawPeriod: Boolean(payloadForAi?.rawBundle?.period),
+    hasRawCompatibility: Boolean(payloadForAi?.rawBundle?.compatibility),
+    requestBodyChars: JSON.stringify(requestBody).length,
+    requestBodyApproxTokens: estimateApproxTokens(requestBody)
+  };
+}
+
+function getAiErrorMessage(parsed) {
+  if (!parsed || typeof parsed !== 'object') return '';
+  return String(
+    parsed.msg
+    || parsed.message
+    || parsed.error?.message
+    || parsed.error_description
+    || parsed.detail
+    || parsed.result?.message
+    || ''
+  ).trim();
+}
+
+function detectUpstreamAiError(raw, httpStatus, requiredSections) {
+  const parsed = tryParseJsonText(raw);
+  const bodyCode = parsed?.code ?? parsed?.statusCode ?? parsed?.error?.code ?? null;
+  const bodyMessage = getAiErrorMessage(parsed);
+  if (!parsed || typeof parsed !== 'object') {
+    return {
+      isError: !httpStatus || httpStatus >= 400,
+      bodyCode: httpStatus || null,
+      bodyMessage: httpStatus >= 400 ? 'http_error' : '',
+      detectedFormat: 'plain_text'
+    };
+  }
+  if (hasLikelySectionKeys(parsed, requiredSections) || parsed?.sections || parsed?.data?.sections || parsed?.result?.sections) {
+    return { isError: false, bodyCode, bodyMessage, detectedFormat: 'json' };
+  }
+  const numericBodyCode = Number(bodyCode);
+  if ((Number.isFinite(numericBodyCode) && numericBodyCode >= 400) || parsed?.error || /server exception|try again later|quota|insufficient|invalid api key/i.test(bodyMessage)) {
+    return {
+      isError: true,
+      bodyCode: Number.isFinite(numericBodyCode) ? numericBodyCode : (bodyCode || 'error'),
+      bodyMessage,
+      detectedFormat: detectKieResponseFormat(raw, parsed, requiredSections)
+    };
+  }
+  return { isError: false, bodyCode, bodyMessage, detectedFormat: detectKieResponseFormat(raw, parsed, requiredSections) };
+}
+
+function resolveAiStyle() {
+  const configured = String(CONFIG.ai.style || '').trim();
+  if (configured) return configured;
+  return String(CONFIG.ai.path || '').includes('/responses') ? 'responses' : 'chat_completions';
+}
+
+function resolveAiEndpointPath(style = 'chat_completions') {
+  let configured = String(CONFIG.ai.path || '').trim();
+  if (!configured) configured = style === 'responses' ? '/v1/responses' : '/v1/chat/completions';
+  if (!configured.startsWith('/')) configured = `/${configured}`;
+  if (/^\/[^/]+\/v1\/chat\/completions$/i.test(configured) && configured.includes(CONFIG.ai.model)) {
+    console.log('[KIE AI] suspicious endpointPath normalized', JSON.stringify({ configuredPath: configured, normalizedPath: '/v1/chat/completions', model: CONFIG.ai.model }));
+    return '/v1/chat/completions';
+  }
+  if (/^\/[^/]+\/v1\/responses$/i.test(configured) && configured.includes(CONFIG.ai.model)) {
+    console.log('[KIE AI] suspicious endpointPath normalized', JSON.stringify({ configuredPath: configured, normalizedPath: '/v1/responses', model: CONFIG.ai.model }));
+    return '/v1/responses';
+  }
+  return configured;
+}
+
+function buildAiAttemptPlan(attempt) {
+  if (attempt === 1) {
+    return {
+      mode: 'full_report',
+      outputMode: 'json',
+      maxTokens: CONFIG.ai.maxTokens,
+      includeRawBundle: true
+    };
+  }
+  return {
+    mode: 'compact_report',
+    outputMode: 'text_titles',
+    maxTokens: Math.min(CONFIG.ai.maxTokens, 7000),
+    includeRawBundle: false
+  };
+}
+
+function buildAiRequestBody({ style, systemPrompt, userText, outputMode, maxTokens }) {
+  if (style === 'responses') {
+    return {
+      model: CONFIG.ai.model,
+      max_output_tokens: maxTokens,
+      input: [
+        { role: 'system', content: [{ type: 'input_text', text: systemPrompt }] },
+        { role: 'user', content: [{ type: 'input_text', text: userText }] }
+      ]
+    };
+  }
+  const body = {
+    model: CONFIG.ai.model,
+    temperature: CONFIG.ai.temperature,
+    max_tokens: maxTokens,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userText }
+    ]
+  };
+  if (outputMode === 'json') body.response_format = { type: 'json_object' };
+  return body;
+}
+
+async function callAiProvider({ label, attempt, payloadMode, outputMode, systemPrompt, userText, requiredSections }) {
+  const style = resolveAiStyle();
+  const endpointPath = resolveAiEndpointPath(style);
+  const endpoint = `${CONFIG.ai.baseUrl}${endpointPath}`;
+  const requestBody = buildAiRequestBody({ style, systemPrompt, userText, outputMode, maxTokens: payloadMode.maxTokens });
+  const requestSize = buildAiRequestSizeSummary({ systemPrompt, userText, requestBody, payloadMode: payloadMode.mode, payloadForAi: payloadMode.payloadForAi });
+  console.log(`[${label}] request start`, JSON.stringify({
+    attempt,
+    provider: CONFIG.ai.provider,
+    model: CONFIG.ai.model,
+    style,
+    endpointPath,
+    mode: payloadMode.mode,
+    outputMode,
+    maxTokens: payloadMode.maxTokens,
+    timeoutMs: CONFIG.ai.timeoutMs
+  }));
+  console.log(`[${label}] input bundle keys`, JSON.stringify({
+    basicInfo: Object.keys(payloadMode.payloadForAi?.basicInfo || {}),
+    partnerInfo: Object.keys(payloadMode.payloadForAi?.partnerInfo || {}),
+    topLevelKeys: Object.keys(payloadMode.payloadForAi || {}),
+    requiredSections
+  }));
+  console.log(`[${label}] request size`, JSON.stringify(requestSize));
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CONFIG.ai.timeoutMs);
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.ai.apiKey}` },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+    const raw = await response.text();
+    console.log(`[${label}] response received`, JSON.stringify({ attempt, status: response.status, rawLength: raw.length }));
+    console.log(`[${label}] raw response preview`, JSON.stringify({ attempt, status: response.status, rawLength: raw.length, preview: sanitizeKiePreviewText(raw) }));
+    const upstream = detectUpstreamAiError(raw, response.status, requiredSections);
+    if (!response.ok || upstream.isError) {
+      console.log(`[${label}] upstream error`, JSON.stringify({
+        httpStatus: response.status,
+        bodyCode: upstream.bodyCode,
+        bodyMessage: upstream.bodyMessage,
+        endpointPath,
+        model: CONFIG.ai.model,
+        requestSize,
+        attempt
+      }));
+      return {
+        ok: false,
+        raw,
+        response,
+        requestSize,
+        endpointPath,
+        upstreamError: {
+          httpStatus: response.status,
+          bodyCode: upstream.bodyCode,
+          bodyMessage: upstream.bodyMessage || (!response.ok ? `HTTP ${response.status}` : 'upstream_error'),
+          attempt,
+          endpointPath,
+          model: CONFIG.ai.model,
+          requestSize,
+          detectedFormat: upstream.detectedFormat || 'unknown'
+        }
+      };
+    }
+    return { ok: true, raw, response, requestSize, endpointPath };
+  } catch (error) {
+    const message = error?.name === 'AbortError' ? 'kie_ai_timeout' : (error.message || 'unknown');
+    console.log(`[${label}] transport error`, JSON.stringify({ attempt, endpointPath, message }));
+    return {
+      ok: false,
+      error,
+      requestSize,
+      endpointPath,
+      upstreamError: {
+        httpStatus: 0,
+        bodyCode: 'transport_error',
+        bodyMessage: message,
+        attempt,
+        endpointPath,
+        model: CONFIG.ai.model,
+        requestSize,
+        detectedFormat: 'transport_error'
+      }
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function buildSmokePromptPayload() {
+  const requiredSections = buildRequiredAiSections(true);
+  return {
+    basicInfo: {
+      name: '테스트 사용자',
+      gender: 'male',
+      birthYear: '1996',
+      birthMonth: '07',
+      birthDay: '03',
+      birthTime: '15:00',
+      calendarType: '양력',
+      baselineDate: '2026-06-01',
+      concern: '온라인 사주 사업을 준비중인데 잘 될까요?'
+    },
+    partnerInfo: {
+      name: '테스트 상대',
+      gender: 'female',
+      birthYear: '1995',
+      birthMonth: '05',
+      birthDay: '14',
+      birthTime: '21:45',
+      calendarType: '양력'
+    },
+    chartData: {
+      pillars: { year: '병자', month: '갑오', day: '무술', hour: '경신' },
+      pillarDetails: { year: { gan: '병', ji: '자' }, month: { gan: '갑', ji: '오' }, day: { gan: '무', ji: '술' }, hour: { gan: '경', ji: '신' } },
+      fiveElements: { 목: 22, 화: 27, 토: 24, 금: 15, 수: 12 },
+      tenGods: { 비견: 14, 식신: 12, 정재: 10, 편관: 11 },
+      strength: '중화에 가까우나 화와 토가 상대적으로 강합니다.',
+      yongsin: '수와 금의 균형 보강이 중요합니다.',
+      johu: '화기 조절과 수기 보완이 필요합니다.',
+      daeun: [{ ageRange: '31-40', summary: '사업 확장과 구조 정비가 함께 들어오는 흐름' }],
+      futureFiveYears: [{ year: '2026', summary: '준비한 서비스를 구체화하기 좋은 해' }],
+      futureSixMonths: [{ year: '2026', month: '07', summary: '상품 구조를 다듬기 좋은 달' }],
+      compatibility: { summary: '서로의 생활 속도는 다르지만 역할 분담이 되면 안정적입니다.' }
+    },
+    rawBundle: {
+      mansae: { sample: true },
+      saju: { sample: true },
+      period: { sample: true },
+      compatibility: { sample: true }
+    },
+    internalReference: {
+      consistencyWarnings: [],
+      compatibilityRequested: true,
+      requiredSections
+    }
+  };
+}
+
+async function runKieSmokeTest(mode = 'smoke') {
+  if (!CONFIG.ai.apiKey) {
+    return { ok: false, mode, error: 'AI API key missing' };
+  }
+  const promptPayload = buildSmokePromptPayload();
+  const fullSections = buildRequiredAiSections(true);
+  const smokeSections = ['핵심 요약', '사주 원국 해석', '대운', '고민에 대한 조언', '관계/궁합 해석'];
+  if (mode === 'smoke') {
+    const systemPrompt = '당신은 JSON만 반환하는 응답기입니다. 반드시 {"ok":true,"message":"pong"}만 반환하세요.';
+    const userText = '안녕하세요. JSON으로 {"ok":true,"message":"pong"} 만 반환하세요.';
+    const payloadMode = { mode: 'smoke', maxTokens: 200, payloadForAi: { smoke: true } };
+    const result = await callAiProvider({ label: 'KIE SMOKE', attempt: 1, payloadMode, outputMode: 'json', systemPrompt, userText, requiredSections: [] });
+    if (!result.ok) {
+      console.log('[KIE SMOKE] ok', JSON.stringify({ ok: false, mode, upstreamError: result.upstreamError }));
+      return { ok: false, mode, ...result.upstreamError };
+    }
+    const parsed = tryParseJsonText(result.raw);
+    const ok = parsed?.ok === true && parsed?.message === 'pong';
+    console.log('[KIE SMOKE] ok', JSON.stringify({ ok, mode, status: result.response.status }));
+    return { ok, mode, status: result.response.status, preview: sanitizeKiePreviewText(result.raw), parsed };
+  }
+
+  const requiredSections = mode === 'compact_report' ? smokeSections : fullSections;
+  const payloadForAi = buildAiPayloadForMode(promptPayload, requiredSections, mode === 'compact_report' ? 'compact_report' : 'full_report');
+  const systemPrompt = [
+    '당신은 숙련된 한국어 사주 해석 상담사입니다.',
+    mode === 'compact_report'
+      ? '반드시 JSON 객체만 반환하고, 아래 필수 섹션 5개만 작성하세요.'
+      : '반드시 JSON 객체만 반환하고, 아래 필수 섹션을 모두 작성하세요.',
+    '마크다운, 코드블록, 설명문을 금지합니다.'
+  ].join(' ');
+  const userText = JSON.stringify({ requiredSections, promptPayload: payloadForAi });
+  const payloadMode = { mode, maxTokens: mode === 'compact_report' ? 2000 : 5000, payloadForAi };
+  const result = await callAiProvider({ label: 'KIE SMOKE', attempt: 1, payloadMode, outputMode: 'json', systemPrompt, userText, requiredSections });
+  if (!result.ok) {
+    console.log('[KIE SMOKE] ok', JSON.stringify({ ok: false, mode, upstreamError: result.upstreamError }));
+    return { ok: false, mode, ...result.upstreamError };
+  }
+  const parsedMeta = parseKieSectionMap(result.raw, requiredSections);
+  const validation = validateAiSections(parsedMeta.sections || {}, { ...promptPayload, chartData: promptPayload.chartData, partnerInfo: promptPayload.partnerInfo }, parsedMeta);
+  console.log('[KIE SMOKE] ok', JSON.stringify({ ok: validation.ok, mode, detectedFormat: parsedMeta.detectedFormat }));
+  return {
+    ok: validation.ok,
+    mode,
+    status: result.response.status,
+    detectedFormat: parsedMeta.detectedFormat,
+    preview: sanitizeKiePreviewText(result.raw),
+    validation
+  };
+}
+
 async function generateAiSections(promptPayload) {
   if (!CONFIG.ai.apiKey) {
-    const error = new Error('KIE AI API 키가 설정되지 않았습니다.');
+    const error = new Error('AI API 키가 설정되지 않았습니다.');
     error.failedStep = 'kie_ai';
     error.progress = 88;
     throw error;
   }
-  const requiredSections = buildRequiredAiSections(Boolean(promptPayload?.partnerInfo?.name && promptPayload?.rawBundle?.compatibility));
+  const requiredSections = buildRequiredAiSections(hasCompatibilityPromptPayload(promptPayload));
   const schemaGuide = Object.fromEntries(requiredSections.map((key) => [key, 'string']));
   const concernInstruction = buildConcernSpecificInstruction(promptPayload?.basicInfo?.concern || '', requiredSections.includes('관계/궁합 해석'));
-  const endpoint = `${CONFIG.ai.baseUrl}${CONFIG.ai.path}`;
-  const style = CONFIG.ai.style || (endpoint.includes('/responses') ? 'responses' : 'chat_completions');
   let retryReason = '';
   let lastError = null;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CONFIG.ai.timeoutMs);
-    try {
-      console.log('[KIE AI] request start', JSON.stringify({ attempt, model: CONFIG.ai.model, style, endpointPath: CONFIG.ai.path, maxTokens: CONFIG.ai.maxTokens, timeoutMs: CONFIG.ai.timeoutMs }));
-      console.log('[KIE AI] input bundle keys', JSON.stringify({
-        basicInfo: Object.keys(promptPayload?.basicInfo || {}),
-        partnerInfo: Object.keys(promptPayload?.partnerInfo || {}),
-        chartData: Object.keys(promptPayload?.chartData || {}),
-        rawBundle: Object.keys(promptPayload?.rawBundle || {}),
-        requiredSections
-      }));
-      const systemPrompt = [
-        '당신은 숙련된 한국어 사주 해석 상담사입니다.',
-        '반드시 한국어로만 작성하세요.',
-        'API, JSON, 시스템, 모델, 데이터 구조 같은 기술 용어는 절대 드러내지 마세요.',
-        '문체는 상담형으로 자연스럽고 친절하게 작성하세요.',
-        '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 데이터를 근거로 프리미엄 리포트 수준의 상세 해석을 작성하세요.',
-        '반드시 JSON 객체만 반환하고, 스키마 키 이름을 한 글자도 바꾸지 마세요.',
-        '마크다운 금지, 코드블록 금지, 설명문 금지입니다.',
-        '각 섹션은 최소 3문단 이상, 관계/궁합 해석과 고민에 대한 조언은 최소 5문단 이상 작성하세요.',
-        '같은 문장을 반복하지 말고, 실제 삶의 장면이 떠오르는 예시와 실행 조언을 포함하세요.',
-        concernInstruction,
-        attempt > 1 ? buildRetryInstruction(retryReason) : ''
-      ].filter(Boolean).join(' ');
-      const userPrompt = {
-        requiredOutputSchema: schemaGuide,
-        requiredSectionOrder: requiredSections,
-        promptPayload
-      };
-      const requestBody = style === 'responses'
-        ? {
-            model: CONFIG.ai.model,
-            max_output_tokens: CONFIG.ai.maxTokens,
-            input: [
-              { role: 'system', content: [{ type: 'input_text', text: systemPrompt }] },
-              { role: 'user', content: [{ type: 'input_text', text: JSON.stringify(userPrompt) }] }
-            ]
-          }
-        : {
-            model: CONFIG.ai.model,
-            temperature: CONFIG.ai.temperature,
-            max_tokens: CONFIG.ai.maxTokens,
-            response_format: { type: 'json_object' },
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: JSON.stringify(userPrompt) }
-            ]
-          };
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.ai.apiKey}` },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal
-      });
-      const raw = await response.text();
-      clearTimeout(timeout);
-      console.log('[KIE AI] response received', JSON.stringify({ attempt, status: response.status, rawLength: raw.length }));
-      console.log('[KIE AI] raw response preview', JSON.stringify({ attempt, status: response.status, rawLength: raw.length, preview: sanitizeKiePreviewText(raw) }));
-      if (!response.ok) throw new Error(`KIE AI 호출 실패: ${response.status}`);
-      const parsedMeta = parseKieSectionMap(raw, requiredSections);
-      if (!parsedMeta.sections) {
-        console.log('[KIE AI] parse failure', JSON.stringify({
-          detectedFormat: parsedMeta.detectedFormat,
-          parseFailureReason: parsedMeta.parseFailureReason,
-          sourcePath: parsedMeta.sourcePath,
-          rawLength: parsedMeta.rawLength,
-          preview: parsedMeta.preview
-        }));
-      }
-      const normalized = parsedMeta.sections || Object.fromEntries(requiredSections.map((key) => [key, '']));
-      const validation = validateAiSections(normalized, promptPayload, parsedMeta);
-      console.log('[KIE AI] section keys', JSON.stringify(validation.foundSectionKeys.length ? validation.foundSectionKeys : Object.keys(normalized)));
-      console.log('[KIE AI] section lengths', JSON.stringify(validation.sectionLengths));
-      console.log('[KIE AI] validation result', JSON.stringify(validation));
-      if (validation.ok) return normalized;
-      retryReason = validation.parseFailureReason || validation.errors.slice(0, 8).join(' | ') || 'unknown';
+    const plan = buildAiAttemptPlan(attempt);
+    const payloadForAi = buildAiPayloadForMode(promptPayload, requiredSections, plan.mode);
+    plan.payloadForAi = payloadForAi;
+    const systemPrompt = [
+      '당신은 숙련된 한국어 사주 해석 상담사입니다.',
+      '반드시 한국어로만 작성하세요.',
+      'API, JSON, 시스템, 모델, 데이터 구조 같은 기술 용어는 절대 드러내지 마세요.',
+      '문체는 상담형으로 자연스럽고 친절하게 작성하세요.',
+      '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 데이터를 근거로 프리미엄 리포트 수준의 상세 해석을 작성하세요.',
+      plan.outputMode === 'json'
+        ? '반드시 JSON 객체만 반환하고, 스키마 키 이름을 한 글자도 바꾸지 마세요. 마크다운 금지, 코드블록 금지, 설명문 금지입니다.'
+        : `JSON 대신 순수 텍스트로만 작성하세요. 각 제목은 반드시 다음 형식을 지키세요:\n${buildTextTitleTemplate(requiredSections)}\n제목 외의 도입 문구, 코드블록, 마크다운 설명문은 금지입니다.`,
+      '각 섹션은 최소 3문단 이상, 관계/궁합 해석과 고민에 대한 조언은 최소 5문단 이상 작성하세요.',
+      '같은 문장을 반복하지 말고, 실제 삶의 장면이 떠오르는 예시와 실행 조언을 포함하세요.',
+      concernInstruction,
+      attempt > 1 ? buildRetryInstruction(retryReason, plan.outputMode) : ''
+    ].filter(Boolean).join(' ');
+    const userText = JSON.stringify({
+      requiredOutputSchema: plan.outputMode === 'json' ? schemaGuide : null,
+      requiredSectionOrder: requiredSections,
+      promptPayload: payloadForAi
+    });
+
+    const result = await callAiProvider({
+      label: 'KIE AI',
+      attempt,
+      payloadMode: plan,
+      outputMode: plan.outputMode,
+      systemPrompt,
+      userText,
+      requiredSections
+    });
+
+    if (!result.ok) {
+      lastError = new Error(result.upstreamError?.bodyMessage || 'KIE upstream error');
+      lastError.failedStep = 'kie_ai';
+      lastError.progress = 88;
+      retryReason = `${result.upstreamError?.bodyCode || 'error'}:${result.upstreamError?.bodyMessage || 'upstream_error'}`;
       if (attempt < 2) {
-        console.log('[KIE AI] retry start', JSON.stringify({ reason: retryReason }));
+        console.log('[KIE AI] retry start', JSON.stringify({ reason: retryReason, nextMode: 'compact_report', nextOutputMode: 'text_titles' }));
         continue;
       }
-      const error = new Error('KIE AI section validation failed');
-      error.failedStep = 'kie_ai';
-      error.progress = 88;
-      throw error;
-    } catch (error) {
-      clearTimeout(timeout);
-      lastError = error;
-      const reason = error?.name === 'AbortError' ? 'kie_ai_timeout' : (error.message || 'unknown');
-      if (attempt < 2) {
-        retryReason = retryReason || reason;
-        console.log('[KIE AI] retry start', JSON.stringify({ reason }));
-        continue;
-      }
+      throw lastError;
     }
+
+    const parsedMeta = parseKieSectionMap(result.raw, requiredSections);
+    if (!parsedMeta.sections) {
+      console.log('[KIE AI] parse failure', JSON.stringify({
+        detectedFormat: parsedMeta.detectedFormat,
+        parseFailureReason: parsedMeta.parseFailureReason,
+        sourcePath: parsedMeta.sourcePath,
+        rawLength: parsedMeta.rawLength,
+        preview: parsedMeta.preview
+      }));
+    }
+    const normalized = parsedMeta.sections || Object.fromEntries(requiredSections.map((key) => [key, '']));
+    const validation = validateAiSections(normalized, promptPayload, parsedMeta);
+    console.log('[KIE AI] section keys', JSON.stringify(validation.foundSectionKeys.length ? validation.foundSectionKeys : Object.keys(normalized)));
+    console.log('[KIE AI] section lengths', JSON.stringify(validation.sectionLengths));
+    console.log('[KIE AI] validation result', JSON.stringify(validation));
+    if (validation.ok) return normalized;
+
+    retryReason = validation.parseFailureReason || validation.errors.slice(0, 8).join(' | ') || 'unknown';
+    lastError = new Error('KIE AI section validation failed');
+    lastError.failedStep = 'kie_ai';
+    lastError.progress = 88;
+    if (attempt < 2) {
+      console.log('[KIE AI] retry start', JSON.stringify({ reason: retryReason, nextMode: 'compact_report', nextOutputMode: 'text_titles' }));
+      continue;
+    }
+    throw lastError;
   }
+
   lastError = lastError || new Error('KIE AI section generation failed');
   lastError.failedStep = 'kie_ai';
   lastError.progress = 88;
   throw lastError;
 }
+
 
 function fallbackAiSections(promptPayload) {
   const name = promptPayload.applicant.name || '고객';
