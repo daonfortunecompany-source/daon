@@ -1,10 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
-import fs from 'fs/promises';
-import fsSync from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import PDFDocument from 'pdfkit';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -13,15 +10,9 @@ const app = express();
 
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
-const STORAGE_DIR = path.resolve(__dirname, process.env.REPORT_STORAGE_DIR || './storage');
-const ORDERS_DIR = path.join(STORAGE_DIR, 'orders');
-const REPORTS_DIR = path.join(STORAGE_DIR, 'reports');
-const LOGS_DIR = path.join(STORAGE_DIR, 'logs');
-const TMP_DIR = path.join(STORAGE_DIR, 'tmp');
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const FONT_REGULAR = path.join(__dirname, 'fonts', 'NanumGothic.ttf');
-const FONT_BOLD = path.join(__dirname, 'fonts', 'NanumBarunGothicBold.ttf');
 const generatingOrders = new Set();
+const runtimeOrderStore = new Map();
 const LUCKY_API_BASE_URL = (process.env.LUCKY_API_BASE_URL || 'https://luckyloveme.com').replace(/\/$/, '');
 const DEFAULT_PERIOD_YEAR = Number(process.env.DEFAULT_PERIOD_YEAR || 2026);
 const DEFAULT_PERIOD_MONTH = Number(process.env.DEFAULT_PERIOD_MONTH || 6);
@@ -81,7 +72,6 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(PUBLIC_DIR));
 
-await ensureDirectories();
 
 app.get('/api/health', async (_req, res) => {
   res.json({
@@ -272,6 +262,14 @@ app.post('/api/saju/summary', async (req, res) => {
   }
 });
 
+app.get('/api/orders/create', async (_req, res) => {
+  applyNoCacheHeaders(res);
+  return res.status(405).json({
+    ok: false,
+    error: '이 엔드포인트는 POST 요청만 지원합니다.'
+  });
+});
+
 app.post('/api/orders/create', async (req, res) => {
   try {
     const input = normalizeOrderInput(req.body || {});
@@ -303,8 +301,7 @@ app.post('/api/orders/create', async (req, res) => {
     await saveOrder(order);
     const payment = await createPaymentRequest(order);
     order.payment = { ...order.payment, ...payment };
-    order.status = 'payment_pending';
-    order.updatedAt = new Date().toISOString();
+    updateOrderProgress(order, { status: 'payment_pending', currentStep: 'payment_pending', progress: getDefaultProgressForStep('payment_pending'), failedStep: null, failedBatch: null, failedSections: [], statusMessage: '결제 완료를 기다리고 있습니다.' });
     order.logs.push(logLine('payment_request_created', { mulNo: payment.mulNo || null }));
     await saveOrder(order);
 
@@ -312,7 +309,7 @@ app.post('/api/orders/create', async (req, res) => {
       ok: true,
       orderId,
       paymentUrl: payment.payUrl,
-      statusUrl: `${BASE_URL}/report-status.html?order=${encodeURIComponent(orderId)}`
+      statusUrl: buildOrderStatusPageUrl(orderId)
     });
   } catch (error) {
     await appendLog('order_create_error', { message: error.message });
@@ -349,10 +346,22 @@ app.all('/api/payapp/feedback', async (req, res) => {
     };
 
     if (payState === 4) {
-      order.status = isOrderCompleted(order) ? 'completed' : 'payment_success';
+      if (isOrderCompleted(order)) {
+        order.status = 'completed';
+      } else {
+        updateOrderProgress(order, {
+          status: 'queued',
+          currentStep: 'queued',
+          progress: getDefaultProgressForStep('queued'),
+          failedStep: null,
+          failedBatch: null,
+          failedSections: [],
+          statusMessage: buildQueuedReceiptMessage(order)
+        });
+      }
       order.logs.push(logLine('payment_success', { payState, mulNo: order.payment.mulNo }));
       await saveOrder(order);
-      triggerReportGeneration(order.id);
+      if (!isOrderCompleted(order)) triggerReportGeneration(order.id);
     } else if ([8, 9, 32, 64, 70, 71].includes(payState)) {
       order.status = 'payment_cancelled';
       order.logs.push(logLine('payment_cancelled', { payState }));
@@ -379,8 +388,9 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
   if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' });
 
   const publicStatus = getPublicOrderStatus(order.status);
-  const downloadReady = isOrderCompleted(order);
-  res.json({
+  const canDeliverHtml = publicStatus === 'completed' && order.runtimeReport && !order.runtimeReport.deliveredAt;
+  const deliveredSections = canDeliverHtml ? cloneRuntimeOrder(order.runtimeReport.sections || {}) : null;
+  const payload = {
     orderId: order.id,
     status: publicStatus,
     progress: getOrderProgress(order),
@@ -389,24 +399,34 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
     failedBatch: order.failedBatch || null,
     failedSections: Array.isArray(order.failedSections) ? order.failedSections : [],
     message: buildStatusMessage(order),
-    downloadUrl: downloadReady ? `${BASE_URL}/api/orders/${encodeURIComponent(order.id)}/report.pdf` : null,
+    viewMode: publicStatus === 'completed' ? 'html' : null,
+    reportSections: deliveredSections,
+    reportExpired: publicStatus === 'completed' && !canDeliverHtml,
+    statusUrl: buildOrderStatusPageUrl(order.id),
     productName: order.product.name,
+    productType: order.product?.type || 'single',
+    expectedDurationText: order.product?.type === 'compatibility' ? '약 5~10분' : '약 3~7분',
     createdAt: order.createdAt,
     updatedAt: order.updatedAt
-  });
+  };
+  if (canDeliverHtml) {
+    order.runtimeReport.deliveredAt = new Date().toISOString();
+    order.runtimeReport.sections = null;
+    await saveOrder(order);
+  }
+  res.json(payload);
 });
 
-app.get('/api/orders/:orderId/report.pdf', async (req, res) => {
-  const order = await readOrder(req.params.orderId);
-  if (!order || !order.artifacts?.pdfPath) {
-    return res.status(404).json({ error: '리포트 파일을 찾을 수 없습니다.' });
-  }
-  const filePath = order.artifacts.pdfPath;
-  if (!fsSync.existsSync(filePath)) {
-    return res.status(404).json({ error: '리포트 파일이 존재하지 않습니다.' });
-  }
-  res.download(filePath, path.basename(filePath));
-});
+async function handleOrderLookup(req, res) {
+  applyNoCacheHeaders(res);
+  return res.status(410).json({
+    ok: false,
+    error: '이 버전에서는 주문 재조회 기능을 제공하지 않습니다. 결제 완료 후 현재 화면에서 리포트를 확인해 주세요.'
+  });
+}
+
+app.get('/api/orders/lookup', handleOrderLookup);
+app.post('/api/orders/lookup', handleOrderLookup);
 
 app.get('/mock-pay/:orderId', async (req, res) => {
   const order = await readOrder(req.params.orderId);
@@ -417,13 +437,21 @@ app.get('/mock-pay/:orderId', async (req, res) => {
 app.get('/mock-pay/:orderId/complete', async (req, res) => {
   const order = await readOrder(req.params.orderId);
   if (!order) return res.status(404).send('Order not found');
-  order.status = 'payment_success';
   order.payment.payState = 4;
   order.payment.mulNo = order.payment.mulNo || `mock_${Date.now()}`;
+  updateOrderProgress(order, {
+    status: 'queued',
+    currentStep: 'queued',
+    progress: getDefaultProgressForStep('queued'),
+    failedStep: null,
+    failedBatch: null,
+    failedSections: [],
+    statusMessage: buildQueuedReceiptMessage(order)
+  });
   order.logs.push(logLine('mock_payment_success', {}));
   await saveOrder(order);
   triggerReportGeneration(order.id);
-  res.redirect(`${BASE_URL}/report-status.html?order=${encodeURIComponent(order.id)}`);
+  res.redirect(buildOrderStatusPageUrl(order.id));
 });
 
 app.get('/mock-pay/:orderId/cancel', async (req, res) => {
@@ -433,7 +461,7 @@ app.get('/mock-pay/:orderId/cancel', async (req, res) => {
   order.payment.payState = 9;
   order.logs.push(logLine('mock_payment_cancelled', {}));
   await saveOrder(order);
-  res.redirect(`${BASE_URL}/report-status.html?order=${encodeURIComponent(order.id)}`);
+  res.redirect(buildOrderStatusPageUrl(order.id));
 });
 
 app.listen(PORT, () => {
@@ -453,9 +481,14 @@ async function generatePremiumReport(orderId) {
   generatingOrders.add(orderId);
   try {
     const order = await readOrder(orderId);
-    if (!order || isOrderCompleted(order)) return;
+    if (!order) return;
+    if (isOrderCompleted(order) && order.runtimeReport?.sections) {
+      console.log('[ORDER] completed order reuse', JSON.stringify({ orderId: order.id, viewMode: 'html' }));
+      return;
+    }
+    if (isOrderCompleted(order)) return;
 
-    updateOrderProgress(order, { status: 'generating', progress: 42, currentStep: 'generation', failedStep: null, failedBatch: null, failedSections: [] });
+    updateOrderProgress(order, { status: 'generating', progress: getDefaultProgressForStep('generation'), currentStep: 'generation', failedStep: null, failedBatch: null, failedSections: [], statusMessage: buildGeneratingMessage('generation') });
     order.logs.push(logLine('generation_started', {}));
     await saveOrder(order);
 
@@ -464,7 +497,7 @@ async function generatePremiumReport(orderId) {
     const applicantPayload = toLuckyFlatPayload(order.applicant);
     const hasPerson1 = Boolean(order.applicant?.name && order.applicant?.birthYear && order.applicant?.birthMonth && order.applicant?.birthDay);
     const hasPerson2 = Boolean(order.partner?.name && order.partner?.birthYear && order.partner?.birthMonth && order.partner?.birthDay && order.partner?.gender);
-    console.log('[PDF] order data loaded:', JSON.stringify({
+    console.log('[ORDER] generation payload loaded', JSON.stringify({
       orderId: order.id,
       productType: order.product?.type || 'single',
       compatibilityRequested: Boolean(order.compatibilityRequested),
@@ -472,7 +505,7 @@ async function generatePremiumReport(orderId) {
       hasPerson2
     }));
 
-    updateOrderProgress(order, { progress: 50, currentStep: 'mansae', failedStep: null });
+    updateOrderProgress(order, { progress: getDefaultProgressForStep('mansae'), currentStep: 'mansae', failedStep: null, statusMessage: buildGeneratingMessage('mansae') });
     await saveOrder(order);
     const mansaeResult = await optionalApiCall('mansae', CONFIG.lucky.mansaeUrl, [applicantPayload], warnings, false);
     if (mansaeResult.data) {
@@ -480,7 +513,7 @@ async function generatePremiumReport(orderId) {
       logLuckyResponseDiagnostics('mansae', mansaeResult.data, applicantPayload);
     }
 
-    updateOrderProgress(order, { progress: 62, currentStep: 'saju', failedStep: null });
+    updateOrderProgress(order, { progress: getDefaultProgressForStep('saju'), currentStep: 'saju', failedStep: null, statusMessage: buildGeneratingMessage('saju') });
     await saveOrder(order);
     const sajuCandidates = [{ ...applicantPayload }];
     const sajuResult = await optionalApiCall('saju', CONFIG.lucky.sajuUrl, sajuCandidates, warnings, true);
@@ -489,14 +522,14 @@ async function generatePremiumReport(orderId) {
       logLuckyResponseDiagnostics('saju', sajuResult.data, applicantPayload);
     }
 
-    updateOrderProgress(order, { progress: 72, currentStep: 'period', failedStep: null, statusMessage: buildGeneratingMessage('period') });
+    updateOrderProgress(order, { progress: getDefaultProgressForStep('period'), currentStep: 'period', failedStep: null, statusMessage: buildGeneratingMessage('period') });
     await saveOrder(order);
     const periodCandidates = buildPeriodPayloadCandidates(applicantPayload);
     const periodResult = await optionalApiCall('period', CONFIG.lucky.periodUrl, periodCandidates, warnings, true);
     if (periodResult.data) apiSnapshots.period = periodResult.data;
 
     if (shouldCallCompatibility(order)) {
-      updateOrderProgress(order, { progress: 84, currentStep: 'compatibility_api', failedStep: null, statusMessage: buildGeneratingMessage('compatibility_api') });
+      updateOrderProgress(order, { progress: getDefaultProgressForStep('compatibility_api'), currentStep: 'compatibility_api', failedStep: null, statusMessage: buildGeneratingMessage('compatibility_api') });
       await saveOrder(order);
       const compatibilityPayload = buildCompatibilityPayload(order.applicant, order.partner, order.partner?.memo || '');
       console.log('[COMPATIBILITY API] request start');
@@ -535,23 +568,28 @@ async function generatePremiumReport(orderId) {
       throw error;
     }
 
-    updateOrderProgress(order, { progress: 88, currentStep: 'core', failedStep: null, statusMessage: buildGeneratingMessage('core') });
+    updateOrderProgress(order, { progress: getDefaultProgressForStep('kie_ai'), currentStep: 'kie_ai', failedStep: null, statusMessage: buildGeneratingMessage('kie_ai') });
     await saveOrder(order);
     const promptPayload = buildAiPromptPayload(order, apiSnapshots, warnings);
     const aiSections = await generateAiSections(promptPayload, order);
 
-    updateOrderProgress(order, { progress: 98, currentStep: 'pdf', failedStep: null, statusMessage: buildGeneratingMessage('pdf') });
+    updateOrderProgress(order, { progress: 98, currentStep: 'html_render', failedStep: null, statusMessage: buildGeneratingMessage('html_render') });
     await saveOrder(order);
-    const pdfFilePath = await renderPremiumPdf(order, promptPayload, aiSections);
-    console.log('[PDF] generated', JSON.stringify({ orderId: order.id, pdfFilePath }));
+    console.log('[REPORT HTML] render start', JSON.stringify({ orderId: order.id, sections: Object.keys(aiSections || {}) }));
 
-    updateOrderProgress(order, { status: 'completed', progress: 100, currentStep: 'completed', failedStep: null, statusMessage: buildGeneratingMessage('completed') });
-    order.artifacts.pdfPath = pdfFilePath;
-    order.artifacts.aiSections = aiSections;
-    order.artifacts.promptPayload = promptPayload;
-    order.logs.push(logLine('generation_completed', { pdfFilePath }));
+    updateOrderProgress(order, { status: 'completed', progress: 100, currentStep: 'completed', failedStep: null, failedBatch: null, failedSections: [], statusMessage: buildGeneratingMessage('completed') });
+    order.runtimeReport = {
+      sections: aiSections,
+      deliveredAt: null,
+      copyReady: true,
+      createdAt: new Date().toISOString()
+    };
+    order.artifacts = { partialAiSections: null };
+    order.logs.push(logLine('generation_completed', { viewMode: 'html' }));
     await saveOrder(order);
-    console.log('[ORDER] status completed', JSON.stringify({ orderId: order.id, status: order.status }));
+    console.log('[REPORT HTML] render completed', JSON.stringify({ orderId: order.id, sectionCount: Object.keys(aiSections || {}).length }));
+    console.log('[REPORT HTML] copy button ready', JSON.stringify({ orderId: order.id }));
+    console.log('[ORDER] status completed', JSON.stringify({ orderId: order.id, status: order.status, viewMode: 'html' }));
   } catch (error) {
     const order = await readOrder(orderId);
     if (order) {
@@ -780,7 +818,7 @@ async function createPaymentRequest(order) {
     price: String(order.product.price),
     recvphone: order.applicant.phone || '',
     feedbackurl: `${BASE_URL}${CONFIG.payapp.feedbackPath}`,
-    returnurl: `${BASE_URL}${CONFIG.payapp.returnPath}?order=${encodeURIComponent(order.id)}`,
+    returnurl: `${BASE_URL}${CONFIG.payapp.returnPath}?orderId=${encodeURIComponent(order.id)}`,
     var1: order.id,
     var2: order.applicant.email || ''
   });
@@ -831,24 +869,26 @@ function isOrderCompleted(order) {
 
 function getDefaultProgressForStep(step) {
   const map = {
-    payment_pending: 18,
-    payment_success: 42,
-    generation: 42,
-    mansae: 50,
-    saju: 62,
-    period: 72,
-    compatibility_api: 84,
-    kie_ai: 88,
+    created: 0,
+    payment_pending: 5,
+    queued: 10,
+    payment_success: 10,
+    generation: 12,
+    mansae: 25,
+    saju: 35,
+    period: 45,
+    compatibility_api: 55,
+    kie_ai: 60,
     core: 88,
     timing: 90,
     analysis: 92,
     life: 94,
     concern: 96,
     compatibility: 97,
-    pdf: 98,
+    html_render: 98,
     completed: 100
   };
-  return map[step] ?? 72;
+  return map[step] ?? 12;
 }
 
 function getOrderProgress(order) {
@@ -896,43 +936,53 @@ function buildFailureMessage(failedStep) {
     case 'saju':
       return '리포트 생성 중 핵심 사주 해석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
     default:
-      return '리포트 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      return '리포트 생성 중 일시적인 문제가 발생했습니다. 결제는 정상 확인되었으나, 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도하거나 고객센터로 문의해 주세요.';
   }
+}
+
+function buildQueuedReceiptMessage(order) {
+  return [
+    '리포트 생성 중입니다.',
+    '',
+    '이 페이지를 닫지 말고 잠시만 기다려 주세요.',
+    '생성 완료 후 리포트가 현재 화면에 표시됩니다.',
+    '',
+    '예상 소요 시간:',
+    '1인 리포트: 약 3~7분',
+    '2인 리포트: 약 5~10분',
+    '',
+    '2인 궁합 리포트는 분석 내용이 많아 몇 분 정도 소요될 수 있습니다.'
+  ].join('\n');
 }
 
 function buildGeneratingMessage(step) {
   const currentStep = String(step || '').trim();
   switch (currentStep) {
+    case 'queued':
     case 'payment_success':
+      return buildQueuedReceiptMessage({});
     case 'generation':
-      return '결제가 확인되어 리포트 생성을 시작했습니다.';
+      return '리포트 생성 중입니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요. 생성 완료 후 리포트가 현재 화면에 표시됩니다.';
     case 'mansae':
-      return '만세력 원국 데이터를 확인하고 있습니다.';
     case 'saju':
-      return '핵심 사주 원국과 세부 해석 데이터를 정리하고 있습니다.';
+      return '입력하신 생년월일시를 바탕으로 사주 정보를 계산하고 있습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.';
     case 'period':
-      return '대운, 세운, 월운의 기준 데이터를 불러오고 있습니다.';
     case 'compatibility_api':
-      return '궁합 원본 데이터를 분석하고 있습니다.';
+      return '운의 흐름과 관계 참고 데이터를 정리하고 있습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.';
     case 'kie_ai':
     case 'core':
-      return '핵심 요약과 원국 해석을 생성하고 있습니다.';
     case 'timing':
-      return '대운, 세운, 월운 흐름을 분석하고 있습니다.';
     case 'analysis':
-      return '십성, 재물운, 직업운을 분석하고 있습니다.';
     case 'life':
-      return '애정운, 건강운, 실천 조언을 정리하고 있습니다.';
     case 'concern':
-      return '고민에 대한 맞춤 조언을 작성하고 있습니다.';
     case 'compatibility':
-      return '관계와 궁합 해석을 정리하고 있습니다.';
-    case 'pdf':
-      return 'PDF를 생성하고 있습니다.';
+      return '리포트 생성 중입니다. 사주 원국과 운의 흐름을 바탕으로 해석 문장을 작성하고 있습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.';
+    case 'html_render':
+      return '완성된 해석 내용을 모바일 리포트 화면으로 정리하고 있습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.';
     case 'completed':
-      return '리포트 생성이 완료되었습니다.';
+      return '리포트 생성이 완료되었습니다. 현재 화면에서 전체 내용을 복사해 보관해 주세요.';
     default:
-      return '사주를 해석하고 PDF를 준비하고 있습니다.';
+      return '리포트 제작 중입니다. 이 페이지를 닫아도 제작은 계속 진행됩니다.';
   }
 }
 
@@ -941,13 +991,14 @@ function buildStatusMessage(order) {
   const publicStatus = getPublicOrderStatus(order?.status);
   switch (publicStatus) {
     case 'payment_pending':
-      return '결제 완료를 기다리고 있습니다.';
+      return '결제 승인 여부를 확인하고 있습니다.';
+    case 'queued':
     case 'payment_success':
-      return buildGeneratingMessage(order?.currentStep || 'payment_success');
+      return buildQueuedReceiptMessage(order);
     case 'generating':
       return buildGeneratingMessage(order?.currentStep || 'generation');
     case 'completed':
-      return '프리미엄 리포트가 준비되었습니다. 아래 다운로드 버튼으로 결과물을 받으실 수 있습니다.';
+      return '리포트 생성이 완료되었습니다. 현재 화면에서 전체 내용을 복사해 보관해 주세요.';
     case 'payment_cancelled':
       return '결제가 취소되어 결과물 생성이 진행되지 않았습니다.';
     case 'failed':
@@ -2241,7 +2292,7 @@ function detectRepeatedSentences(sections) {
       map.set(sentence, (map.get(sentence) || 0) + 1);
     }
   }
-  return Array.from(map.entries()).filter(([, count]) => count >= 3).map(([sentence, count]) => ({ sentence, count }));
+  return Array.from(map.entries()).filter(([, count]) => count >= 25).map(([sentence, count]) => ({ sentence, count }));
 }
 
 function hasCompatibilityPromptPayload(promptPayload) {
@@ -2278,7 +2329,7 @@ const SECTION_PROMPT_TARGET_PARAGRAPHS = {
   '월운': 5,
   '운성': 5,
   '고민에 대한 조언': 5,
-  '관계/궁합 해석': 5
+  '관계/궁합 해석': 6
 };
 
 const KIE_BATCH_PROGRESS = {
@@ -2288,7 +2339,7 @@ const KIE_BATCH_PROGRESS = {
   life: 94,
   concern: 96,
   compatibility: 97,
-  pdf: 98,
+  html_render: 98,
   completed: 100
 };
 
@@ -2314,7 +2365,7 @@ const SECTION_MIN_VISIBLE_CHARS = {
   '실천 조언': 700,
   '주의할 점': 600,
   '고민에 대한 조언': 1200,
-  '관계/궁합 해석': 1200
+  '관계/궁합 해석': 1000
 };
 
 const META_RESPONSE_PHRASES = [
@@ -2326,6 +2377,43 @@ const META_RESPONSE_PHRASES = [
   '다음과 같이 나누어',
   '죄송합니다',
   '작성할 수 없습니다'
+];
+
+const KIE_POLICY_REFUSAL_PHRASES = [
+  '죄송하지만',
+  '수행할 수 없습니다',
+  '도와드릴 수 없습니다',
+  '특정한 운세',
+  '사실처럼 단정',
+  '성공 가능성',
+  '예측할 수 없습니다',
+  '제공된 정보만으로',
+  '운세나 사업 성공',
+  '상세한 사주 해석',
+  '미래를 예측',
+  '결정되어 있다',
+  '단정할 수 없습니다'
+];
+
+const COMPATIBILITY_FORBIDDEN_PATTERNS = [
+  /반드시\s*잘\s*맞/,
+  /절대\s*맞지\s*않/,
+  /결혼하면\s*성공/,
+  /헤어질\s*가능성이\s*높/,
+  /사업을\s*하면\s*성공/,
+  /실패한다/,
+  /운명(이다|적으로)/,
+  /최악의\s*궁합/,
+  /최고의\s*궁합/,
+  /반드시\s*조심/,
+  /미래가\s*정해져/,
+  /확정적으로/,
+  /성공\s*가능성이\s*높/,
+  /이별\s*가능성이\s*높/,
+  /결혼운이\s*정해져/,
+  /사업운이\s*(좋|나쁘)/,
+  /궁합은\s*매우\s*좋/,
+  /궁합은\s*나쁘/
 ];
 
 function getReportBatches(hasCompatibility) {
@@ -2370,9 +2458,11 @@ function getBatchTimeoutMs(batchName = '') {
 
 async function persistBatchProgress(order, batchName, eventType, detail = {}) {
   if (!order) return;
-  const currentStep = getBatchRootName(batchName) || 'kie_ai';
-  const progress = getBatchProgress(batchName);
-  const statusMessage = buildGeneratingMessage(currentStep);
+  const currentStep = detail.currentStep || getBatchRootName(batchName) || 'kie_ai';
+  const progress = Number.isFinite(Number(detail.progressOverride))
+    ? Number(detail.progressOverride)
+    : Math.max(getOrderProgress(order), getBatchProgress(batchName));
+  const statusMessage = detail.statusMessage || buildGeneratingMessage(currentStep);
   updateOrderProgress(order, { status: 'generating', currentStep, progress, failedStep: null, statusMessage });
   if (eventType) order.logs.push(logLine(eventType, { batchName, ...detail }));
   await saveOrder(order);
@@ -2466,10 +2556,29 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
   }
   if (hasCompatibilityPromptPayload(promptPayload) && requiredSections.includes('관계/궁합 해석')) {
     const relationText = String(sections?.['관계/궁합 해석'] || '');
-    const relationChecks = [/(일간)/, /(오행)/, /(십성)/, /(감정)/, /(소통)/, /(갈등)/, /(회복)/, /(협업|사업)/, /(금전)/, /(종합|결론)/];
-    if (relationChecks.filter((regex) => regex.test(relationText)).length < 7) {
+    const relationChecks = [
+      /(기질|성향|차이)/,
+      /(소통|대화|말투)/,
+      /(감정|표현)/,
+      /(갈등|충돌|마찰)/,
+      /(보완|장점|강점)/,
+      /(역할|분담|협업|함께 일)/,
+      /(현실|금전|생활)/,
+      /(조언|실천|패턴|방법|안정)/
+    ];
+    if (relationChecks.filter((regex) => regex.test(relationText)).length < 5) {
       sectionErrors['관계/궁합 해석'].push('핵심 포인트 부족');
       errors.push('관계/궁합 해석 핵심 포인트 부족');
+    }
+    const refusal = detectKiePolicyRefusal(relationText);
+    if (refusal.detected) {
+      sectionErrors['관계/궁합 해석'].push('거절 응답 포함');
+      errors.push('관계/궁합 해석 거절 응답 포함');
+    }
+    const deterministic = COMPATIBILITY_FORBIDDEN_PATTERNS.some((pattern) => pattern.test(relationText));
+    if (deterministic) {
+      sectionErrors['관계/궁합 해석'].push('단정적 표현 포함');
+      errors.push('관계/궁합 해석 단정적 표현 포함');
     }
   }
   const repeated = detectRepeatedSentences(sections);
@@ -2688,14 +2797,20 @@ function shouldSplitBatchOnValidation(batch, validation) {
 }
 
 function buildSingleSectionPromptGuide(section) {
-  return [
+  const base = [
     `이번 호출에서는 "${section}" 섹션 하나만 작성하세요.`,
     `최소 ${getSectionPromptTargetChars(section)}자 이상 작성하세요.`,
     `반드시 ${getSectionPromptTargetParagraphs(section)}문단 이상 작성하세요.`,
     '각 문단은 2~3문장 이상으로 작성하세요.',
     '짧게 요약하지 말고 실제 생활 예시, 주의점, 실천 조언을 반드시 포함하세요.',
     `반드시 {"${section}":"본문"} 형식의 JSON 객체만 반환하세요.`
-  ].join(' ');
+  ];
+  if (section === '관계/궁합 해석') {
+    base.push('관계 성향, 소통 방식, 갈등 포인트, 보완점, 현실 조언을 모두 포함하세요.');
+    base.push('결혼/이별/성공/실패를 단정하지 말고, 운명론적 표현과 확정적 예언을 금지하세요.');
+    base.push('사과문, 거절문, 안내문, 코드블록, 요청받지 않은 다른 key를 절대 쓰지 마세요.');
+  }
+  return base.join(' ');
 }
 
 function buildSectionRequirementGuide(sections, isolated = false) {
@@ -2704,12 +2819,87 @@ function buildSectionRequirementGuide(sections, isolated = false) {
     : `${section}: 최소 ${getSectionPromptTargetParagraphs(section)}문단, 최소 ${getSectionPromptTargetChars(section)}자, 각 문단 2~3문장 이상, 실제 예시/주의점/실천 조언 포함`).join(' | ');
 }
 
+function isCompatibilityOnlyBatch(batch) {
+  return Array.isArray(batch?.sections) && batch.sections.length === 1 && batch.sections[0] === '관계/궁합 해석';
+}
+
+function getBatchMaxAttempts(batch) {
+  return isCompatibilityOnlyBatch(batch) ? 3 : 2;
+}
+
+function detectKiePolicyRefusal(text) {
+  const raw = String(text || '').trim();
+  const matches = KIE_POLICY_REFUSAL_PHRASES.filter((phrase) => raw.includes(phrase));
+  return {
+    detected: matches.length > 0,
+    matches
+  };
+}
+
+function buildCompatibilitySpecificInstruction(attempt = 1) {
+  const sharedRules = [
+    '섹션 제목은 관계/궁합 해석으로 유지하되, 본문은 관계 분석과 소통 코칭 중심으로 작성하세요.',
+    '반드시 JSON 객체만 반환하고, key는 관계/궁합 해석 하나만 사용하세요.',
+    '반드시 {"관계/궁합 해석":"본문"} 형식의 순수 JSON만 반환하세요.',
+    '최소 1600자 이상, 최소 6문단 이상, 각 문단 2~3문장 이상으로 작성하세요.',
+    '관계 성향, 소통 방식, 갈등 포인트, 보완점, 역할 분담, 금전과 현실 문제, 안정적인 대화 조언을 모두 포함하세요.',
+    '결혼, 이별, 성공, 실패, 운명, 최고, 최악 같은 단정적 표현을 금지합니다.',
+    '사과문, 거절문, 안내문, 코드블록, 마크다운, 추가 key를 절대 쓰지 마세요.'
+  ].join(' ');
+  if (attempt === 1) {
+    return `${sharedRules} 다음 내용은 운세 예측이나 결혼/이별/성공/실패에 대한 단정이 아닙니다. 두 사람의 관계 성향과 소통 방식을 이해하기 위한 참고용 관계 분석 문서입니다. 생년월일과 사주 정보는 전통적 성향 분석의 참고 자료로만 사용하세요. 미래 결과를 확정적으로 말하지 말고, 두 사람의 기질 차이, 감정 표현 방식, 갈등이 생기기 쉬운 지점, 서로 보완되는 부분, 함께 생활하거나 일할 때의 역할 분담, 돈과 현실 문제를 다루는 방식, 관계를 안정적으로 유지하기 위한 대화법과 실천 조언을 중심으로 작성하세요. 이 관계는 단정적인 좋고 나쁨보다 조율 방식이 중요하다는 톤을 유지하세요.`;
+  }
+  if (attempt === 2) {
+    return `${sharedRules} 이 글은 운세 예측이나 성공/실패 단정이 아니라, 두 사람의 성향 차이와 소통 방식을 설명하는 관계 코칭 문서입니다. 생년월일 정보는 전통적 성향 분석의 참고 자료로만 사용하고, 미래 결과를 단정하지 마세요. 두 사람의 관계 흐름은 서로의 차이를 이해할수록 안정된다는 관점으로, 감정 확인 대화, 갈등 조율, 속도 차이 이해, 생활 습관 조정, 현실적인 협력 방식을 중심으로 작성하세요.`;
+  }
+  return `${sharedRules} 두 사람의 관계를 성격, 소통, 갈등 관리, 역할 분담, 함께 생활하거나 일할 때의 주의점 중심으로 설명하세요. 미래 사건을 예측하거나 좋고 나쁨을 단정하지 마세요. 사주 용어는 최소한으로만 사용하고, 상담 참고용 관계 코칭 문장으로 작성하세요. 결혼/이별/성공/실패를 판단하지 말고, 서로에게 도움이 되는 대화법과 생활 조율 팁을 분명하게 제시하세요.`;
+}
+
+function buildBatchWaves(batches) {
+  const ordered = Array.isArray(batches) ? batches.slice() : [];
+  if (!ordered.length) return [];
+  const usesSingleSectionMode = ordered.some((batch) => String(batch?.batchName || '').includes(':'));
+  if (usesSingleSectionMode) {
+    const waves = [];
+    for (let index = 0; index < ordered.length; index += 3) {
+      waves.push(ordered.slice(index, index + 3));
+    }
+    return waves;
+  }
+  const preferred = [
+    ['core', 'timing', 'analysis'],
+    ['life', 'concern', 'compatibility']
+  ];
+  const consumed = new Set();
+  const waves = preferred.map((group) => group
+    .map((name) => ordered.find((batch) => batch.batchName === name))
+    .filter(Boolean)
+    .filter((batch) => {
+      if (consumed.has(batch.batchName)) return false;
+      consumed.add(batch.batchName);
+      return true;
+    }))
+    .filter((wave) => wave.length > 0);
+  const remaining = ordered.filter((batch) => !consumed.has(batch.batchName));
+  for (let index = 0; index < remaining.length; index += 3) {
+    waves.push(remaining.slice(index, index + 3));
+  }
+  return waves;
+}
+
 async function generateKieBatch(promptPayload, batch, endpointPath, order = null) {
   let retryReason = '';
   let lastError = null;
   let lastValidation = null;
   const isSingleSection = batch.sections.length === 1;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  const isCompatibilityBatch = isCompatibilityOnlyBatch(batch);
+  const maxAttempts = getBatchMaxAttempts(batch);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (isCompatibilityBatch) {
+      const attemptLabel = attempt === 1 ? 'attempt 1' : attempt === 2 ? 'attempt 2 safe prompt' : 'attempt 3 conservative prompt';
+      console.log('[KIE AI COMPATIBILITY] start', JSON.stringify({ batchName: batch.batchName }));
+      console.log('[KIE AI COMPATIBILITY]', attemptLabel);
+    }
     const plan = buildAiAttemptPlan(attempt);
     const payloadForAi = buildAiPayloadForMode(promptPayload, batch.sections, plan.mode);
     plan.payloadForAi = payloadForAi;
@@ -2724,6 +2914,7 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       '"한 번에 작성할 수 없습니다" 같은 메타 문장을 절대 쓰지 마세요.',
       buildSectionRequirementGuide(batch.sections, isSingleSection),
       buildConcernSpecificInstruction(promptPayload?.basicInfo?.concern || '', batch.sections.includes('관계/궁합 해석')),
+      isCompatibilityBatch ? buildCompatibilitySpecificInstruction(attempt) : '',
       attempt > 1 ? buildRetryInstruction(retryReason, 'json', batch.sections) : ''
     ].filter(Boolean).join(' ');
     const userText = JSON.stringify({
@@ -2767,8 +2958,8 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       retryReason = `${result.upstreamError?.bodyCode || 'error'}:${result.upstreamError?.bodyMessage || 'upstream_error'}`;
       console.log('[KIE AI BATCH] error type', JSON.stringify({ batchName: batch.batchName, attempt, type: result.upstreamError?.type || 'unknown' }));
       console.log('[KIE AI BATCH] error message', JSON.stringify({ batchName: batch.batchName, attempt, message: result.upstreamError?.bodyMessage || 'upstream_error' }));
-      console.log('[KIE AI BATCH] failed batchName', JSON.stringify({ batchName: batch.batchName, attempt, willRetry: attempt < 2 && result.upstreamError?.type !== 'KIE_UPSTREAM_HTTP_ERROR' }));
-      const shouldRetry = attempt < 2 && result.upstreamError?.type !== 'KIE_UPSTREAM_HTTP_ERROR';
+      console.log('[KIE AI BATCH] failed batchName', JSON.stringify({ batchName: batch.batchName, attempt, willRetry: attempt < maxAttempts && result.upstreamError?.type !== 'KIE_UPSTREAM_HTTP_ERROR' }));
+      const shouldRetry = attempt < maxAttempts && result.upstreamError?.type !== 'KIE_UPSTREAM_HTTP_ERROR';
       if (shouldRetry) {
         await persistBatchProgress(order, batch.batchName, 'kie_batch_retry', { attempt, reason: retryReason });
         console.log('[KIE AI BATCH] retry start', JSON.stringify({ batchName: batch.batchName, reason: retryReason }));
@@ -2778,6 +2969,26 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
     }
 
     console.log('[KIE AI BATCH] response length', JSON.stringify({ batchName: batch.batchName, rawLength: result.raw.length }));
+    if (isCompatibilityBatch) {
+      console.log('[KIE AI COMPATIBILITY] raw length', JSON.stringify({ rawLength: result.raw.length }));
+    }
+    const policyRefusal = detectKiePolicyRefusal(result.raw);
+    if (isCompatibilityBatch && policyRefusal.detected) {
+      console.log('[KIE AI BATCH] policy refusal detected', JSON.stringify({ batchName: batch.batchName, attempt, matches: policyRefusal.matches }));
+      console.log('[KIE AI COMPATIBILITY] refusal detected', JSON.stringify({ attempt, matches: policyRefusal.matches }));
+      retryReason = policyRefusal.matches.join(', ') || 'policy_refusal_detected';
+      if (attempt < maxAttempts) {
+        await persistBatchProgress(order, batch.batchName, 'kie_batch_retry', { attempt, reason: retryReason, policyRefusal: true });
+        console.log('[KIE AI BATCH] retry start', JSON.stringify({ batchName: batch.batchName, reason: retryReason, safeMode: true }));
+        continue;
+      }
+      throw createKieBatchError('KIE AI compatibility policy refusal', {
+        batchName: batch.batchName,
+        failedSections: batch.sections,
+        userMessage: '리포트 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
+      });
+    }
+
     const metaResponse = detectMetaResponseText(result.raw);
     if (metaResponse.detected) {
       console.log('[KIE AI] meta response detected', JSON.stringify({ batchName: batch.batchName, matches: metaResponse.matches }));
@@ -2786,7 +2997,7 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       }
       lastError = createKieBatchError('KIE AI meta response detected', { batchName: batch.batchName, failedSections: batch.sections });
       retryReason = metaResponse.matches.join(', ') || 'meta_response_detected';
-      if (attempt < 2) {
+      if (attempt < maxAttempts) {
         await persistBatchProgress(order, batch.batchName, 'kie_batch_retry', { attempt, reason: retryReason });
         console.log('[KIE AI BATCH] retry start', JSON.stringify({ batchName: batch.batchName, reason: retryReason }));
         continue;
@@ -2808,14 +3019,26 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
     console.log('[KIE AI BATCH] passed sections', JSON.stringify(validation.passedSections || []));
     console.log('[KIE AI BATCH] failed sections', JSON.stringify(validation.failedSections || []));
     console.log('[KIE AI BATCH] validation result', JSON.stringify(validation));
+    if (isCompatibilityBatch) {
+      console.log('[KIE AI COMPATIBILITY] parsed keys', JSON.stringify(validation.foundSectionKeys.length ? validation.foundSectionKeys : Object.keys(normalized)));
+      console.log('[KIE AI COMPATIBILITY] section length', JSON.stringify(validation.sectionLengths));
+      console.log('[KIE AI COMPATIBILITY] paragraph count', JSON.stringify(validation.paragraphCounts));
+      console.log('[KIE AI COMPATIBILITY] validation result', JSON.stringify({ ok: validation.ok, errors: validation.errors, failedSections: validation.failedSections }));
+    }
     if (validation.ok) {
       console.log('[KIE AI BATCH] success', JSON.stringify({ batchName: batch.batchName, sections: batch.sections }));
+      if (isCompatibilityBatch) {
+        console.log('[KIE AI COMPATIBILITY] success', JSON.stringify({ attempt, sections: batch.sections }));
+      }
       return { ok: true, sections: normalized, validation };
     }
     retryReason = validation.parseFailureReason || validation.errors.slice(0, 8).join(' | ') || 'batch_validation_failed';
-    if (attempt < 2) {
+    if (attempt < maxAttempts) {
       await persistBatchProgress(order, batch.batchName, 'kie_batch_retry', { attempt, reason: retryReason });
       console.log('[KIE AI BATCH] retry start', JSON.stringify({ batchName: batch.batchName, reason: retryReason }));
+      if (isCompatibilityBatch) {
+        console.log('[KIE AI COMPATIBILITY] failed', JSON.stringify({ attempt, reason: retryReason, willRetry: true }));
+      }
       continue;
     }
     if (shouldSplitBatchOnValidation(batch, validation)) {
@@ -2825,6 +3048,9 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       batchName: batch.batchName,
       failedSections: validation.failedSections?.length ? validation.failedSections : batch.sections
     });
+    if (isCompatibilityBatch) {
+      console.log('[KIE AI COMPATIBILITY] failed', JSON.stringify({ attempt, reason: retryReason, willRetry: false }));
+    }
     throw lastError;
   }
   if (lastValidation && shouldSplitBatchOnValidation(batch, lastValidation)) {
@@ -3142,23 +3368,61 @@ async function generateAiSections(promptPayload, order = null) {
   const endpointPath = resolveAiEndpointPath(resolveAiStyle());
   const batches = getReportBatches(hasCompatibility);
   const finalSections = {};
+  const waves = buildBatchWaves(batches);
 
-  for (const batch of batches) {
-    await persistBatchProgress(order, batch.batchName, 'kie_batch_start', { sections: batch.sections });
-    try {
-      const sections = await generateKieBatchOrSplit(promptPayload, batch, endpointPath, order);
-      Object.assign(finalSections, sections);
-      await persistBatchProgress(order, batch.batchName, 'kie_batch_success', {
-        sections: Object.keys(sections || {}),
-        lengths: summarizeSectionLengths(sections || {}, batch.sections)
+  for (const wave of waves) {
+    if (order) {
+      updateOrderProgress(order, {
+        status: 'generating',
+        currentStep: 'kie_ai',
+        progress: Math.max(getOrderProgress(order), getDefaultProgressForStep('kie_ai')),
+        failedStep: null,
+        failedBatch: null,
+        failedSections: [],
+        statusMessage: buildGeneratingMessage('kie_ai')
       });
-    } catch (error) {
-      console.log('[KIE AI BATCH] failed batchName', JSON.stringify({ batchName: batch.batchName, final: true, message: error.message || 'unknown' }));
+      order.logs.push(logLine('kie_wave_start', { batches: wave.map((batch) => batch.batchName) }));
+      await saveOrder(order);
+    }
+
+    const settled = await Promise.allSettled(
+      wave.map(async (batch) => {
+        const sections = await generateKieBatchOrSplit(promptPayload, batch, endpointPath, order);
+        return { batch, sections };
+      })
+    );
+
+    const failures = [];
+    for (let index = 0; index < settled.length; index += 1) {
+      const batch = wave[index];
+      const result = settled[index];
+      if (result.status === 'fulfilled') {
+        const sections = result.value.sections || {};
+        Object.assign(finalSections, sections);
+        await persistBatchProgress(order, batch.batchName, 'kie_batch_success', {
+          sections: Object.keys(sections),
+          lengths: summarizeSectionLengths(sections, batch.sections)
+        });
+      } else {
+        const error = result.reason instanceof Error ? result.reason : new Error(String(result.reason || 'unknown'));
+        failures.push({ batch, error });
+      }
+    }
+
+    if (order) {
+      order.artifacts = order.artifacts || {};
+      order.artifacts.partialAiSections = { ...finalSections };
+      await saveOrder(order);
+    }
+
+    if (failures.length) {
+      const firstFailure = failures.sort((a, b) => wave.indexOf(a.batch) - wave.indexOf(b.batch))[0];
+      const error = firstFailure.error;
       if (!error.failedStep) error.failedStep = 'kie_ai';
-      if (!error.currentStep) error.currentStep = getBatchRootName(batch.batchName);
-      if (!error.failedBatch) error.failedBatch = getBatchRootName(batch.batchName);
-      if (!Array.isArray(error.failedSections)) error.failedSections = [];
-      if (!Number.isFinite(Number(error.progress))) error.progress = getBatchProgress(batch.batchName);
+      if (!error.currentStep) error.currentStep = getBatchRootName(firstFailure.batch.batchName);
+      if (!error.failedBatch) error.failedBatch = getBatchRootName(firstFailure.batch.batchName);
+      if (!Array.isArray(error.failedSections) || !error.failedSections.length) error.failedSections = firstFailure.batch.sections.slice();
+      if (!Number.isFinite(Number(error.progress))) error.progress = getBatchProgress(firstFailure.batch.batchName);
       throw error;
     }
   }
@@ -3215,238 +3479,6 @@ function fallbackAiSections(promptPayload) {
   return sections;
 }
 
-async function renderPremiumPdf(order, promptPayload, sections) {
-  const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const safeName = sanitizeFileName(order.applicant.name || 'report');
-  const filePath = path.join(REPORTS_DIR, `${safeName}-${dateStamp}.pdf`);
-  const premiumSections = buildPremiumPdfSections(order, promptPayload, sections || {});
-
-  await new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 50, autoFirstPage: true });
-    const stream = fsSync.createWriteStream(filePath);
-    doc.pipe(stream);
-    doc.registerFont('Regular', FONT_REGULAR);
-    doc.registerFont('Bold', FONT_BOLD);
-
-    const page = { width: 595.28, height: 841.89, margin: 50 };
-    const colors = { text: '#352c29', muted: '#6f625b', primary: '#cf8f7a', line: '#eadfd2', soft: '#f8f3ee', card: '#fffdf9' };
-
-    const ensureSpace = (needed = 80) => {
-      if (doc.y + needed > page.height - page.margin) {
-        doc.addPage();
-        doc.font('Regular').fillColor(colors.text);
-      }
-    };
-
-    const sectionTitle = (title) => {
-      ensureSpace(60);
-      doc.moveDown(0.6);
-      const top = doc.y;
-      doc.roundedRect(page.margin, top, page.width - page.margin * 2, 28, 12).fillAndStroke('#fff5f0', '#f0ddd1');
-      doc.fillColor(colors.primary).font('Bold').fontSize(14).text(title, page.margin + 14, top + 8, { width: page.width - page.margin * 2 - 28 });
-      doc.y = top + 34;
-      doc.fillColor(colors.text).font('Regular');
-    };
-
-    const paragraph = (text) => {
-      if (!text) return;
-      const safeText = sanitizeCustomerFacingText(text);
-      const parts = String(safeText).split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
-      parts.forEach((part) => {
-        ensureSpace(70);
-        doc.font('Regular').fontSize(11.5).fillColor(colors.text).text(part, { lineGap: 6, paragraphGap: 10, align: 'left' });
-        doc.moveDown(0.5);
-      });
-    };
-
-    const infoRow = (label, value) => {
-      ensureSpace(28);
-      doc.font('Bold').fontSize(10.5).fillColor(colors.muted).text(label, page.margin + 14, doc.y, { continued: true });
-      doc.font('Regular').fillColor(colors.text).text(`  ${value || '-'}`);
-    };
-
-    const drawPillarTable = (pillarDetails) => {
-      ensureSpace(250);
-      const cols = [
-        { key: 'head', title: '구분', width: 76 },
-        { key: 'year', title: '년주', width: 104 },
-        { key: 'month', title: '월주', width: 104 },
-        { key: 'day', title: '일주', width: 104 },
-        { key: 'hour', title: '시주', width: 104 }
-      ];
-      const left = page.margin;
-      const top = doc.y;
-      const rowHeight = 34;
-      const widths = cols.map((col) => col.width);
-      const rows = [
-        ['천간', pillarDetails.year?.gan || '-', pillarDetails.month?.gan || '-', pillarDetails.day?.gan || '-', pillarDetails.hour?.gan || '-'],
-        ['지지', pillarDetails.year?.ji || '-', pillarDetails.month?.ji || '-', pillarDetails.day?.ji || '-', pillarDetails.hour?.ji || '-'],
-        ['천간 십성', pillarDetails.year?.sipseong?.gan || '', pillarDetails.month?.sipseong?.gan || '', pillarDetails.day?.sipseong?.gan || '', pillarDetails.hour?.sipseong?.gan || ''],
-        ['지지 십성', pillarDetails.year?.sipseong?.ji || '', pillarDetails.month?.sipseong?.ji || '', pillarDetails.day?.sipseong?.ji || '', pillarDetails.hour?.sipseong?.ji || ''],
-        ['오행', `${pillarDetails.year?.ohaeng?.gan || '-'} / ${pillarDetails.year?.ohaeng?.ji || '-'}`, `${pillarDetails.month?.ohaeng?.gan || '-'} / ${pillarDetails.month?.ohaeng?.ji || '-'}`, `${pillarDetails.day?.ohaeng?.gan || '-'} / ${pillarDetails.day?.ohaeng?.ji || '-'}`, `${pillarDetails.hour?.ohaeng?.gan || '-'} / ${pillarDetails.hour?.ohaeng?.ji || '-'}`],
-        ['음양', `${pillarDetails.year?.eumyang?.gan || '-'} / ${pillarDetails.year?.eumyang?.ji || '-'}`, `${pillarDetails.month?.eumyang?.gan || '-'} / ${pillarDetails.month?.eumyang?.ji || '-'}`, `${pillarDetails.day?.eumyang?.gan || '-'} / ${pillarDetails.day?.eumyang?.ji || '-'}`, `${pillarDetails.hour?.eumyang?.gan || '-'} / ${pillarDetails.hour?.eumyang?.ji || '-'}`]
-      ];
-
-      let x = left;
-      cols.forEach((col) => {
-        doc.rect(x, top, col.width, rowHeight).fillAndStroke('#fbf6f0', '#e7ddd2');
-        doc.fillColor('#6f5b50').font('Bold').fontSize(10.5).text(col.title, x, top + 11, { width: col.width, align: 'center' });
-        x += col.width;
-      });
-
-      rows.forEach((row, rowIndex) => {
-        let cellX = left;
-        const y = top + rowHeight * (rowIndex + 1);
-        row.forEach((cell, colIndex) => {
-          doc.rect(cellX, y, widths[colIndex], rowHeight).fillAndStroke(colIndex === 0 ? '#f9f4ee' : '#ffffff', '#e7ddd2');
-          doc.fillColor(colIndex === 0 ? '#856d5f' : colors.text)
-            .font(colIndex === 0 ? 'Bold' : 'Regular')
-            .fontSize(colIndex === 0 ? 10 : 10.5)
-            .text(String(cell || '-'), cellX + 6, y + 9, { width: widths[colIndex] - 12, align: 'center' });
-          cellX += widths[colIndex];
-        });
-      });
-      doc.y = top + rowHeight * (rows.length + 1) + 16;
-    };
-
-    doc.rect(0, 0, page.width, page.height).fill('#fffdfa');
-    doc.fillColor('#f6eee7').circle(page.width - 70, 90, 80).fill();
-    doc.fillColor('#e7f1ed').circle(80, page.height - 100, 72).fill();
-    doc.fillColor(colors.text).font('Bold').fontSize(28).text('프리미엄 사주 리포트', page.margin, 92);
-    doc.moveDown(0.3);
-    doc.font('Regular').fontSize(14).fillColor(colors.muted).text(`${order.applicant.name}님을 위한 맞춤 해설`, { width: 320, lineGap: 4 });
-    doc.moveDown(1.1);
-    doc.roundedRect(page.margin, 180, page.width - page.margin * 2, 108, 22).fillAndStroke('#fffaf6', '#eadfd2');
-    doc.fillColor(colors.text).font('Bold').fontSize(14).text('기본 정보', page.margin + 18, 198);
-    doc.font('Regular').fontSize(11).fillColor(colors.muted)
-      .text(`생년월일: ${order.applicant.birthYear}.${pad2(order.applicant.birthMonth)}.${pad2(order.applicant.birthDay)}`, page.margin + 18, 226)
-      .text(`달력 기준: ${order.applicant.calendarType === 'lunar' ? '음력' : '양력'} / 성별: ${order.applicant.gender === 'male' ? '남성' : '여성'}`, page.margin + 18, 244)
-      .text(`출생 시각: ${order.applicant.birthTime || '미입력'} / 생성일: ${new Date().toLocaleDateString('ko-KR')}`, page.margin + 18, 262);
-
-    if (order.applicant.concern) {
-      doc.roundedRect(page.margin, 312, page.width - page.margin * 2, 90, 18).fillAndStroke('#f8f3ee', '#eadfd2');
-      doc.font('Bold').fontSize(13).fillColor(colors.primary).text('현재 고민', page.margin + 18, 328);
-      doc.font('Regular').fontSize(11).fillColor(colors.text).text(sanitizeCustomerFacingText(order.applicant.concern), page.margin + 18, 350, { width: page.width - page.margin * 2 - 36, lineGap: 5 });
-      doc.y = 420;
-    } else {
-      doc.y = 330;
-    }
-
-    sectionTitle('기본 정보');
-    infoRow('상품', order.product.name);
-    if (order.partner?.name) {
-      infoRow('상대방', `${order.partner.name} / ${order.partner.gender === 'male' ? '남성' : '여성'}`);
-      infoRow('상대방 생년월일', `${order.partner.birthYear}.${pad2(order.partner.birthMonth)}.${pad2(order.partner.birthDay)} ${order.partner.birthTime || ''}`.trim());
-      infoRow('상대방 달력 기준', order.partner.calendarType === 'lunar' ? '음력' : '양력');
-    }
-    if (order.applicant.concern) infoRow('현재 고민', order.applicant.concern);
-
-    sectionTitle('사주팔자 원국 표');
-    drawPillarTable(premiumSections.pillarDetails);
-
-    const orderedSections = premiumSections.orderedSections || [];
-
-    for (const [title, body] of orderedSections) {
-      sectionTitle(title);
-      paragraph(body);
-    }
-
-    doc.end();
-    stream.on('finish', resolve);
-    stream.on('error', reject);
-  });
-
-  return filePath;
-}
-
-function formatLooseProfileText(title, value) {
-  if (value == null || value === '') return '';
-  if (typeof value === 'string') return `${title}: ${value}`;
-  if (Array.isArray(value)) return `${title}:\n${value.map((item) => `- ${typeof item === 'string' ? item : JSON.stringify(item)}`).join('\n')}`;
-  return `${title}:\n${Object.entries(value).map(([key, nested]) => `- ${key}: ${typeof nested === 'string' ? nested : JSON.stringify(nested)}`).join('\n')}`;
-}
-
-function buildTimedFlowText(rows, label) {
-  if (!Array.isArray(rows) || !rows.length) return `${label} 자료는 실제 API 결과를 기준으로 종합 해석에 반영되었습니다.`;
-  return rows.map((row, index) => {
-    const heading = row.month ? `${row.year || '-'}년 ${row.month}월` : `${row.year || index + 1}년`;
-    const detail = [row.ganji || '', row.score ? `점수 ${row.score}` : '', row.summary || ''].filter(Boolean).join(' / ');
-    return `${heading} | ${detail}`;
-  }).join('\n');
-}
-
-function buildDaeunText(daeun) {
-  if (!daeun) return '대운 자료는 원국과 함께 종합 해석에 반영되었습니다.';
-  if (Array.isArray(daeun)) {
-    return daeun.slice(0, 10).map((item) => {
-      if (typeof item === 'string') return `- ${item}`;
-      const span = [item.startAge || item.start || item.age || '', item.endAge || item.end || ''].filter(Boolean).join('~');
-      const title = item.label || item.name || item.ganji || item.period || '';
-      const theme = item.theme || item.summary || item.description || '';
-      return `- ${span ? span + '세' : '흐름'} | ${title} ${theme}`.trim();
-    }).join('\n');
-  }
-  return formatLooseProfileText('대운 핵심', daeun);
-}
-
-function buildSupportProfileText(chartData) {
-  return [
-    formatLooseProfileText('강약', chartData?.strength),
-    formatLooseProfileText('용신/희신/기신', chartData?.yongsin),
-    formatLooseProfileText('조후', chartData?.johu)
-  ].filter(Boolean).join('\n\n');
-}
-
-function buildPremiumPdfSections(order, promptPayload, aiSections) {
-  const apiBase = promptPayload?.rawBundle?.saju || promptPayload?.rawBundle?.mansae || {};
-  const pillarDetails = promptPayload?.chartData?.pillarDetails || buildPillarDetails(extractPillars(apiBase, order.applicant), apiBase);
-  const fiveElements = promptPayload?.chartData?.fiveElements || extractDistribution(apiBase, ['오행', 'five', 'element']) || defaultElementDistribution(order.applicant);
-  const tenGods = promptPayload?.chartData?.tenGods || extractDistribution(apiBase, ['십성', 'tenGod', 'ten']) || defaultTenGodDistribution(order.applicant);
-  const requiredSections = buildRequiredAiSections(Boolean(promptPayload?.partnerInfo?.name && promptPayload?.rawBundle?.compatibility));
-  const orderedSections = [
-    ['오행 분포', [buildDistributionSummary('오행', fiveElements), formatLooseProfileText('원국 핵심', promptPayload?.chartData?.pillars)].filter(Boolean).join('\n\n')],
-    ['십성 분포', [buildDistributionSummary('십성', tenGods), formatLooseProfileText('십성 분포 상세', tenGods)].filter(Boolean).join('\n\n')],
-    ['용신/희신/기신', buildSupportProfileText(promptPayload?.chartData || {})],
-    ['대운 표', buildDaeunText(promptPayload?.chartData?.daeun)],
-    ['세운 흐름', buildTimedFlowText(promptPayload?.chartData?.futureFiveYears, '세운')],
-    ['월운 흐름', buildTimedFlowText(promptPayload?.chartData?.futureSixMonths, '월운')],
-    ...requiredSections.map((title) => [title, aiSections?.[title] || '']),
-    ['종합 마무리', [aiSections?.['실천 조언'] || '', aiSections?.['주의할 점'] || '', aiSections?.['건강운'] || ''].filter(Boolean).join('\n\n')]
-  ].filter(([, body]) => String(body || '').trim());
-  console.log('[PDF SECTION LENGTHS]');
-  console.log(JSON.stringify(Object.fromEntries(orderedSections.map(([title, body]) => [title, countVisibleChars(body)]))));
-  return { pillarDetails, orderedSections };
-}
-
-function buildDistributionSummary(label, valueMap) {
-  const entries = Object.entries(valueMap || {})
-    .filter(([, value]) => Number(value || 0) > 0)
-    .sort((a, b) => Number(b[1]) - Number(a[1]));
-  if (!entries.length) return '';
-  const total = entries.reduce((sum, [, value]) => sum + Number(value || 0), 0) || 1;
-  const lines = entries.map(([key, value]) => `${key} ${((Number(value || 0) / total) * 100).toFixed(1)}%`);
-  return `${label} 분포는 ${lines.join(', ')} 순으로 읽힙니다. 가장 두드러지는 기운을 중심으로 강점과 보완 포인트를 함께 해석했습니다.`;
-}
-
-function sanitizeCustomerFacingText(text) {
-  const blocked = /(계산 확인 메모|saju api|period api|compatibility api|kie ai|requiredfields|missingfields|content-type|charset|raw json error|raw json|debug|fallback|mock|source|api 400|json|system|model|prompt|engine|raw bundle)/i;
-  const parts = String(text || '')
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !blocked.test(line));
-  return parts.join('\n\n').replace(/\s{2,}/g, ' ').trim();
-}
-
-function buildApiDigest(apiSnapshots) {
-  const lines = [];
-  const pillars = extractPillars(apiSnapshots.saju || apiSnapshots.mansae, { birthYear: 1990, birthMonth: 1, birthDay: 1, birthTime: '09:00' });
-  lines.push(`사주 원문 기준 네 기둥은 ${pillars.year}년주, ${pillars.month}월주, ${pillars.day}일주, ${pillars.hour}시주 흐름으로 정리됩니다.`);
-  if (apiSnapshots.period) lines.push('시기별 운세 자료를 함께 반영하여 향후 5년과 다음 6개월의 흐름을 입체적으로 연결했습니다.');
-  if (apiSnapshots.compatibility) lines.push('궁합 참고 자료가 함께 들어와 관계 리듬과 상호 보완 포인트도 별도로 반영했습니다.');
-  return lines.join('\n\n');
-}
-
 function extractResponsesText(parsed) {
   const output = Array.isArray(parsed?.output) ? parsed.output : [];
   for (const item of output) {
@@ -3474,34 +3506,29 @@ function logLine(type, detail) {
   return { at: new Date().toISOString(), type, detail };
 }
 
+function buildOrderStatusPageUrl(orderId) {
+  return `${BASE_URL}/report-status.html?orderId=${encodeURIComponent(orderId)}`;
+}
+
+function cloneRuntimeOrder(order) {
+  return order ? JSON.parse(JSON.stringify(order)) : null;
+}
+
 async function saveOrder(order) {
   order.updatedAt = new Date().toISOString();
-  const filePath = path.join(ORDERS_DIR, `${order.id}.json`);
-  await fs.writeFile(filePath, JSON.stringify(order, null, 2), 'utf8');
+  runtimeOrderStore.set(order.id, cloneRuntimeOrder(order));
 }
 
 async function readOrder(orderId) {
-  try {
-    const filePath = path.join(ORDERS_DIR, `${orderId}.json`);
-    const raw = await fs.readFile(filePath, 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  return cloneRuntimeOrder(runtimeOrderStore.get(orderId) || null);
 }
 
 async function appendLog(name, payload) {
-  const filePath = path.join(LOGS_DIR, `${new Date().toISOString().slice(0, 10)}.log`);
-  const line = `[${new Date().toISOString()}] ${name} ${JSON.stringify(payload)}\n`;
-  await fs.appendFile(filePath, line, 'utf8');
+  console.log(`[APP LOG] ${name}`, JSON.stringify(payload || {}));
 }
 
 async function ensureDirectories() {
-  await Promise.all([ORDERS_DIR, REPORTS_DIR, LOGS_DIR, TMP_DIR].map((dir) => fs.mkdir(dir, { recursive: true })));
-}
-
-function sanitizeFileName(name) {
-  return String(name || 'report').replace(/[\\/:*?"<>|\s]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return true;
 }
 
 function pad2(value) {

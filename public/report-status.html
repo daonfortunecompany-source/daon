@@ -255,6 +255,34 @@
       white-space: pre-line;
     }
 
+    [hidden] { display: none !important; }
+
+    .meta-box {
+      margin-top: 14px;
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: #fffaf6;
+      display: grid;
+      gap: 8px;
+    }
+
+    .meta-box strong { font-size: 13px; }
+    .meta-box code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      background: rgba(255,255,255,.8);
+      padding: 2px 6px;
+      border-radius: 8px;
+      color: #6d5247;
+    }
+
+    .lookup-note {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
     .actions {
       margin-top: 22px;
       display: grid;
@@ -303,6 +331,101 @@
       color: #9a4b43;
     }
 
+    .report-view {
+      display: grid;
+      gap: 14px;
+      margin-top: 20px;
+    }
+
+    .report-notice {
+      background: #fff7f1;
+      border: 1px solid #f0ddd1;
+      border-radius: 18px;
+      padding: 16px;
+      color: #6f5b50;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+
+    .report-card {
+      background: #fffdfa;
+      border: 1px solid #eadfd2;
+      border-radius: 20px;
+      padding: 18px 16px;
+      box-shadow: 0 8px 26px rgba(53, 44, 41, 0.06);
+    }
+
+    .report-card h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      line-height: 1.35;
+      color: #352c29;
+    }
+
+    .report-card p {
+      margin: 0 0 12px;
+      line-height: 1.9;
+      font-size: 15px;
+      color: #4d4340;
+      word-break: keep-all;
+    }
+
+    .report-copy-wrap {
+      position: sticky;
+      bottom: 12px;
+      z-index: 2;
+      display: grid;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .copy-feedback {
+      font-size: 13px;
+      color: #6f625b;
+      text-align: center;
+      min-height: 20px;
+    }
+
+    .copy-toast {
+      position: fixed;
+      left: 50%;
+      bottom: 92px;
+      transform: translateX(-50%) translateY(12px);
+      width: min(calc(100% - 32px), 380px);
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(53, 44, 41, 0.92);
+      color: #fff;
+      font-size: 13px;
+      line-height: 1.6;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .18s ease, transform .18s ease;
+      box-shadow: 0 16px 32px rgba(53, 44, 41, 0.18);
+      z-index: 30;
+    }
+
+    .copy-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .copy-toast.error {
+      background: rgba(154, 75, 67, 0.95);
+    }
+
+    .report-copy-btn {
+      width: 100%;
+      padding: 16px 18px;
+      border: 0;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #cf8f7a, #b87562);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+      box-shadow: 0 12px 28px rgba(207, 143, 122, 0.28);
+    }
+
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
@@ -338,16 +461,28 @@
       .loading-copy {
         font-size: 14px;
       }
+      .report-card {
+        padding: 16px 14px;
+      }
+      .report-card h2 {
+        font-size: 17px;
+      }
+      .report-card p {
+        font-size: 14px;
+        line-height: 1.85;
+      }
     }
   </style>
 </head>
 <body>
   <main class="card" id="statusCard">
-    <h1>리포트 생성 상태</h1>
-    <p class="sub">사주를 해석하고 풀이하는 중입니다. 잠시만 기다려주세요.</p>
+    <h1>리포트 제작 상태</h1>
+    <p class="sub">리포트 생성 중입니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요. 생성 완료 후 리포트가 현재 화면에 표시됩니다.</p>
     <div class="status-badge" id="statusBadge">상태 확인 중...</div>
 
-    <section class="loading-panel" aria-label="리포트 생성 진행 상태">
+    <section class="meta-box" id="receiptMetaBox" hidden></section>
+
+    <section class="loading-panel" id="loadingPanel" aria-label="리포트 생성 진행 상태">
       <div class="loading-row">
         <div class="spinner" aria-hidden="true"></div>
         <div class="loading-copy" aria-live="polite">
@@ -364,7 +499,7 @@
       </div>
     </section>
 
-    <section class="timeline">
+    <section class="timeline" id="timelinePanel">
       <article class="timeline-item pending" id="stepPayment">
         <div class="step-kicker"><i></i><span>Step 1</span></div>
         <strong>1. 결제 확인</strong>
@@ -377,8 +512,8 @@
       </article>
       <article class="timeline-item pending" id="stepDownload">
         <div class="step-kicker"><i></i><span>Step 3</span></div>
-        <strong>3. PDF 결과물 전달</strong>
-        <span id="downloadStep">완료 후 PDF를 다운로드할 수 있습니다.</span>
+        <strong>3. 리포트 화면 표시</strong>
+        <span id="downloadStep">완료 후 모바일 리포트를 현재 화면에서 확인할 수 있습니다.</span>
       </article>
     </section>
 
@@ -388,11 +523,15 @@
       <button class="btn btn-primary" id="refreshButton" type="button">다시 확인하기</button>
       <a class="btn btn-soft" href="/">메인으로 돌아가기</a>
     </div>
+
+    <section class="report-view" id="reportView" hidden></section>
   </main>
 
   <script>
     const params = new URLSearchParams(window.location.search);
-    const orderId = params.get('order');
+    const initialOrderId = params.get('orderId') || params.get('order');
+    let activeOrderId = initialOrderId;
+    const pageTitle = document.querySelector('h1');
     const statusCard = document.getElementById('statusCard');
     const statusSub = document.querySelector('.sub');
     const statusBadge = document.getElementById('statusBadge');
@@ -409,6 +548,68 @@
     const stepPayment = document.getElementById('stepPayment');
     const stepGenerating = document.getElementById('stepGenerating');
     const stepDownload = document.getElementById('stepDownload');
+    const receiptMetaBox = document.getElementById('receiptMetaBox');
+    const loadingPanel = document.getElementById('loadingPanel');
+    const timelinePanel = document.getElementById('timelinePanel');
+    const reportView = document.getElementById('reportView');
+    const REPORT_SECTION_ORDER = ['핵심 요약','사주 원국 해석','대운','세운','월운','운성','신살,귀인','십성','재물운','직업운','애정운','자녀운','건강운','실천 조언','주의할 점','고민에 대한 조언','관계/궁합 해석'];
+    const REPORT_CACHE_PREFIX = 'daon-runtime-report:';
+    let pollTimer = null;
+    let pollingStopped = false;
+    let requestInFlight = false;
+    let completedReportState = null;
+    let renderedCompletedOrderId = null;
+
+    function cloneJson(value) {
+      return value ? JSON.parse(JSON.stringify(value)) : null;
+    }
+
+    function getReportCacheKey(orderId) {
+      return `${REPORT_CACHE_PREFIX}${orderId || ''}`;
+    }
+
+    function saveCompletedReport(orderId, sections) {
+      if (!orderId || !sections) return null;
+      const cloned = cloneJson(sections);
+      completedReportState = { orderId, sections: cloned };
+      try {
+        sessionStorage.setItem(getReportCacheKey(orderId), JSON.stringify(cloned));
+      } catch (error) {
+      }
+      return cloned;
+    }
+
+    function loadCompletedReport(orderId) {
+      if (!orderId) return null;
+      if (completedReportState?.orderId === orderId && completedReportState.sections) {
+        return cloneJson(completedReportState.sections);
+      }
+      try {
+        const raw = sessionStorage.getItem(getReportCacheKey(orderId));
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (parsed) completedReportState = { orderId, sections: parsed };
+        return parsed;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function stopPolling() {
+      pollingStopped = true;
+      if (pollTimer) {
+        window.clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    function schedulePoll(delayMs) {
+      if (pollingStopped) return;
+      if (pollTimer) window.clearTimeout(pollTimer);
+      pollTimer = window.setTimeout(() => {
+        pollTimer = null;
+        poll();
+      }, delayMs);
+    }
 
     function setStepState(target, state) {
       if (!target) return;
@@ -423,191 +624,348 @@
       progressLabel.textContent = label;
     }
 
+    function escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function renderReceiptMeta(data) {
+      if (!receiptMetaBox) return;
+      const expected = data.productType === 'compatibility' ? '2인 궁합 리포트는 분석 내용이 많아 몇 분 정도 소요될 수 있습니다.' : '1인 리포트는 보통 약 3~7분 정도 소요됩니다.';
+      receiptMetaBox.hidden = false;
+      receiptMetaBox.innerHTML = [
+        '<strong>리포트 접수 정보</strong>',
+        `<div>주문번호: <code>${data.orderId || '-'}</code></div>`,
+        `<div>예상 안내: ${expected}</div>`,
+        '<div class="lookup-note">이 화면은 현재 요청 흐름에서만 사용되며, 리포트는 서버에 저장되지 않습니다.</div>'
+      ].join('');
+    }
+
+    function buildReportText(data) {
+      const sections = data.reportSections || {};
+      const blocks = [
+        '다온 사주 리포트',
+        '',
+        '이 리포트는 개인정보 보호를 위해 서버에 저장되지 않습니다.',
+        '페이지를 닫거나 새로고침하면 다시 열람할 수 없으니, 전체 내용을 복사해 보관해 주세요.',
+        ''
+      ];
+      REPORT_SECTION_ORDER.forEach((title) => {
+        const body = String(sections[title] || '').trim();
+        if (!body) return;
+        blocks.push(title, body, '');
+      });
+      blocks.push('이 리포트는 서버에 저장되지 않습니다. 페이지를 닫기 전에 반드시 전체 내용을 복사해 보관해 주세요.');
+      return blocks.join('\n');
+    }
+
+    async function copyReportText(text) {
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (error) {
+        }
+      }
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', 'readonly');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (!ok) throw new Error('copy_failed');
+      return true;
+    }
+
+    let copyToastTimer = null;
+    function showCopyToast(message, isError = false) {
+      let toast = document.getElementById('copyToast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'copyToast';
+        toast.className = 'copy-toast';
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        document.body.appendChild(toast);
+      }
+      toast.textContent = message;
+      toast.classList.toggle('error', Boolean(isError));
+      toast.classList.add('show');
+      if (copyToastTimer) window.clearTimeout(copyToastTimer);
+      copyToastTimer = window.setTimeout(() => {
+        toast.classList.remove('show');
+      }, 2600);
+    }
+
+    function renderHtmlReport(data) {
+      if (!reportView) return;
+      const currentOrderId = data.orderId || activeOrderId || '';
+      if (renderedCompletedOrderId && renderedCompletedOrderId === currentOrderId && !reportView.hidden) return;
+      const sections = data.reportSections || {};
+      const cards = REPORT_SECTION_ORDER
+        .filter((title) => String(sections[title] || '').trim())
+        .map((title) => {
+          const paragraphs = String(sections[title] || '')
+            .split(/\n{2,}/)
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .map((item) => `<p>${escapeHtml(item)}</p>`)
+            .join('');
+          return `<article class="report-card"><h2>${escapeHtml(title)}</h2>${paragraphs}</article>`;
+        })
+        .join('');
+      reportView.hidden = false;
+      loadingPanel.hidden = true;
+      timelinePanel.hidden = true;
+      actions.hidden = true;
+      detailBox.hidden = true;
+      if (pageTitle) pageTitle.textContent = '다온 사주 리포트';
+      if (statusSub) statusSub.textContent = '리포트는 현재 화면에서만 확인할 수 있습니다. 페이지를 닫거나 새로고침하기 전에 반드시 전체 내용을 복사해 보관해 주세요.';
+      reportView.innerHTML = `
+        <div class="report-notice">이 리포트는 개인정보 보호를 위해 서버에 저장되지 않습니다.<br />페이지를 닫거나 새로고침하면 다시 열람할 수 없으니, 하단의 ‘전체 내용 복사하기’ 버튼을 눌러 내용을 보관해 주세요.</div>
+        ${cards}
+        <div class="report-notice">이 리포트는 서버에 저장되지 않습니다.<br />페이지를 닫기 전에 반드시 전체 내용을 복사해 보관해 주세요.</div>
+        <div class="report-copy-wrap">
+          <button class="report-copy-btn" id="copyReportButton" type="button">전체 내용 복사하기</button>
+          <div class="copy-feedback" id="copyFeedback">메모장, 카카오톡 나에게 보내기, 이메일 등에 붙여넣어 보관해 주세요.</div>
+        </div>
+      `;
+      const copyButton = document.getElementById('copyReportButton');
+      const copyFeedback = document.getElementById('copyFeedback');
+      const reportText = buildReportText(data);
+      renderedCompletedOrderId = currentOrderId;
+      copyButton?.addEventListener('click', async () => {
+        try {
+          await copyReportText(reportText);
+          if (copyFeedback) copyFeedback.textContent = '리포트 전체 내용이 복사되었습니다. 메모장, 카카오톡 나에게 보내기, 이메일 등에 붙여넣어 보관해 주세요.';
+          showCopyToast('리포트 전체 내용이 복사되었습니다. 메모장, 카카오톡 나에게 보내기, 이메일 등에 붙여넣어 보관해 주세요.');
+        } catch (error) {
+          if (copyFeedback) copyFeedback.textContent = '자동 복사에 실패했습니다. 내용을 직접 선택하여 복사해 주세요.';
+          showCopyToast('자동 복사에 실패했습니다. 내용을 직접 선택하여 복사해 주세요.', true);
+        }
+      });
+    }
+
     function renderStatus(data) {
       const rawStatus = data.status || 'created';
       const status = rawStatus === 'ready' ? 'completed' : rawStatus;
-      const failedStep = data.failedStep || null;
       const currentStep = data.currentStep || null;
-      const failedBatch = data.failedBatch || null;
-      const failedSections = Array.isArray(data.failedSections) ? data.failedSections : [];
       const progress = Number.isFinite(Number(data.progress)) ? Number(data.progress) : null;
+      const currentOrderId = data.orderId || activeOrderId || '';
+      const cachedSections = data.reportSections || loadCompletedReport(currentOrderId);
+      const hasRenderableSections = Boolean(cachedSections && Object.keys(cachedSections).length);
+      const renderData = hasRenderableSections ? { ...data, reportSections: cachedSections } : data;
+      const completedButMissingSections = status === 'completed' && renderData.viewMode === 'html' && !hasRenderableSections;
+      renderReceiptMeta(renderData);
       const statusMap = {
-        created: '결제창 준비 중',
+        created: '주문 접수',
         payment_pending: '결제 대기 중',
-        payment_success: '리포트 생성 시작',
+        queued: '제작 접수 완료',
+        payment_success: '제작 접수 완료',
         generating: '리포트 생성 중',
         ready: '리포트 준비 완료',
         completed: '리포트 준비 완료',
         payment_cancelled: '결제 취소',
-        failed: '처리 실패'
+        failed: '일시적 지연'
       };
       statusBadge.textContent = statusMap[status] || '상태 확인 중';
 
       const isCompleted = status === 'completed';
+      const isQueued = status === 'queued' || status === 'payment_success';
+      const isGenerating = isQueued || status === 'generating';
       statusCard.classList.toggle('is-final', ['completed', 'payment_cancelled', 'failed'].includes(status));
       statusCard.classList.toggle('is-failed', ['payment_cancelled', 'failed'].includes(status));
       if (statusSub) {
-        statusSub.textContent = isCompleted
-          ? '프리미엄 PDF 리포트가 준비되었습니다. 아래 버튼에서 바로 다운로드하실 수 있습니다.'
-          : status === 'failed'
-            ? (failedStep === 'period'
-                ? '기간운 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
-                : failedStep === 'compatibility'
-                  ? '궁합 분석 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
-                  : failedStep === 'kie_ai'
-                    ? '결제는 정상 확인되었으나, 리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인하거나 고객센터로 문의해 주세요.'
-                    : '리포트 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.')
-            : status === 'payment_cancelled'
-              ? '결제가 취소되어 리포트 생성이 진행되지 않았습니다.'
-              : '사주를 해석하고 풀이하는 중입니다. 잠시만 기다려주세요.';
+        statusSub.textContent = completedButMissingSections
+          ? '리포트 표시 중 문제가 발생했습니다. 페이지를 새로고침하지 말고 고객센터로 문의해 주세요.'
+          : isCompleted
+            ? (hasRenderableSections
+                ? '리포트 생성이 완료되었습니다. 현재 화면에서 전체 내용을 복사해 보관해 주세요.'
+                : '이 리포트는 서버에 저장되지 않아 다시 열람할 수 없습니다.')
+            : status === 'failed'
+              ? '리포트 생성 중 일시적인 문제가 발생했습니다. 결제는 정상 확인되었으나, 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도하거나 고객센터로 문의해 주세요.'
+              : isQueued
+                ? '리포트 생성이 접수되었습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.'
+                : status === 'payment_cancelled'
+                  ? '결제가 취소되어 리포트 생성이 진행되지 않았습니다.'
+                  : (renderData.productType === 'compatibility'
+                      ? '리포트 생성 중입니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요. 2인 궁합 리포트는 분석 내용이 많아 몇 분 정도 소요될 수 있습니다.'
+                      : '리포트 생성 중입니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요. 생성 완료 후 리포트가 현재 화면에 표시됩니다.');
       }
 
-      const isGenerating = status === 'payment_success' || status === 'generating';
-      loadingText.textContent = isCompleted
-        ? '리포트 준비 완료'
-        : status === 'failed'
-          ? '리포트 생성이 지연되고 있습니다'
-          : status === 'payment_cancelled'
-            ? '결제가 취소되었습니다'
-            : isGenerating
-              ? '리포트 생성 중'
-              : '리포트 상태 확인 중';
+      loadingText.textContent = completedButMissingSections
+        ? '리포트 표시 오류'
+        : isCompleted
+          ? '리포트 준비 완료'
+          : status === 'failed'
+            ? '리포트 생성을 다시 확인하고 있습니다'
+            : status === 'payment_cancelled'
+              ? '결제가 취소되었습니다'
+              : isQueued
+                ? '제작 접수 완료'
+                : isGenerating
+                  ? '리포트 생성 중'
+                  : '리포트 상태 확인 중';
 
-      if (['payment_success', 'generating', 'completed'].includes(status)) {
-        paymentStep.textContent = '결제 성공이 확인되었습니다.';
+      if (['queued', 'payment_success', 'generating', 'completed'].includes(status)) {
+        paymentStep.textContent = status === 'queued' || status === 'payment_success'
+          ? '결제가 정상 확인되어 리포트 제작이 접수되었습니다.'
+          : '결제 성공이 확인되었습니다.';
         setStepState(stepPayment, 'done');
       } else if (status === 'payment_cancelled') {
-        paymentStep.textContent = '결제가 취소되어 리포트 생성이 진행되지 않았습니다.';
+        paymentStep.textContent = '결제가 취소되어 리포트 제작이 진행되지 않았습니다.';
         setStepState(stepPayment, 'pending');
       } else {
         paymentStep.textContent = '결제 승인 여부를 확인하고 있습니다.';
         setStepState(stepPayment, status === 'payment_pending' ? 'active' : 'pending');
       }
 
-      if (status === 'payment_success' || status === 'generating') {
-        generationStep.textContent = '사주 원국과 해석을 정리하고 있습니다.';
-        downloadStep.textContent = '완료 후 PDF를 다운로드할 수 있습니다.';
+      if (status === 'queued' || status === 'payment_success' || status === 'generating') {
+        generationStep.textContent = '사주 계산과 해석 문장을 정리하고 있습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.';
+        downloadStep.textContent = '완료 후 모바일 리포트를 현재 화면에서 확인할 수 있습니다.';
         setStepState(stepGenerating, 'active');
         setStepState(stepDownload, 'pending');
+      } else if (completedButMissingSections) {
+        generationStep.textContent = '리포트 생성은 완료되었지만 화면 표시 중 문제가 발생했습니다.';
+        downloadStep.textContent = '리포트 표시 중 문제가 발생했습니다. 페이지를 새로고침하지 말고 고객센터로 문의해 주세요.';
+        setStepState(stepGenerating, 'done');
+        setStepState(stepDownload, 'pending');
       } else if (isCompleted) {
-        generationStep.textContent = '리포트 생성이 완료되었습니다.';
-        downloadStep.textContent = '지금 바로 PDF를 내려받을 수 있습니다.';
+        generationStep.textContent = hasRenderableSections ? '리포트 생성이 완료되었습니다.' : '리포트 생성은 완료되었지만, 이 화면에서는 다시 열람할 수 없습니다.';
+        downloadStep.textContent = hasRenderableSections ? '현재 화면 하단에서 전체 내용을 복사해 보관해 주세요.' : '페이지를 닫거나 새로고침하면 다시 열람할 수 없습니다.';
         setStepState(stepGenerating, 'done');
         setStepState(stepDownload, 'done');
       } else if (status === 'failed') {
-        generationStep.textContent = failedStep === 'period'
-          ? '기간운 분석 단계에서 실패했습니다.'
-          : failedStep === 'compatibility'
-            ? '궁합 분석 단계에서 실패했습니다.'
-            : failedStep === 'kie_ai'
-              ? '리포트 해석 생성이 일시 지연되고 있습니다.'
-              : '리포트 생성 중 문제가 발생했습니다.';
-        downloadStep.textContent = '잠시 후 다시 시도해 주세요.';
+        generationStep.textContent = '리포트 생성 중 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+        downloadStep.textContent = '잠시 후 다시 조회하거나 고객센터로 문의해 주세요.';
         setStepState(stepGenerating, 'active');
         setStepState(stepDownload, 'pending');
       } else if (status === 'payment_cancelled') {
-        generationStep.textContent = '리포트 생성이 시작되지 않았습니다.';
-        downloadStep.textContent = '결제 완료 후에만 PDF 결과물이 준비됩니다.';
+        generationStep.textContent = '리포트 제작이 시작되지 않았습니다.';
+        downloadStep.textContent = '결제 완료 후에만 모바일 리포트가 준비됩니다.';
         setStepState(stepGenerating, 'pending');
         setStepState(stepDownload, 'pending');
       } else {
-        generationStep.textContent = '사주 원국과 해석을 정리할 준비 중입니다.';
-        downloadStep.textContent = '완료 후 PDF를 다운로드할 수 있습니다.';
+        generationStep.textContent = '리포트 제작을 준비하고 있습니다.';
+        downloadStep.textContent = '완료 후 모바일 리포트를 현재 화면에서 확인할 수 있습니다.';
         setStepState(stepGenerating, 'pending');
         setStepState(stepDownload, 'pending');
       }
 
       const stepProgressText = {
-        payment_success: '결제가 확인되어 리포트 생성을 시작했습니다.',
-        generation: '리포트 생성을 시작했습니다.',
-        mansae: '만세력 원국 데이터를 확인하고 있습니다.',
-        saju: '핵심 사주 원국과 세부 해석 데이터를 정리하고 있습니다.',
-        period: '대운, 세운, 월운의 기준 데이터를 불러오고 있습니다.',
-        compatibility_api: '궁합 원본 데이터를 분석하고 있습니다.',
-        kie_ai: '핵심 요약과 원국 해석을 생성하고 있습니다.',
-        core: '핵심 요약과 원국 해석을 생성하고 있습니다.',
-        timing: '대운, 세운, 월운 흐름을 분석하고 있습니다.',
-        analysis: '십성, 재물운, 직업운을 분석하고 있습니다.',
-        life: '애정운, 건강운, 실천 조언을 정리하고 있습니다.',
+        payment_pending: '결제 승인 여부를 확인하고 있습니다.',
+        queued: '리포트 제작이 접수되었습니다.',
+        payment_success: '리포트 제작이 접수되었습니다.',
+        generation: '리포트 제작을 시작하고 있습니다.',
+        mansae: '입력하신 생년월일시를 바탕으로 사주 정보를 계산하고 있습니다.',
+        saju: '사주 원국과 기본 해석 데이터를 정리하고 있습니다.',
+        period: '운의 흐름 데이터를 정리하고 있습니다.',
+        compatibility_api: '관계 참고 데이터를 정리하고 있습니다.',
+        kie_ai: '사주 원국과 운의 흐름을 바탕으로 해석 문장을 작성하고 있습니다.',
+        core: '핵심 요약과 원국 해석을 작성하고 있습니다.',
+        timing: '대운, 세운, 월운 흐름을 작성하고 있습니다.',
+        analysis: '재물, 직업, 성향 해석을 작성하고 있습니다.',
+        life: '생활 전반 조언을 작성하고 있습니다.',
         concern: '고민에 대한 맞춤 조언을 작성하고 있습니다.',
-        compatibility: '관계와 궁합 해석을 정리하고 있습니다.',
-        pdf: 'PDF를 생성하고 있습니다.',
+        compatibility: '관계 분석 문장을 작성하고 있습니다.',
+        html_render: '완성된 해석 내용을 모바일 리포트 화면으로 정리하고 있습니다.',
         completed: '리포트가 준비되었습니다.'
       };
       const defaultProgress = status === 'payment_pending'
-        ? 18
-        : status === 'payment_success'
-          ? 42
+        ? 5
+        : isQueued
+          ? 10
           : status === 'generating'
-            ? 72
+            ? 60
             : isCompleted
               ? 100
               : status === 'failed'
-                ? 88
+                ? 97
                 : status === 'payment_cancelled'
                   ? 0
-                  : 8;
-      const progressText = status === 'payment_pending'
-        ? '결제 완료를 기다리고 있습니다.'
-        : status === 'payment_success' || status === 'generating'
-          ? (stepProgressText[currentStep] || '사주를 해석하고 PDF를 정리하고 있습니다.')
-          : isCompleted
-            ? '리포트가 준비되었습니다.'
-            : status === 'failed'
-              ? (failedStep === 'period'
-                  ? '기간운 분석 단계에서 문제가 감지되어 확인이 필요합니다.'
-                  : failedStep === 'kie_ai'
-                    ? '리포트 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
-                    : '생성 중 문제가 감지되어 확인이 필요합니다.')
-              : status === 'payment_cancelled'
-                ? '결제가 취소되어 진행이 중단되었습니다.'
-                : '주문 정보를 확인하고 있습니다.';
+                  : 0;
+      const progressText = completedButMissingSections
+        ? '리포트 표시 중 문제가 발생했습니다. 페이지를 새로고침하지 말고 고객센터로 문의해 주세요.'
+        : isCompleted
+          ? (hasRenderableSections
+              ? '리포트 생성이 완료되었습니다. 현재 화면에서 전체 내용을 복사해 보관해 주세요.'
+              : '리포트는 서버에 저장되지 않아 다시 열람할 수 없습니다.')
+          : status === 'failed'
+            ? '리포트 제작 중 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해주세요.'
+            : status === 'payment_cancelled'
+              ? '결제가 취소되어 진행이 중단되었습니다.'
+              : (stepProgressText[currentStep || status] || '리포트 제작 상태를 확인하고 있습니다.');
       applyProgress(progress ?? defaultProgress, progressText);
 
-      const failureMeta = status === 'failed'
-        ? `
-실패 배치: ${failedBatch || '-'}
-실패 섹션: ${failedSections.length ? failedSections.join(', ') : '-'}`
-        : '';
-      const updatedText = data.updatedAt ? `
+      const updatedText = renderData.updatedAt ? `\n\n최근 갱신: ${new Date(renderData.updatedAt).toLocaleString('ko-KR')}` : '';
+      detailBox.hidden = false;
+      detailBox.textContent = completedButMissingSections
+        ? `리포트 표시 중 문제가 발생했습니다. 페이지를 새로고침하지 말고 고객센터로 문의해 주세요.${updatedText}`
+        : `${renderData.message || '리포트 상태를 계속 확인하고 있습니다.'}${updatedText}`;
 
-최근 갱신: ${new Date(data.updatedAt).toLocaleString('ko-KR')}` : '';
-      detailBox.textContent = `${data.message || '리포트 상태를 계속 확인하고 있습니다.'}${failureMeta}${updatedText}`;
-
-      const existingDownload = document.getElementById('downloadButton');
-      if (existingDownload) existingDownload.remove();
-      if (isCompleted && data.downloadUrl) {
-        const a = document.createElement('a');
-        a.id = 'downloadButton';
-        a.className = 'btn btn-primary';
-        a.href = data.downloadUrl;
-        a.textContent = 'PDF 리포트 다운로드';
-        actions.prepend(a);
+      if (isCompleted && renderData.viewMode === 'html' && hasRenderableSections) {
+        renderHtmlReport(renderData);
       }
     }
 
     async function poll() {
-      if (!orderId) {
-        statusBadge.textContent = '주문번호 없음';
-        detailBox.textContent = '유효한 주문번호가 없어 상태를 확인할 수 없습니다.';
-        applyProgress(0, '주문번호를 확인해 주세요.');
+      if (pollingStopped || requestInFlight) return;
+      if (!activeOrderId) {
+        statusBadge.textContent = '리포트 연결 필요';
+        receiptMetaBox.hidden = true;
+        loadingPanel.hidden = true;
+        timelinePanel.hidden = true;
+        refreshButton.hidden = true;
+        detailBox.textContent = '이 화면은 결제 완료 후 자동으로 연결되는 전용 리포트 페이지입니다.';
+        applyProgress(0, '정상적인 주문 연결이 필요합니다.');
         return;
       }
+      requestInFlight = true;
       try {
-        const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}/status?t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+        const res = await fetch(`/api/orders/${encodeURIComponent(activeOrderId)}/status?t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
         const data = await res.json();
+        if (data.status === 'completed' && data.viewMode === 'html' && data.reportSections && Object.keys(data.reportSections).length) {
+          const persistedSections = saveCompletedReport(activeOrderId, data.reportSections) || data.reportSections;
+          data.reportSections = persistedSections;
+          stopPolling();
+        } else if (['ready', 'completed', 'failed', 'payment_cancelled'].includes(data.status)) {
+          stopPolling();
+        }
         renderStatus(data);
-        if (!['ready', 'completed', 'failed', 'payment_cancelled'].includes(data.status)) {
-          setTimeout(poll, 4000);
+        if (!pollingStopped && !['ready', 'completed', 'failed', 'payment_cancelled'].includes(data.status)) {
+          schedulePoll(4000);
         }
       } catch (error) {
-        detailBox.textContent = '상태를 확인하는 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도합니다.';
-        applyProgress(12, '상태를 다시 확인하고 있습니다.');
-        setTimeout(poll, 5000);
+        if (!pollingStopped) {
+          detailBox.hidden = false;
+          detailBox.textContent = '상태를 확인하는 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도합니다.';
+          applyProgress(12, '상태를 다시 확인하고 있습니다.');
+          schedulePoll(5000);
+        }
+      } finally {
+        requestInFlight = false;
       }
     }
 
-    refreshButton?.addEventListener('click', () => { window.location.reload(); });
+    refreshButton?.addEventListener('click', () => {
+      pollingStopped = false;
+      requestInFlight = false;
+      completedReportState = null;
+      renderedCompletedOrderId = null;
+      if (pollTimer) {
+        window.clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+      window.location.reload();
+    });
     poll();
   </script>
 </body>

@@ -205,10 +205,9 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      showStatus('결제창으로 이동합니다. 결제 완료 후 리포트 생성 상태 화면으로 안내됩니다.');
+      showStatus('결제창으로 이동합니다. 결제 완료 후 현재 화면에서 리포트 생성 상태를 확인하실 수 있습니다.');
       window.location.href = data.paymentUrl;
     } catch (error) {
-      console.error(error);
       showStatus(error.message || '결제 요청 중 오류가 발생했습니다.', true);
     } finally {
       submitButton.disabled = false;
@@ -284,11 +283,8 @@
     const source = options.source || 'unknown';
     const force = options.force !== false;
     const state = typeof window.__getLatestSummaryState === 'function' ? window.__getLatestSummaryState() : { summary: null, seed: getFreeSummarySeed() };
-    console.log('[PREMIUM CTA] launch', JSON.stringify({
-      source,
-      hasSummary: Boolean(state?.summary),
-      hasSeed: Boolean(state?.seed)
-    }));
+    void source;
+    void state;
     openPremiumModal({ force });
   }
 

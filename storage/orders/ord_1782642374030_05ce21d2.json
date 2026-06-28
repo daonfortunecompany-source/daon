@@ -1,0 +1,232 @@
+{
+  "id": "ord_1782642374030_05ce21d2",
+  "lookupCode": "5179",
+  "createdAt": "2026-06-28T10:26:14.030Z",
+  "updatedAt": "2026-06-28T10:26:15.141Z",
+  "status": "failed",
+  "product": {
+    "type": "compatibility",
+    "name": "2인 사주(궁합 무료 진행)",
+    "price": 36000
+  },
+  "applicant": {
+    "name": "수연",
+    "gender": "male",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "현재 일과 관계의 균형을 어떻게 잡아야 할까요?",
+    "memo": ""
+  },
+  "partner": {
+    "name": "정수라",
+    "gender": "female",
+    "birthYear": "1995",
+    "birthMonth": "05",
+    "birthDay": "14",
+    "birthTime": "21:45",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "",
+    "memo": "연인 및 협업 파트너 관점의 관계 조언 요청"
+  },
+  "person1": {
+    "name": "수연",
+    "gender": "male",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "현재 일과 관계의 균형을 어떻게 잡아야 할까요?",
+    "memo": ""
+  },
+  "person2": {
+    "name": "정수라",
+    "gender": "female",
+    "birthYear": "1995",
+    "birthMonth": "05",
+    "birthDay": "14",
+    "birthTime": "21:45",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "",
+    "memo": "연인 및 협업 파트너 관점의 관계 조언 요청"
+  },
+  "compatibilityRequested": true,
+  "warnings": [],
+  "payment": {
+    "price": 36000,
+    "productName": "2인 사주(궁합 무료 진행)",
+    "mulNo": "mock_1782642374032",
+    "payState": 4,
+    "method": "mock",
+    "payUrl": "http://127.0.0.1:3012/mock-pay/ord_1782642374030_05ce21d2"
+  },
+  "artifacts": {
+    "partialAiSections": {}
+  },
+  "logs": [
+    {
+      "at": "2026-06-28T10:26:14.032Z",
+      "type": "payment_request_created",
+      "detail": {
+        "mulNo": "mock_1782642374032",
+        "lookupCode": "5179"
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:14.035Z",
+      "type": "mock_payment_success",
+      "detail": {
+        "lookupCode": "5179"
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:14.087Z",
+      "type": "generation_started",
+      "detail": {}
+    },
+    {
+      "at": "2026-06-28T10:26:14.108Z",
+      "type": "kie_wave_start",
+      "detail": {
+        "batches": [
+          "core",
+          "timing",
+          "analysis"
+        ]
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:14.120Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "core",
+        "attempt": 1,
+        "reason": "같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:14.122Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "timing",
+        "attempt": 1,
+        "reason": "같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:14.125Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "analysis",
+        "attempt": 1,
+        "reason": "같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:14.137Z",
+      "type": "generation_failed",
+      "detail": {
+        "failedStep": "kie_ai",
+        "currentStep": "core",
+        "failedBatch": "core",
+        "failedSections": [
+          "핵심 요약",
+          "사주 원국 해석"
+        ],
+        "message": "KIE AI batch validation failed"
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:15.056Z",
+      "type": "mock_payment_success",
+      "detail": {
+        "lookupCode": "5179"
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:15.107Z",
+      "type": "generation_started",
+      "detail": {}
+    },
+    {
+      "at": "2026-06-28T10:26:15.123Z",
+      "type": "kie_wave_start",
+      "detail": {
+        "batches": [
+          "core",
+          "timing",
+          "analysis"
+        ]
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:15.127Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "core",
+        "attempt": 1,
+        "reason": "같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:15.130Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "timing",
+        "attempt": 1,
+        "reason": "같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:15.131Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "analysis",
+        "attempt": 1,
+        "reason": "같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:26:15.141Z",
+      "type": "generation_failed",
+      "detail": {
+        "failedStep": "kie_ai",
+        "currentStep": "core",
+        "failedBatch": "core",
+        "failedSections": [
+          "핵심 요약",
+          "사주 원국 해석"
+        ],
+        "message": "KIE AI batch validation failed"
+      }
+    }
+  ],
+  "currentStep": "core",
+  "failedStep": "kie_ai",
+  "failedBatch": "core",
+  "failedSections": [
+    "핵심 요약",
+    "사주 원국 해석"
+  ],
+  "statusMessage": "리포트 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
+  "progress": 88
+}

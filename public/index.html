@@ -2237,7 +2237,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
               <li>건강운</li>
               <li>향후 10년의 대운 흐름</li>
               <li>고민에 대한 조언</li>
-              <li>평생 보관 가능한 40P 이상의 PDF파일 제공</li>
+              <li>복사하여 평생 보관 가능한 리포트 제공</li>
             </ul>
             <button class="btn btn-pay" id="payButton">상세 사주풀이 신청하기</button>
           </div>
@@ -2257,7 +2257,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
             </button>
             <div class="faq-answer-wrap">
               <div class="faq-answer">
-                <p>프리미엄 사주 리포트는 보통의 AI가 아닌 전문 명리학자의 자문으로 설계하고 50만명이 검증한 알고리즘을 사용하여 PDF형식의 결과지를 전달드리고 있습니다.</p>
+                <p>프리미엄 사주 리포트는 보통의 AI가 아닌 전문 명리학자의 자문으로 설계하고 50만명이 검증한 알고리즘을 사용하여 모바일 화면에서 바로 확인하고 전체 내용을 복사해 보관할 수 있는 긴 리포트 형태로 제공됩니다.</p>
               </div>
             </div>
           </article>
@@ -2720,7 +2720,6 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
 
       try {
         validateSummaryPayload(payload);
-        console.log('[FREE SUMMARY] request payload', payload);
         const data = await requestJson('/api/saju/summary', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2733,7 +2732,6 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         }
         renderSummary(payload.name, payload, data.result);
       } catch (error) {
-        console.error(error);
         latestSummary = null;
         window.__freeSummarySeed = null;
         resultCard.classList.add('hidden');

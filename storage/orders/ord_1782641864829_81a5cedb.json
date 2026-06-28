@@ -1,0 +1,283 @@
+{
+  "id": "ord_1782641864829_81a5cedb",
+  "lookupCode": "5520",
+  "createdAt": "2026-06-28T10:17:44.829Z",
+  "updatedAt": "2026-06-28T10:17:45.447Z",
+  "status": "failed",
+  "product": {
+    "type": "compatibility",
+    "name": "2인 사주(궁합 무료 진행)",
+    "price": 36000
+  },
+  "applicant": {
+    "name": "수연",
+    "gender": "male",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "관계와 일의 균형을 어떻게 잡아야 할지 궁금합니다.",
+    "memo": ""
+  },
+  "partner": {
+    "name": "정수라",
+    "gender": "female",
+    "birthYear": "1995",
+    "birthMonth": "05",
+    "birthDay": "14",
+    "birthTime": "21:45",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "",
+    "memo": "함께 대화가 잘 통하는지 궁금합니다."
+  },
+  "person1": {
+    "name": "수연",
+    "gender": "male",
+    "birthYear": "1996",
+    "birthMonth": "07",
+    "birthDay": "03",
+    "birthTime": "15:00",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "관계와 일의 균형을 어떻게 잡아야 할지 궁금합니다.",
+    "memo": ""
+  },
+  "person2": {
+    "name": "정수라",
+    "gender": "female",
+    "birthYear": "1995",
+    "birthMonth": "05",
+    "birthDay": "14",
+    "birthTime": "21:45",
+    "birthTimeUnknown": false,
+    "calendarType": "solar",
+    "isLeapMonth": false,
+    "phone": "",
+    "email": "",
+    "concern": "",
+    "memo": "함께 대화가 잘 통하는지 궁금합니다."
+  },
+  "compatibilityRequested": true,
+  "warnings": [],
+  "payment": {
+    "price": 36000,
+    "productName": "2인 사주(궁합 무료 진행)",
+    "mulNo": "mock_1782641864831",
+    "payState": 4,
+    "method": "mock",
+    "payUrl": "http://127.0.0.1:3010/mock-pay/ord_1782641864829_81a5cedb"
+  },
+  "artifacts": {
+    "partialAiSections": {}
+  },
+  "logs": [
+    {
+      "at": "2026-06-28T10:17:44.831Z",
+      "type": "payment_request_created",
+      "detail": {
+        "mulNo": "mock_1782641864831",
+        "lookupCode": "5520"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:44.834Z",
+      "type": "mock_payment_success",
+      "detail": {
+        "lookupCode": "5520"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:44.885Z",
+      "type": "generation_started",
+      "detail": {}
+    },
+    {
+      "at": "2026-06-28T10:17:44.915Z",
+      "type": "kie_wave_start",
+      "detail": {
+        "batches": [
+          "core",
+          "timing",
+          "analysis"
+        ]
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:44.925Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "core",
+        "attempt": 1,
+        "reason": "핵심 요약 분량 부족 | 사주 원국 해석 분량 부족 | total_section_length_too_short"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:44.928Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "timing",
+        "attempt": 1,
+        "reason": "대운 분량 부족 | 세운 분량 부족 | 월운 분량 부족 | 운성 분량 부족 | total_section_length_too_short | 같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:44.930Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "analysis",
+        "attempt": 1,
+        "reason": "신살,귀인 분량 부족 | 십성 분량 부족 | 재물운 분량 부족 | 직업운 분량 부족 | total_section_length_too_short | 같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:44.950Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "core:핵심 요약",
+        "attempt": 1,
+        "reason": "핵심 요약 분량 부족 | total_section_length_too_short"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:44.951Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "analysis:신살,귀인",
+        "attempt": 1,
+        "reason": "신살,귀인 분량 부족 | total_section_length_too_short | 같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:44.952Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "timing:대운",
+        "attempt": 1,
+        "reason": "대운 분량 부족 | total_section_length_too_short | 같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:44.963Z",
+      "type": "generation_failed",
+      "detail": {
+        "failedStep": "kie_ai",
+        "currentStep": "core",
+        "failedBatch": "core",
+        "failedSections": [
+          "핵심 요약"
+        ],
+        "message": "KIE AI batch validation failed"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:45.352Z",
+      "type": "mock_payment_success",
+      "detail": {
+        "lookupCode": "5520"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:45.403Z",
+      "type": "generation_started",
+      "detail": {}
+    },
+    {
+      "at": "2026-06-28T10:17:45.418Z",
+      "type": "kie_wave_start",
+      "detail": {
+        "batches": [
+          "core",
+          "timing",
+          "analysis"
+        ]
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:45.424Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "core",
+        "attempt": 1,
+        "reason": "핵심 요약 분량 부족 | 사주 원국 해석 분량 부족 | total_section_length_too_short"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:45.426Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "timing",
+        "attempt": 1,
+        "reason": "대운 분량 부족 | 세운 분량 부족 | 월운 분량 부족 | 운성 분량 부족 | total_section_length_too_short | 같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:45.427Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "analysis",
+        "attempt": 1,
+        "reason": "신살,귀인 분량 부족 | 십성 분량 부족 | 재물운 분량 부족 | 직업운 분량 부족 | total_section_length_too_short | 같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:45.438Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "core:핵심 요약",
+        "attempt": 1,
+        "reason": "핵심 요약 분량 부족 | total_section_length_too_short"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:45.440Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "timing:대운",
+        "attempt": 1,
+        "reason": "대운 분량 부족 | total_section_length_too_short | 같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:45.441Z",
+      "type": "kie_batch_retry",
+      "detail": {
+        "batchName": "analysis:신살,귀인",
+        "attempt": 1,
+        "reason": "신살,귀인 분량 부족 | total_section_length_too_short | 같은 문장 반복 과다"
+      }
+    },
+    {
+      "at": "2026-06-28T10:17:45.447Z",
+      "type": "generation_failed",
+      "detail": {
+        "failedStep": "kie_ai",
+        "currentStep": "core",
+        "failedBatch": "core",
+        "failedSections": [
+          "핵심 요약"
+        ],
+        "message": "KIE AI batch validation failed"
+      }
+    }
+  ],
+  "currentStep": "core",
+  "failedStep": "kie_ai",
+  "failedBatch": "core",
+  "failedSections": [
+    "핵심 요약"
+  ],
+  "statusMessage": "리포트 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
+  "progress": 88
+}
