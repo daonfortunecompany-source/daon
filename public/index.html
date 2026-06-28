@@ -420,6 +420,13 @@
       cursor: pointer;
     }
 
+    .time-unknown-note {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.55;
+      color: #8a7568;
+    }
+
     .gender-choice {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -738,6 +745,29 @@
       color: #6b5649;
     }
 
+    .surface-element-summary {
+      display: grid;
+      gap: 6px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: #faf6f1;
+      border: 1px solid #eee1d5;
+    }
+
+    .surface-element-label {
+      font-size: 11px;
+      font-weight: 800;
+      color: #8a7467;
+      letter-spacing: 0.01em;
+    }
+
+    .surface-element-values {
+      font-size: 12px;
+      line-height: 1.55;
+      color: #5c4e47;
+      word-break: keep-all;
+    }
+
     .donut-shell-v2 {
       width: min(188px, 100%);
       aspect-ratio: 1 / 1;
@@ -804,6 +834,14 @@
       gap: 10px;
       width: 100%;
       max-width: 100%;
+    }
+
+    .analysis-footnote {
+      margin-top: -2px;
+      color: #857265;
+      font-size: 12px;
+      line-height: 1.6;
+      word-break: keep-all;
     }
 
     .stats-row-v2 {
@@ -2072,6 +2110,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
                 <input type="checkbox" id="birthTimeUnknown" />
                 <span>출생시간 모름</span>
               </label>
+              <div class="time-unknown-note">출생시간을 모르는 경우, 시주를 제외한 생년월일 중심으로 분석합니다.</div>
             </div>
             <div class="calendar-field-stack">
               <label for="calendarType">양력 / 음력</label>
@@ -2135,12 +2174,16 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
 
         <section class="reference-panel">
           <div class="panel-title-row">
-            <h3>오행 · 십성 분포</h3>
+            <h3>오행 · 십성 종합 분포</h3>
             <span class="panel-note hidden" id="distributionNote"></span>
           </div>
           <div class="analysis-grid-v2">
             <div class="analysis-box-v2">
-              <div class="analysis-box-head">오행 분포</div>
+              <div class="analysis-box-head">오행 종합 분포</div>
+              <div class="surface-element-summary hidden" id="surfaceElementSummary">
+                <span class="surface-element-label">표면 오행</span>
+                <span class="surface-element-values" id="surfaceElementValues"></span>
+              </div>
               <div class="donut-shell-v2">
                 <div class="donut-chart-v2" id="elementRing"></div>
                 <div class="donut-center-v2">
@@ -2149,6 +2192,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
                 </div>
               </div>
               <div class="stats-table-v2" id="elementTable"></div>
+              <div class="analysis-footnote hidden" id="elementDistributionHint"></div>
             </div>
 
             <div class="analysis-box-v2">
@@ -2315,6 +2359,9 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     const elementCorePct = document.getElementById('elementCorePct');
     const elementCopy = document.getElementById('elementCopy');
     const elementTable = document.getElementById('elementTable');
+    const elementDistributionHint = document.getElementById('elementDistributionHint');
+    const surfaceElementSummary = document.getElementById('surfaceElementSummary');
+    const surfaceElementValues = document.getElementById('surfaceElementValues');
     const starRing = document.getElementById('starRing');
     const starCoreLabel = document.getElementById('starCoreLabel');
     const starCorePct = document.getElementById('starCorePct');
@@ -2336,12 +2383,22 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     function syncBirthTimeState() {
       const unknown = isBirthTimeUnknown();
       if (timeHourSelect) {
+        if (unknown && timeHourSelect.value) timeHourSelect.dataset.previousValue = timeHourSelect.value;
         timeHourSelect.disabled = unknown;
-        if (unknown) timeHourSelect.value = '';
+        if (unknown) {
+          timeHourSelect.value = '';
+        } else if (!timeHourSelect.value && timeHourSelect.dataset.previousValue) {
+          timeHourSelect.value = timeHourSelect.dataset.previousValue;
+        }
       }
       if (timeMinuteSelect) {
+        if (unknown && timeMinuteSelect.value) timeMinuteSelect.dataset.previousValue = timeMinuteSelect.value;
         timeMinuteSelect.disabled = unknown;
-        if (unknown) timeMinuteSelect.value = '';
+        if (unknown) {
+          timeMinuteSelect.value = '';
+        } else if (!timeMinuteSelect.value && timeMinuteSelect.dataset.previousValue) {
+          timeMinuteSelect.value = timeMinuteSelect.dataset.previousValue;
+        }
       }
     }
 
@@ -2349,16 +2406,32 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       return String(value || '').replace(/[^0-9]/g, '').slice(0, maxLength);
     }
 
+    function normalizeTimeSelectValue(value, max) {
+      const digits = cleanNumeric(value, 2);
+      if (!digits) return '';
+      const number = Number(digits);
+      if (!Number.isFinite(number) || number < 0 || number > max) return '';
+      return String(number).padStart(2, '0');
+    }
+
+    const UNKNOWN_BIRTH_TIME_FALLBACK = Object.freeze({ hour: '12', minute: '00', label: '출생시간 미상' });
+
     function getFormPayload() {
       const year = cleanNumeric(document.getElementById('year')?.value, 4);
       const month = cleanNumeric(document.getElementById('month')?.value, 2);
       const day = cleanNumeric(document.getElementById('day')?.value, 2);
       const paddedMonth = month ? month.padStart(2, '0') : '';
       const paddedDay = day ? day.padStart(2, '0') : '';
-      const birthHour = isBirthTimeUnknown() ? '' : String(timeHourSelect?.value || '').padStart(2, '0');
-      const birthMinute = isBirthTimeUnknown() ? '' : String(timeMinuteSelect?.value || '').padStart(2, '0');
+      const unknown = isBirthTimeUnknown();
+      const selectedHour = normalizeTimeSelectValue(timeHourSelect?.value || '', 23);
+      const selectedMinute = normalizeTimeSelectValue(timeMinuteSelect?.value || '', 59);
+      const birthHour = unknown ? UNKNOWN_BIRTH_TIME_FALLBACK.hour : selectedHour;
+      const birthMinute = unknown ? UNKNOWN_BIRTH_TIME_FALLBACK.minute : selectedMinute;
       const calendarType = document.getElementById('calendarType').value;
       const gender = document.querySelector('input[name="gender"]:checked')?.value || '';
+      const displayBirthTime = unknown
+        ? UNKNOWN_BIRTH_TIME_FALLBACK.label
+        : (birthHour && birthMinute ? `${birthHour}:${birthMinute}` : '');
       return {
         name: document.getElementById('name').value || '사용자',
         year,
@@ -2372,8 +2445,9 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         birthHour,
         birthMinute,
         birthDate: year && paddedMonth && paddedDay ? `${year}-${paddedMonth}-${paddedDay}` : '',
-        birthTimeUnknown: isBirthTimeUnknown(),
-        birthTime: birthHour && birthMinute ? `${birthHour}:${birthMinute}` : '',
+        birthTimeUnknown: unknown,
+        birthTime: unknown ? '' : (birthHour && birthMinute ? `${birthHour}:${birthMinute}` : ''),
+        displayBirthTime,
         calendar: calendarType,
         calendarType,
         isLeapMonth: document.getElementById('leapMonth').value === 'true',
@@ -2668,10 +2742,49 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         </div>`;
     }
 
+    function buildVisibleElementSummary(result) {
+      const details = result?.pillarDetails || {};
+      const order = ['목', '화', '토', '금', '수'];
+      const counts = Object.fromEntries(order.map((key) => [key, 0]));
+      ['year', 'month', 'day', 'hour'].forEach((pillarKey) => {
+        const detail = details[pillarKey];
+        if (!detail) return;
+        if (result?.inputEcho?.birthTimeUnknown && pillarKey === 'hour') return;
+        [detail?.ohaeng?.gan, detail?.ohaeng?.ji].forEach((element) => {
+          if (counts[element] != null) counts[element] += 1;
+        });
+      });
+      const shown = order.filter((key) => counts[key] > 0).map((key) => `${key} ${counts[key]}`);
+      if (!shown.length) return '';
+      if (counts.토 === 0) shown.push('토 없음');
+      return shown.join(' · ');
+    }
+
+    function getDistributionGuide(result, isFallback) {
+      const meta = result.distributionMeta || {};
+      if (meta.panelNote || meta.elementHint) {
+        return {
+          panelNote: meta.panelNote || '',
+          elementHint: meta.elementHint || ''
+        };
+      }
+      if (isFallback) {
+        return {
+          panelNote: '현재 화면은 대체 분포 기준으로 정리한 참고 비율입니다.',
+          elementHint: '실제 Lucky API 종합 분포와는 차이가 있을 수 있습니다.'
+        };
+      }
+      return {
+        panelNote: '지장간 포함 기준으로 계산된 종합 비율입니다.',
+        elementHint: '겉으로 토가 없어 보여도 지지 속 지장간에 토 기운이 있으면 분포에 반영될 수 있어요.'
+      };
+    }
+
     function renderSummary(name, payload, result) {
       const ui = result.ui || {};
       const analysis = buildAnalysisStats(result);
       const isFallback = result.source === 'local' || result.source === 'mock' || result.usingFallback;
+      const distributionGuide = getDistributionGuide(result, isFallback);
 
       if (pillarMatrix) pillarMatrix.innerHTML = buildPillarMatrixHtml(result);
 
@@ -2684,8 +2797,20 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         ? '현재 화면은 대체 데이터로 구성되었을 수 있습니다. 아래 카드에서 실제 반환값 기준 요약을 먼저 확인해 주세요.'
         : '사주 원국, 오행·십성 경향, 핵심 해석을 아래 카드에서 확인해보세요.';
       if (distributionNote) {
-        distributionNote.textContent = '';
-        distributionNote.style.display = 'none';
+        distributionNote.textContent = distributionGuide.panelNote || '';
+        distributionNote.classList.toggle('hidden', !distributionGuide.panelNote);
+        distributionNote.style.display = distributionGuide.panelNote ? 'inline-flex' : 'none';
+      }
+      const visibleElementSummary = buildVisibleElementSummary(result);
+      if (surfaceElementSummary) {
+        surfaceElementSummary.classList.toggle('hidden', !visibleElementSummary);
+      }
+      if (surfaceElementValues) {
+        surfaceElementValues.textContent = visibleElementSummary;
+      }
+      if (elementDistributionHint) {
+        elementDistributionHint.textContent = distributionGuide.elementHint || '';
+        elementDistributionHint.classList.toggle('hidden', !distributionGuide.elementHint);
       }
       premiumHint.textContent = isFallback
         ? '현재 결과는 Lucky API 원문이 아닌 로컬 대체 요약일 수 있습니다. 재시도 후에도 동일하면 Lucky 연동 상태를 먼저 확인해 주세요.'
@@ -2732,14 +2857,18 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         latestSummary = data.result;
         window.__freeSummarySeed = { ...payload };
         if (data.result.notice) {
-          alert(data.result.notice);
+          console.info('[FREE SUMMARY NOTICE]', data.result.notice);
         }
         renderSummary(payload.name, payload, data.result);
       } catch (error) {
         latestSummary = null;
         window.__freeSummarySeed = null;
         resultCard.classList.add('hidden');
-        alert(error.message || '무료 분석 결과를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        const rawMessage = error?.message || '';
+        const userMessage = payload.birthTimeUnknown && /생시주|출생\s*생시주|hour\s*pillar/i.test(rawMessage)
+          ? '출생정보를 확인하는 중 일시적인 문제가 발생했습니다. 입력값을 확인한 뒤 다시 시도해 주세요.'
+          : (rawMessage || '무료 분석 결과를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        alert(userMessage);
       } finally {
         submitButton.disabled = false;
         submitButton.textContent = originalText;

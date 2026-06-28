@@ -54,6 +54,8 @@
     document.body.style.overflow = '';
   }
 
+  const UNKNOWN_BIRTH_TIME_FALLBACK = Object.freeze({ hour: '12', minute: '00', label: '출생시간 미상' });
+
   function syncPremiumFormFromSummary(options = {}) {
     const seed = getFreeSummarySeed();
     const force = options.force === true;
@@ -72,12 +74,17 @@
     setTargetValue('premiumLeapMonth', String(seedValue('isLeapMonth', document.getElementById('leapMonth')?.value === 'true' ? 'true' : document.getElementById('leapMonth')?.value || 'false')));
 
     const premiumTime = document.getElementById('premiumTime');
-    const seedTime = seedValue('birthTime', '');
+    const premiumTimeUnknown = seedValue('birthTimeUnknown', false) === true || seedValue('birthTimeUnknown', 'false') === 'true';
+    const seedTime = premiumTimeUnknown ? '' : seedValue('birthTime', '');
     const timeHour = document.getElementById('timeHour')?.value || '';
     const timeMinute = document.getElementById('timeMinute')?.value || '';
     const fallbackTime = timeHour ? `${String(timeHour).padStart(2, '0')}:${String(timeMinute || '00').padStart(2, '0')}` : '';
-    if (premiumTime && (force || !premiumTime.value)) {
-      premiumTime.value = seedTime || fallbackTime;
+    if (premiumTime) {
+      premiumTime.dataset.birthTimeUnknown = premiumTimeUnknown ? 'true' : 'false';
+      premiumTime.placeholder = premiumTimeUnknown ? UNKNOWN_BIRTH_TIME_FALLBACK.label : '예: 09:30';
+      if (force || !premiumTime.value) {
+        premiumTime.value = premiumTimeUnknown ? '' : (seedTime || fallbackTime);
+      }
     }
 
     const selectedGender = seedValue('gender', document.querySelector('input[name="gender"]:checked')?.value || '');
@@ -130,13 +137,22 @@
 
   function buildPayload() {
     const product = currentProduct();
+    const premiumTimeInput = document.getElementById('premiumTime');
+    const normalizedApplicantTime = normalizeTime(premiumTimeInput?.value || '');
+    const applicantBirthTimeUnknown = String(premiumTimeInput?.dataset.birthTimeUnknown || 'false') === 'true' && !normalizedApplicantTime;
+    const applicantBirthHour = applicantBirthTimeUnknown ? UNKNOWN_BIRTH_TIME_FALLBACK.hour : (normalizedApplicantTime.split(':')[0] || '');
+    const applicantBirthMinute = applicantBirthTimeUnknown ? UNKNOWN_BIRTH_TIME_FALLBACK.minute : (normalizedApplicantTime.split(':')[1] || '');
     const applicant = {
       name: document.getElementById('premiumName').value.trim(),
       gender: document.querySelector('input[name="premiumGender"]:checked')?.value || '',
       birthYear: cleanDigits(document.getElementById('premiumYear').value),
       birthMonth: cleanDigits(document.getElementById('premiumMonth').value),
       birthDay: cleanDigits(document.getElementById('premiumDay').value),
-      birthTime: normalizeTime(document.getElementById('premiumTime').value),
+      birthTime: applicantBirthTimeUnknown ? '' : normalizedApplicantTime,
+      birthTimeUnknown: applicantBirthTimeUnknown,
+      birthHour: applicantBirthHour,
+      birthMinute: applicantBirthMinute,
+      displayBirthTime: applicantBirthTimeUnknown ? UNKNOWN_BIRTH_TIME_FALLBACK.label : normalizedApplicantTime,
       calendarType: document.getElementById('premiumCalendarType').value,
       isLeapMonth: document.getElementById('premiumLeapMonth').value,
       concern: document.getElementById('premiumConcern').value.trim()
@@ -316,6 +332,13 @@
   });
   document.querySelectorAll('input[name="partnerGender"]').forEach((input) => input.addEventListener('change', updateOrderSummary));
   document.querySelectorAll('input[name="premiumGender"]').forEach((input) => input.addEventListener('change', updateOrderSummary));
+  document.getElementById('premiumTime')?.addEventListener('input', (event) => {
+    const value = String(event.target?.value || '').trim();
+    if (value) {
+      event.target.dataset.birthTimeUnknown = 'false';
+      event.target.placeholder = '예: 09:30';
+    }
+  });
 
   window.openPremiumModal = openPremiumModal;
   window.launchPremiumFlow = launchPremiumFlow;

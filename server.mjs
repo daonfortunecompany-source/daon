@@ -21,6 +21,9 @@ const DEBUG_MODE = String(process.env.DEBUG_MODE || 'false').toLowerCase() === '
 const ALLOW_LOCAL_FALLBACK = process.env.ALLOW_LOCAL_FALLBACK != null
   ? String(process.env.ALLOW_LOCAL_FALLBACK).toLowerCase() === 'true'
   : String(process.env.USE_MOCK_DATA || 'false').toLowerCase() === 'true';
+const UNKNOWN_BIRTH_TIME_DISPLAY = '출생시간 미상';
+const UNKNOWN_BIRTH_TIME_REPORT_DISPLAY = '미상';
+const UNKNOWN_BIRTH_TIME_FALLBACK = Object.freeze({ hour: '12', minute: '00', time: '12:00' });
 
 const CONFIG = {
   lucky: {
@@ -117,13 +120,14 @@ app.post('/api/saju/summary', async (req, res) => {
       year: payload.birthYear,
       month: payload.birthMonth,
       day: payload.birthDay,
-      hour: payload.birthTime ? String(payload.birthTime).split(':')[0] || '' : '',
-      minute: payload.birthTime ? String(payload.birthTime).split(':')[1] || '' : '',
+      hour: payload.birthTimeUnknown ? payload.birthHour : (payload.birthTime ? String(payload.birthTime).split(':')[0] || '' : ''),
+      minute: payload.birthTimeUnknown ? payload.birthMinute : (payload.birthTime ? String(payload.birthTime).split(':')[1] || '' : ''),
       calendar: payload.calendarType,
       calendarType: payload.calendarType,
       gender: payload.gender,
       isLeapMonth: payload.isLeapMonth === true,
-      birthTimeUnknown: payload.birthTimeUnknown
+      birthTimeUnknown: payload.birthTimeUnknown,
+      displayBirthTime: payload.birthTimeUnknown ? UNKNOWN_BIRTH_TIME_DISPLAY : (payload.birthTime || '')
     };
     mansaeRequestPayload = {
       year: luckyPayload.year,
@@ -402,6 +406,16 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
     viewMode: publicStatus === 'completed' ? 'html' : null,
     reportSections: deliveredSections,
     reportExpired: publicStatus === 'completed' && !canDeliverHtml,
+    applicant: {
+      name: order.applicant?.name || '',
+      birthDate: [order.applicant?.birthYear, order.applicant?.birthMonth, order.applicant?.birthDay].filter(Boolean).join('-'),
+      birthTimeUnknown: order.applicant?.birthTimeUnknown === true,
+      displayBirthTime: order.applicant?.birthTimeUnknown === true ? UNKNOWN_BIRTH_TIME_REPORT_DISPLAY : (order.applicant?.birthTime || ''),
+      calendarType: formatCalendarTypeForLucky(order.applicant?.calendarType || 'solar')
+    },
+    reportNote: order.applicant?.birthTimeUnknown === true
+      ? '출생시간이 확인되지 않아 시주를 기준으로 한 일부 세부 해석은 제한적으로 참고하는 것이 좋습니다.'
+      : '',
     statusUrl: buildOrderStatusPageUrl(order.id),
     productName: order.product.name,
     productType: order.product?.type || 'single',
@@ -852,8 +866,8 @@ function determineProduct(input) {
 function buildInputWarnings(input) {
   const warnings = [];
   const birthTime = input.applicant.birthTime || '';
-  if (!birthTime) warnings.push('출생 시간을 모름으로 선택하여 시주 해석은 보수적으로 정리합니다.');
-  if (/^(23|00|01):/.test(birthTime)) warnings.push('야자시/조자시 구간 여부를 확인하는 메모를 함께 포함합니다.');
+  if (input.applicant.birthTimeUnknown || !birthTime) warnings.push('출생시간이 확인되지 않아 시주를 기준으로 한 일부 세부 해석은 제한적으로 참고하는 것이 좋습니다.');
+  if (!input.applicant.birthTimeUnknown && /^(23|00|01):/.test(birthTime)) warnings.push('야자시/조자시 구간 여부를 확인하는 메모를 함께 포함합니다.');
   if (input.applicant.calendarType === 'lunar' && input.applicant.isLeapMonth === 'unknown') warnings.push('음력 생일이며 윤달 여부가 불확실해 확인 메모를 포함합니다.');
   if (input.partner?.memo && !hasPartnerCoreFields(input.partner)) warnings.push('상대 정보가 일부만 입력되어 궁합 API 대신 관계 관련 참고 조언 중심으로 정리합니다.');
   return warnings;
@@ -1029,17 +1043,29 @@ function normalizeApplicant(raw, isPartner = false) {
   const birthMonth = normalizeMonthDayValue(raw.birthMonth || raw.month || dateParts.month || '');
   const birthDay = normalizeMonthDayValue(raw.birthDay || raw.day || dateParts.day || '');
   const birthTimeUnknown = raw.birthTimeUnknown === true || raw.birthTimeUnknown === 'true' || raw.birthTimeUnknown === 'unknown';
-  const birthHour = normalizeHourMinuteValue(raw.birthHour || raw.hour || timeParts.hour || '', 23);
-  const birthMinute = normalizeHourMinuteValue(raw.birthMinute || raw.minute || timeParts.minute || '', 59);
-  const combinedBirthTime = birthHour || birthMinute ? `${birthHour.padStart(2, '0')}:${birthMinute.padStart(2, '0')}` : '';
+  const normalizedBirthTime = normalizeTime(raw.birthTime || raw.time || '');
+  const normalizedTimeParts = parseBirthTimeParts(normalizedBirthTime);
+  const birthHour = normalizeHourMinuteValue(raw.birthHour || raw.hour || normalizedTimeParts.hour || timeParts.hour || '', 23);
+  const birthMinute = normalizeHourMinuteValue(raw.birthMinute || raw.minute || normalizedTimeParts.minute || timeParts.minute || '', 59);
+  const resolvedBirthHour = birthTimeUnknown ? (birthHour || UNKNOWN_BIRTH_TIME_FALLBACK.hour) : birthHour;
+  const resolvedBirthMinute = birthTimeUnknown ? (birthMinute || UNKNOWN_BIRTH_TIME_FALLBACK.minute) : (birthMinute || (birthHour ? '00' : ''));
+  const combinedBirthTime = resolvedBirthHour || resolvedBirthMinute ? `${String(resolvedBirthHour || UNKNOWN_BIRTH_TIME_FALLBACK.hour).padStart(2, '0')}:${String(resolvedBirthMinute || UNKNOWN_BIRTH_TIME_FALLBACK.minute).padStart(2, '0')}` : '';
+  const displayBirthTime = birthTimeUnknown
+    ? UNKNOWN_BIRTH_TIME_DISPLAY
+    : (normalizedBirthTime || combinedBirthTime || '');
   return {
     name: String(raw.name || '').trim(),
     gender: raw.gender === 'male' ? 'male' : raw.gender === 'female' ? 'female' : '',
     birthYear,
     birthMonth,
     birthDay,
-    birthTime: birthTimeUnknown ? '' : normalizeTime(raw.birthTime || combinedBirthTime || ''),
+    birthTime: birthTimeUnknown ? '' : (normalizedBirthTime || combinedBirthTime || ''),
     birthTimeUnknown,
+    birthHour: resolvedBirthHour,
+    birthMinute: resolvedBirthMinute,
+    displayBirthTime,
+    fallbackBirthHour: birthTimeUnknown ? UNKNOWN_BIRTH_TIME_FALLBACK.hour : '',
+    fallbackBirthMinute: birthTimeUnknown ? UNKNOWN_BIRTH_TIME_FALLBACK.minute : '',
     calendarType: normalizeCalendarType(raw.calendarType || raw.calendar || 'solar'),
     isLeapMonth: normalizeLeap(raw.isLeapMonth),
     phone: isPartner ? '' : cleanDigits(raw.phone || ''),
@@ -1068,12 +1094,21 @@ function shouldCallCompatibility(order) {
 }
 
 function toLuckyFlatPayload(person) {
-  const [hourRaw, minuteRaw] = String(person.birthTime || '').split(':');
+  const birthTimeUnknown = person.birthTimeUnknown === true || person.birthTimeUnknown === 'true';
+  const normalizedBirthTime = normalizeTime(person.birthTime || person.time || '');
+  const [hourRaw, minuteRaw] = String(normalizedBirthTime || '').split(':');
   const year = normalizeYearValue(person.birthYear || '');
   const month = normalizeMonthDayValue(person.birthMonth || '');
   const day = normalizeMonthDayValue(person.birthDay || '');
-  const hour = normalizeHourMinuteValue(hourRaw || '', 23);
-  const minute = normalizeHourMinuteValue(minuteRaw || '', 59);
+  const hour = birthTimeUnknown
+    ? (normalizeHourMinuteValue(person.birthHour || person.hour || hourRaw || '', 23) || UNKNOWN_BIRTH_TIME_FALLBACK.hour)
+    : normalizeHourMinuteValue(person.birthHour || person.hour || hourRaw || '', 23);
+  const minute = birthTimeUnknown
+    ? (normalizeHourMinuteValue(person.birthMinute || person.minute || minuteRaw || '', 59) || UNKNOWN_BIRTH_TIME_FALLBACK.minute)
+    : (normalizeHourMinuteValue(person.birthMinute || person.minute || minuteRaw || '', 59) || (hour ? '00' : ''));
+  const apiBirthTime = birthTimeUnknown
+    ? `${String(hour || UNKNOWN_BIRTH_TIME_FALLBACK.hour).padStart(2, '0')}:${String(minute || UNKNOWN_BIRTH_TIME_FALLBACK.minute).padStart(2, '0')}`
+    : (normalizedBirthTime || (hour && minute ? `${hour}:${minute}` : ''));
   const calendar = person.calendarType === 'lunar' ? 'lunar' : 'solar';
   const calendarLabel = formatCalendarTypeForLucky(calendar);
   return {
@@ -1083,8 +1118,10 @@ function toLuckyFlatPayload(person) {
     day,
     hour,
     minute,
-    time: person.birthTime || '',
-    birthTime: person.birthTime || '',
+    time: apiBirthTime,
+    birthTime: apiBirthTime,
+    displayBirthTime: birthTimeUnknown ? UNKNOWN_BIRTH_TIME_DISPLAY : (normalizedBirthTime || apiBirthTime || ''),
+    birthTimeUnknown,
     birthYear: year,
     birthMonth: month,
     birthDay: day,
@@ -1247,7 +1284,8 @@ function cleanDigits(value) {
 }
 
 function buildFreeSummary(payload, mansaeData, meta = {}) {
-  const pillars = meta.selectedPillars || extractPillars(mansaeData, payload);
+  const sourcePillars = meta.selectedPillars || extractPillars(mansaeData, payload);
+  const pillars = payload.birthTimeUnknown ? { ...sourcePillars, hour: '' } : sourcePillars;
   const elements = extractDistribution(mansaeData, ['오행', 'five', 'element']) || defaultElementDistribution(payload);
   const tenGods = extractDistribution(mansaeData, ['십성', 'tenGod', 'ten']) || defaultTenGodDistribution(payload);
   const name = payload.name || '사용자';
@@ -1261,11 +1299,13 @@ function buildFreeSummary(payload, mansaeData, meta = {}) {
       year: payload.birthYear,
       month: payload.birthMonth,
       day: payload.birthDay,
-      hour: payload.birthTime ? String(payload.birthTime).split(':')[0] || '' : '',
-      minute: payload.birthTime ? String(payload.birthTime).split(':')[1] || '' : '',
+      hour: payload.birthTimeUnknown ? payload.birthHour : (payload.birthTime ? String(payload.birthTime).split(':')[0] || '' : ''),
+      minute: payload.birthTimeUnknown ? payload.birthMinute : (payload.birthTime ? String(payload.birthTime).split(':')[1] || '' : ''),
       calendar: payload.calendarType,
       gender: payload.gender,
-      isLeapMonth: payload.isLeapMonth === true
+      isLeapMonth: payload.isLeapMonth === true,
+      birthTimeUnknown: payload.birthTimeUnknown === true,
+      displayBirthTime: payload.birthTimeUnknown ? UNKNOWN_BIRTH_TIME_DISPLAY : (payload.birthTime || '')
     },
     selectedPillarsFrom: meta.selectedPillarsFrom || {
       year: '',
@@ -1286,13 +1326,26 @@ function buildFreeSummary(payload, mansaeData, meta = {}) {
     fiveElements: elements,
     tenGods,
     tags: [`${dominantElement} 기운`, `${dominantGod} 중심`, payload.calendarType === 'lunar' ? '음력 기준' : '양력 기준'],
+    distributionMeta: source === 'lucky'
+      ? {
+          mode: 'api-composite',
+          panelNote: '지장간 포함 기준으로 계산된 종합 비율입니다.',
+          elementHint: '겉으로 토가 없어 보여도 지지 속 지장간에 토 기운이 있으면 오행 분포에 반영될 수 있어요.'
+        }
+      : {
+          mode: 'fallback-reference',
+          panelNote: '현재 화면은 대체 분포 기준으로 정리한 참고 비율입니다.',
+          elementHint: '실제 Lucky API 종합 분포와는 차이가 있을 수 있습니다.'
+        },
     summary: `${name}님은 기본적으로 ${dominantElement} 기운이 또렷하고 ${dominantGod} 성향이 전면에 드러나는 흐름으로 읽힙니다.`,
     trait: `${name}님은 자신의 판단 기준이 분명한 편이며, 한번 방향을 정하면 끝까지 밀어붙이는 힘이 있습니다. 다만 피로가 쌓일 때는 감정 기복이 커질 수 있어 템포 조절이 중요합니다.`,
     love: `관계에서는 솔직함과 안정감을 동시에 원합니다. 가까워질수록 속도를 맞춰주는 사람이 잘 맞고, 말보다 행동에서 신뢰를 확인하려는 경향이 있습니다.`,
     work: `일과 재물에서는 당장의 성과보다 흐름을 길게 보는 편이 유리합니다. 익숙한 영역에서 실력을 쌓되, 결정적인 시점에는 스스로 주도권을 잡는 방식이 좋습니다.`,
     ui: {
       sourceLabel: source === 'lucky' ? 'Lucky API' : source === 'mock' ? 'MOCK DATA' : 'LOCAL FALLBACK',
-      intro: '입력한 생년월일시를 바탕으로 사주 원국, 오행/십성 경향, 핵심 해석을 한 화면에 정리했습니다.',
+      intro: payload.birthTimeUnknown
+        ? '출생시간이 확인되지 않아 시주를 제외한 생년월일 중심으로 사주 원국과 핵심 해석을 정리했습니다.'
+        : '입력한 생년월일시를 바탕으로 사주 원국, 오행/십성 경향, 핵심 해석을 한 화면에 정리했습니다.',
       summaryTitle: '무료 요약 결과',
       summaryBody: `${name}님의 무료 요약 결과입니다. 아래에서 사주 원국과 핵심 해석을 함께 확인해보세요.`
     }
@@ -1454,7 +1507,9 @@ function sumSelectedCandidateScores(pillarDebug) {
 }
 
 function validateBirthPillarSelection(pillarDebug, payload) {
-  const missing = ['year', 'month', 'day', 'hour'].filter((key) => !pillarDebug?.pillars?.[key]);
+  const birthTimeUnknown = payload?.birthTimeUnknown === true || payload?.birthTimeUnknown === 'true';
+  const requiredPillars = birthTimeUnknown ? ['year', 'month', 'day'] : ['year', 'month', 'day', 'hour'];
+  const missing = requiredPillars.filter((key) => !pillarDebug?.pillars?.[key]);
   if (missing.length) {
     console.log(`[SAJU VALIDATION] missing birth pillars detected: ${missing.join(', ')}`);
     throw createStructuredSummaryError(`Lucky API에서 출생 ${missing.map(localizePillarName).join('/')} 필드를 찾지 못했습니다.`, {
@@ -1462,6 +1517,9 @@ function validateBirthPillarSelection(pillarDebug, payload) {
       usingFallback: false,
       selectedPillarsFrom: pillarDebugToResponsePaths(pillarDebug)
     });
+  }
+  if (birthTimeUnknown && !pillarDebug?.pillars?.hour) {
+    console.log('[SAJU VALIDATION] hour pillar missing but allowed because birth time is unknown');
   }
   const expectedYearPillar = computeExpectedYearPillar(payload);
   if (expectedYearPillar && pillarDebug?.pillars?.year && pillarDebug.pillars.year !== expectedYearPillar) {
@@ -1486,6 +1544,7 @@ function validateBirthPillarSelection(pillarDebug, payload) {
       selectedPillarsFrom: pillarDebugToResponsePaths(pillarDebug)
     });
   }
+  if (birthTimeUnknown) return;
   const hourBranch = normalizeBranchChar((pillarDebug.pillars.hour || '').slice(1));
   const expectedHourBranch = guessExpectedHourBranch(payload.birthTime || '');
   if (hourBranch && expectedHourBranch && hourBranch !== expectedHourBranch) {
@@ -1946,7 +2005,9 @@ function extractPeriodRows(periodRaw, mode = 'year') {
 
 function collectPromptContext(order, apiSnapshots, warnings) {
   const apiBase = apiSnapshots.saju || apiSnapshots.mansae || {};
-  const pillars = extractPillars(apiBase, order.applicant);
+  const rawPillars = extractPillars(apiBase, order.applicant);
+  const birthTimeUnknown = order.applicant?.birthTimeUnknown === true;
+  const pillars = birthTimeUnknown ? { ...rawPillars, hour: '' } : rawPillars;
   const pillarDetails = buildPillarDetails(pillars, apiBase);
   const fiveElements = extractDistribution(apiBase, ['오행', 'five', 'element']) || {};
   const tenGods = extractDistribution(apiBase, ['십성', 'tenGod', 'ten']) || {};
@@ -1959,6 +2020,8 @@ function collectPromptContext(order, apiSnapshots, warnings) {
       birthMonth: order.applicant?.birthMonth || '',
       birthDay: order.applicant?.birthDay || '',
       birthTime: order.applicant?.birthTime || '',
+      birthTimeUnknown,
+      displayBirthTime: birthTimeUnknown ? UNKNOWN_BIRTH_TIME_DISPLAY : (order.applicant?.birthTime || ''),
       calendarType: formatCalendarTypeForLucky(order.applicant?.calendarType || 'solar'),
       isLeapMonth: order.applicant?.isLeapMonth === true,
       baselineDate: `${CONFIG.lucky.defaultPeriodYear}-${String(CONFIG.lucky.defaultPeriodMonth).padStart(2, '0')}-${String(CONFIG.lucky.defaultPeriodDay).padStart(2, '0')}`,
@@ -1971,6 +2034,8 @@ function collectPromptContext(order, apiSnapshots, warnings) {
       birthMonth: order.partner?.birthMonth || '',
       birthDay: order.partner?.birthDay || '',
       birthTime: order.partner?.birthTime || '',
+      birthTimeUnknown: order.partner?.birthTimeUnknown === true,
+      displayBirthTime: order.partner?.birthTimeUnknown === true ? UNKNOWN_BIRTH_TIME_DISPLAY : (order.partner?.birthTime || ''),
       calendarType: formatCalendarTypeForLucky(order.partner?.calendarType || 'solar'),
       isLeapMonth: order.partner?.isLeapMonth === true,
       memo: order.partner?.memo || ''
@@ -1997,6 +2062,12 @@ function buildAiPromptPayload(order, apiSnapshots, warnings) {
   return {
     basicInfo: promptContext.basicInfo,
     partnerInfo: promptContext.partnerInfo,
+    analysisNotes: {
+      birthTimeUnknown: promptContext.basicInfo?.birthTimeUnknown === true,
+      note: promptContext.basicInfo?.birthTimeUnknown === true
+        ? '사용자가 출생시간을 모르는 상태입니다. 따라서 시주를 확정하지 말고, 생년월일 중심으로 해석하세요. 시주 기반의 세부 해석, 자녀운, 말년운, 시간대에 민감한 신살 해석은 단정하지 말고 보수적으로 작성하세요.'
+        : ''
+    },
     chartData: {
       pillars: promptContext.pillars,
       pillarDetails: promptContext.pillarDetails,
@@ -2699,13 +2770,14 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
   };
 }
 
-function buildConcernSpecificInstruction(concern, hasCompatibility) {
+function buildConcernSpecificInstruction(concern, hasCompatibility, birthTimeUnknown = false) {
   const lines = [
     '각 섹션은 최소 3문단 이상 작성하고, 각 섹션의 첫 부분에 해당 주제가 무엇을 의미하는지 1~2문장으로 짧게 설명한 뒤 실제 풀이를 이어가세요.',
     '추상적인 일반론 대신 실제 상담 장면이 떠오르는 구체 예시를 포함하세요.',
     '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 자료를 실제 해석 문장에 직접 연결하세요.',
     '고민에 대한 조언은 최소 5문단 이상 작성하고 사용자의 질문에 직접 답하세요.'
   ];
+  if (birthTimeUnknown) lines.push('사용자가 출생시간을 모르는 상태입니다. 따라서 시주를 확정하지 말고, 생년월일 중심으로 해석하세요. 시주 기반의 세부 해석, 자녀운, 말년운, 시간대에 민감한 신살 해석은 단정하지 말고 보수적으로 작성하세요. 리포트에는 출생시간이 확인되지 않아 시주를 기준으로 한 일부 세부 해석은 제한적으로 참고하는 것이 좋다는 취지의 안내를 자연스럽게 반영하세요.');
   if (hasCompatibility) lines.push('관계/궁합 해석은 최소 5문단 이상 작성하고, 두 사람의 원국과 compatibility 자료를 함께 반영하세요. 이름을 언급할 때는 반드시 이름 뒤에 님을 붙여 작성하세요.');
   if (/온라인\s*사주\s*사업/.test(String(concern || ''))) {
     lines.push('사용자 질문이 온라인 사주 사업에 관한 경우, 온라인 사주 사업과 사주 구조의 적합성, 상담형/콘텐츠형/리포트형/브랜딩형 적합도, 수익화 가능성, 고객 응대 스타일, 사업 시작 시 주의점, 혼자 운영 vs 협업, 2026년 기준 실행 타이밍, 3개월 실행 계획, 6개월 실행 계획, 1년 운영 전략, 실패 가능성을 줄이는 조건, 최종 결론을 반드시 모두 포함하세요.');
@@ -2747,6 +2819,7 @@ function buildAiPayloadForMode(promptPayload, requiredSections, mode = 'full_rep
     compatibilitySummary: chartData.compatibility || null,
     concern: promptPayload?.basicInfo?.concern || '',
     consistencyWarnings: promptPayload?.internalReference?.consistencyWarnings || [],
+    analysisNotes: promptPayload?.analysisNotes || {},
     requiredSections
   };
   if (mode === 'full_report') {
@@ -3014,7 +3087,7 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       '각 섹션 값에는 실제 리포트 본문만 작성하세요.',
       '"한 번에 작성할 수 없습니다" 같은 메타 문장을 절대 쓰지 마세요.',
       buildSectionRequirementGuide(batch.sections, isSingleSection),
-      buildConcernSpecificInstruction(promptPayload?.basicInfo?.concern || '', batch.sections.includes('관계/궁합 해석')),
+      buildConcernSpecificInstruction(promptPayload?.basicInfo?.concern || '', batch.sections.includes('관계/궁합 해석'), promptPayload?.basicInfo?.birthTimeUnknown === true),
       isCompatibilityBatch ? buildCompatibilitySpecificInstruction(attempt) : '',
       attempt > 1 ? buildRetryInstruction(retryReason, 'json', batch.sections) : ''
     ].filter(Boolean).join(' ');
@@ -3463,6 +3536,14 @@ async function runKieSmokeTest(mode = 'smoke', candidate = 'all') {
 
 async function generateAiSections(promptPayload, order = null) {
   if (!CONFIG.ai.apiKey) {
+    if (CONFIG.allowLocalFallback) {
+      console.log('[KIE AI FINAL] AI API key missing, using local fallback sections');
+      return fallbackAiSections({
+        ...promptPayload,
+        applicant: promptPayload?.basicInfo || promptPayload?.applicant || {},
+        partner: promptPayload?.partnerInfo || promptPayload?.partner || null
+      });
+    }
     throw createKieBatchError('AI API 키가 설정되지 않았습니다.');
   }
   const hasCompatibility = hasCompatibilityPromptPayload(promptPayload);
@@ -3554,9 +3635,12 @@ async function generateAiSections(promptPayload, order = null) {
 
 
 function fallbackAiSections(promptPayload) {
-  const name = promptPayload.applicant.name || '고객';
-  const concern = promptPayload.applicant.concern || '현재 삶의 방향';
-  const hasCompatibility = Boolean(promptPayload.compatibilityReference || hasPartnerCoreFields(promptPayload.partner));
+  const applicantInfo = promptPayload?.basicInfo || promptPayload?.applicant || {};
+  const partnerInfo = promptPayload?.partnerInfo || promptPayload?.partner || null;
+  const name = applicantInfo.name || '고객';
+  const concern = applicantInfo.concern || '현재 삶의 방향';
+  const birthTimeUnknown = applicantInfo.birthTimeUnknown === true || promptPayload?.analysisNotes?.birthTimeUnknown === true;
+  const hasCompatibility = Boolean(promptPayload.compatibilityReference || hasPartnerCoreFields(partnerInfo));
   const sections = {
     '핵심 요약': `${name}님은 기본적으로 자기 기준이 분명하면서도 흐름을 읽는 감각이 좋은 편입니다. 한 번에 크게 방향을 바꾸기보다, 이미 쌓아온 기반 위에서 기회를 확장할 때 성과가 잘 나는 타입으로 보입니다. 지금 시점에서는 조급함보다 우선순위를 정리하는 힘이 중요합니다.`,
     '사주 원국 해석': `${name}님의 사주는 바깥으로 드러나는 추진력과 안쪽에서 오래 버티는 힘이 함께 읽히는 구조로 정리됩니다. 겉으로는 담담해 보여도 내면에서는 기준이 뚜렷하고, 사람이나 일에서 신뢰가 무너지면 빠르게 거리를 조정하는 경향이 있습니다. 중요한 결정은 감정만으로 움직이기보다 자신이 납득할 수 있는 이유를 확보한 뒤 실행하는 방식이 잘 맞습니다.`,
@@ -3575,6 +3659,11 @@ function fallbackAiSections(promptPayload) {
     '주의할 점': `가장 주의할 점은 조급함 때문에 준비가 덜 된 상태에서 큰 결정을 밀어붙이는 것입니다. 사람을 믿는 것과 검증 없이 맡기는 것은 다르니, 중요한 계약이나 약속은 반드시 문서와 일정 기준으로 다시 확인하세요. 감정적으로 지친 상태에서 관계를 정리하면 후회가 남을 수 있으니 하루 정도 숨을 고른 뒤 판단하는 것이 좋습니다.`,
     '고민에 대한 조언': `${name}님이 적어주신 고민인 "${concern}"은 단순히 운의 좋고 나쁨보다, 지금 무엇을 먼저 정리하고 어디에 힘을 모을지와 더 깊이 연결되어 있습니다. 지금은 모든 문제를 한 번에 해결하려 하기보다, 가장 체감이 큰 한 가지를 먼저 명확히 정하고 그 다음 단계를 설계하는 방식이 맞습니다. 원하는 결과를 얻기 위해서는 타이밍도 중요하지만, 그 타이밍을 받아낼 준비를 갖추는 것이 더 중요합니다.`
   };
+  if (birthTimeUnknown) {
+    sections['사주 원국 해석'] = `${sections['사주 원국 해석']} 출생시간이 확인되지 않아 시주를 기준으로 한 일부 세부 해석은 제한적으로 참고하는 것이 좋습니다.`;
+    sections['자녀운'] = `${sections['자녀운']} 출생시간이 확인되지 않은 경우 자녀운과 말년운 해석은 참고용으로만 보시는 것이 좋습니다.`;
+    sections['주의할 점'] = `${sections['주의할 점']} 출생시간 미상인 경우 시간대에 민감한 해석은 단정적으로 받아들이지 않는 것이 좋습니다.`;
+  }
   if (hasCompatibility) {
     sections['관계/궁합 해석'] = `두 사람의 궁합은 단순한 좋고 나쁨보다 서로가 관계에서 어떤 안정감을 원하는지, 갈등이 생겼을 때 어떻게 회복하는지가 핵심입니다. 서로의 속도와 표현 방식이 다를 수 있으므로, 감정을 추측하기보다 말과 행동의 기준을 맞추는 과정이 중요합니다. 상대에 대한 기대가 커질수록 실망도 커질 수 있으니, 관계의 방향을 천천히 확인하면서 신뢰를 쌓아가세요.`;
   }
