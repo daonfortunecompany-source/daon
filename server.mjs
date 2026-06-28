@@ -9,7 +9,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 const PORT = Number(process.env.PORT || 3000);
-const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+const EXPLICIT_BASE_URL = String(process.env.BASE_URL || process.env.SITE_URL || process.env.APP_BASE_URL || '').trim().replace(/\/$/, '');
+const BASE_URL = (EXPLICIT_BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const generatingOrders = new Set();
 const runtimeOrderStore = new Map();
@@ -24,6 +25,30 @@ const ALLOW_LOCAL_FALLBACK = process.env.ALLOW_LOCAL_FALLBACK != null
 const UNKNOWN_BIRTH_TIME_DISPLAY = '출생시간 미상';
 const UNKNOWN_BIRTH_TIME_REPORT_DISPLAY = '미상';
 const UNKNOWN_BIRTH_TIME_FALLBACK = Object.freeze({ hour: '12', minute: '00', time: '12:00' });
+
+function parseOptionalBoolean(value) {
+  if (value == null || value === '') return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return null;
+}
+
+const RESOLVED_PAYMENT_MODE = (() => {
+  const explicitMode = String(process.env.PAYMENT_MODE || '').trim().toLowerCase();
+  if (explicitMode === 'live') return 'live';
+  if (explicitMode === 'mock') return 'mock';
+  const booleanCandidates = [
+    parseOptionalBoolean(process.env.USE_MOCK_PAYMENT),
+    parseOptionalBoolean(process.env.MOCK_PAYMENT),
+    parseOptionalBoolean(process.env.ENABLE_MOCK_PAY),
+    parseOptionalBoolean(process.env.PAYAPP_MOCK)
+  ].filter((value) => value !== null);
+  if (booleanCandidates.length) {
+    return booleanCandidates.some(Boolean) ? 'mock' : 'live';
+  }
+  return String(process.env.NODE_ENV || '').trim().toLowerCase() === 'development' ? 'mock' : 'live';
+})();
 
 const CONFIG = {
   lucky: {
@@ -58,9 +83,10 @@ const CONFIG = {
     shopname: process.env.PAYAPP_SHOPNAME || '일상사주',
     linkKey: process.env.PAYAPP_LINK_KEY || '',
     linkValue: process.env.PAYAPP_LINK_VALUE || '',
-    feedbackPath: process.env.PAYAPP_FEEDBACK_PATH || '/api/payapp/feedback',
-    returnPath: process.env.PAYAPP_RETURN_PATH || '/report-status.html',
-    mock: String(process.env.PAYAPP_MOCK || 'false').toLowerCase() === 'true'
+    feedbackPath: process.env.PAYAPP_FEEDBACK_PATH || process.env.PAYAPP_CALLBACK_PATH || '/api/payapp/callback',
+    returnPath: process.env.PAYAPP_RETURN_PATH || '/api/payapp/return',
+    mode: RESOLVED_PAYMENT_MODE,
+    mock: RESOLVED_PAYMENT_MODE === 'mock'
   },
   product: {
     singlePrice: Number(process.env.REPORT_PRICE_SINGLE || 18900),
@@ -76,11 +102,16 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(PUBLIC_DIR));
 
 
-app.get('/api/health', async (_req, res) => {
+app.get('/api/health', async (req, res) => {
+  const publicBaseUrl = resolvePublicBaseUrl(req);
   res.json({
     ok: true,
     service: 'daon-premium-saju-service',
     payappReady: Boolean(CONFIG.payapp.userid && CONFIG.payapp.linkValue),
+    paymentMode: CONFIG.payapp.mode,
+    paymentBaseUrl: publicBaseUrl,
+    paymentCallbackUrl: `${publicBaseUrl}${CONFIG.payapp.feedbackPath}`,
+    paymentReturnUrl: `${publicBaseUrl}${CONFIG.payapp.returnPath}`,
     luckyConfigured: Boolean(CONFIG.lucky.apiKey),
     aiConfigured: Boolean(CONFIG.ai.apiKey),
     time: new Date().toISOString()
@@ -292,18 +323,20 @@ app.post('/api/orders/create', async (req, res) => {
       person2: input.person2,
       compatibilityRequested: input.compatibilityRequested,
       warnings: buildInputWarnings(input),
+      publicBaseUrl: resolvePublicBaseUrl(req),
       payment: {
         price: product.price,
         productName: product.name,
         mulNo: null,
         payState: 1,
-        method: CONFIG.payapp.mock ? 'mock' : 'payapp'
+        method: CONFIG.payapp.mock ? 'mock' : 'payapp',
+        requestedMode: CONFIG.payapp.mode
       },
       artifacts: {},
       logs: []
     };
     await saveOrder(order);
-    const payment = await createPaymentRequest(order);
+    const payment = await createPaymentRequest(order, { publicBaseUrl: order.publicBaseUrl });
     order.payment = { ...order.payment, ...payment };
     updateOrderProgress(order, { status: 'payment_pending', currentStep: 'payment_pending', progress: getDefaultProgressForStep('payment_pending'), failedStep: null, failedBatch: null, failedSections: [], statusMessage: '결제 완료를 기다리고 있습니다.' });
     order.logs.push(logLine('payment_request_created', { mulNo: payment.mulNo || null }));
@@ -312,8 +345,9 @@ app.post('/api/orders/create', async (req, res) => {
     res.json({
       ok: true,
       orderId,
+      paymentMode: CONFIG.payapp.mode,
       paymentUrl: payment.payUrl,
-      statusUrl: buildOrderStatusPageUrl(orderId)
+      statusUrl: buildOrderStatusPageUrl(orderId, order.publicBaseUrl)
     });
   } catch (error) {
     await appendLog('order_create_error', { message: error.message });
@@ -321,68 +355,134 @@ app.post('/api/orders/create', async (req, res) => {
   }
 });
 
-app.all('/api/payapp/feedback', async (req, res) => {
+function classifyPayappOutcome(incoming, payState) {
+  const cancelledStates = [8, 9, 32, 64, 70, 71];
+  if (payState === 4) return 'paid';
+  if (cancelledStates.includes(payState)) return 'cancelled';
+  if (payState === 10) return 'pending';
+  const raw = JSON.stringify(incoming || {}).toLowerCase();
+  if (/cancel|canceled|cancelled|취소/.test(raw)) return 'cancelled';
+  if (/fail|failed|error|실패/.test(raw)) return 'failed';
+  if (Number.isFinite(payState) && payState > 0) return 'failed';
+  return 'received';
+}
+
+async function applyPayappPaymentResult(incoming, { source = 'callback' } = {}) {
+  const orderId = String(incoming.var1 || incoming.orderId || '').trim();
+  if (!orderId) throw new Error('주문 식별값(var1)이 없습니다.');
+  const order = await readOrder(orderId);
+  if (!order) throw new Error('주문을 찾을 수 없습니다.');
+
+  const linkValue = String(incoming.linkval || incoming.linkValue || '');
+  if (CONFIG.payapp.linkValue && linkValue && CONFIG.payapp.linkValue !== linkValue) {
+    throw new Error('PayApp linkval 검증에 실패했습니다.');
+  }
+
+  const payState = Number(incoming.pay_state || incoming.payState || incoming.paystate || order.payment?.payState || 0);
+  const price = Number(incoming.price || 0);
+  if (price && price !== order.payment.price) {
+    throw new Error('결제 금액 검증에 실패했습니다.');
+  }
+
+  order.payment = {
+    ...order.payment,
+    payState,
+    mulNo: incoming.mul_no || incoming.mulNo || order.payment.mulNo,
+    recvphone: incoming.recvphone || order.applicant.phone,
+    payUrl: incoming.payurl || incoming.payUrl || order.payment.payUrl || null,
+    tid: incoming.tid || order.payment.tid || null,
+    lastFeedbackAt: new Date().toISOString(),
+    lastSource: source
+  };
+
+  const outcome = classifyPayappOutcome(incoming, payState);
+  if (outcome === 'paid') {
+    const shouldTriggerGeneration = !isOrderCompleted(order);
+    if (isOrderCompleted(order)) {
+      order.status = 'completed';
+    } else {
+      updateOrderProgress(order, {
+        status: 'queued',
+        currentStep: 'queued',
+        progress: getDefaultProgressForStep('queued'),
+        failedStep: null,
+        failedBatch: null,
+        failedSections: [],
+        statusMessage: buildQueuedReceiptMessage(order)
+      });
+    }
+    order.logs.push(logLine('payment_success', { source, payState, mulNo: order.payment.mulNo, tid: order.payment.tid || null }));
+    await saveOrder(order);
+    if (shouldTriggerGeneration) triggerReportGeneration(order.id);
+  } else if (outcome === 'cancelled') {
+    updateOrderProgress(order, {
+      status: 'payment_cancelled',
+      currentStep: 'payment_cancelled',
+      progress: getDefaultProgressForStep('payment_pending'),
+      failedStep: null,
+      failedBatch: null,
+      failedSections: [],
+      statusMessage: '결제가 완료되지 않았습니다. 다시 시도해 주세요.'
+    });
+    order.logs.push(logLine('payment_cancelled', { source, payState }));
+    await saveOrder(order);
+  } else if (outcome === 'failed') {
+    updateOrderProgress(order, {
+      status: 'failed',
+      currentStep: 'payment_failed',
+      progress: getDefaultProgressForStep('payment_pending'),
+      failedStep: 'payment',
+      failedBatch: null,
+      failedSections: [],
+      statusMessage: '결제가 완료되지 않았습니다. 다시 시도해 주세요.'
+    });
+    order.logs.push(logLine('payment_failed', { source, payState }));
+    await saveOrder(order);
+  } else if (outcome === 'pending') {
+    updateOrderProgress(order, {
+      status: 'payment_pending',
+      currentStep: 'payment_pending',
+      progress: getDefaultProgressForStep('payment_pending'),
+      failedStep: null,
+      failedBatch: null,
+      failedSections: [],
+      statusMessage: '결제 완료를 기다리고 있습니다.'
+    });
+    order.logs.push(logLine('payment_waiting', { source, payState }));
+    await saveOrder(order);
+  } else {
+    order.logs.push(logLine('payment_feedback_received', { source, payState }));
+    await saveOrder(order);
+  }
+
+  return order;
+}
+
+app.all([CONFIG.payapp.feedbackPath, '/api/payapp/feedback', '/api/payapp/callback'], async (req, res) => {
   const incoming = { ...req.query, ...req.body };
   try {
-    const orderId = String(incoming.var1 || '').trim();
-    if (!orderId) throw new Error('주문 식별값(var1)이 없습니다.');
-    const order = await readOrder(orderId);
-    if (!order) throw new Error('주문을 찾을 수 없습니다.');
-
-    const linkValue = String(incoming.linkval || '');
-    if (CONFIG.payapp.linkValue && linkValue && CONFIG.payapp.linkValue !== linkValue) {
-      throw new Error('PayApp linkval 검증에 실패했습니다.');
-    }
-
-    const payState = Number(incoming.pay_state || incoming.payState || 0);
-    const price = Number(incoming.price || 0);
-    if (price && price !== order.payment.price) {
-      throw new Error('결제 금액 검증에 실패했습니다.');
-    }
-
-    order.payment = {
-      ...order.payment,
-      payState,
-      mulNo: incoming.mul_no || order.payment.mulNo,
-      recvphone: incoming.recvphone || order.applicant.phone,
-      payUrl: incoming.payurl || order.payment.payUrl || null,
-      lastFeedbackAt: new Date().toISOString()
-    };
-
-    if (payState === 4) {
-      if (isOrderCompleted(order)) {
-        order.status = 'completed';
-      } else {
-        updateOrderProgress(order, {
-          status: 'queued',
-          currentStep: 'queued',
-          progress: getDefaultProgressForStep('queued'),
-          failedStep: null,
-          failedBatch: null,
-          failedSections: [],
-          statusMessage: buildQueuedReceiptMessage(order)
-        });
-      }
-      order.logs.push(logLine('payment_success', { payState, mulNo: order.payment.mulNo }));
-      await saveOrder(order);
-      if (!isOrderCompleted(order)) triggerReportGeneration(order.id);
-    } else if ([8, 9, 32, 64, 70, 71].includes(payState)) {
-      order.status = 'payment_cancelled';
-      order.logs.push(logLine('payment_cancelled', { payState }));
-      await saveOrder(order);
-    } else if (payState === 10) {
-      order.status = 'payment_pending';
-      order.logs.push(logLine('payment_waiting', { payState }));
-      await saveOrder(order);
-    } else {
-      order.logs.push(logLine('payment_feedback_received', { payState }));
-      await saveOrder(order);
-    }
-
+    const order = await applyPayappPaymentResult(incoming, { source: 'callback' });
+    await appendLog('payapp_callback_received', { orderId: order.id, payState: order.payment?.payState || null, mode: CONFIG.payapp.mode });
     res.status(200).send('SUCCESS');
   } catch (error) {
-    await appendLog('payapp_feedback_error', { message: error.message, incoming });
+    await appendLog('payapp_callback_error', { message: error.message, incoming });
     res.status(200).send('FAIL');
+  }
+});
+
+app.all(CONFIG.payapp.returnPath, async (req, res) => {
+  const incoming = { ...req.query, ...req.body };
+  const fallbackOrderId = String(incoming.var1 || incoming.orderId || '').trim();
+  try {
+    const order = await applyPayappPaymentResult(incoming, { source: 'return' });
+    await appendLog('payapp_return_received', { orderId: order.id, payState: order.payment?.payState || null, mode: CONFIG.payapp.mode });
+    return res.redirect(buildOrderStatusPageUrl(order.id, resolvePublicBaseUrl(req, order)));
+  } catch (error) {
+    await appendLog('payapp_return_error', { message: error.message, incoming });
+    if (fallbackOrderId) {
+      return res.redirect(buildOrderStatusPageUrl(fallbackOrderId, resolvePublicBaseUrl(req)));
+    }
+    return res.status(400).send('결제가 완료되지 않았습니다. 다시 시도해 주세요.');
   }
 });
 
@@ -416,7 +516,7 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
     reportNote: order.applicant?.birthTimeUnknown === true
       ? '출생시간이 확인되지 않아 시주를 기준으로 한 일부 세부 해석은 제한적으로 참고하는 것이 좋습니다.'
       : '',
-    statusUrl: buildOrderStatusPageUrl(order.id),
+    statusUrl: buildOrderStatusPageUrl(order.id, order.publicBaseUrl),
     productName: order.product.name,
     productType: order.product?.type || 'single',
     expectedDurationText: order.product?.type === 'compatibility' ? '약 5~10분' : '약 3~7분',
@@ -443,12 +543,14 @@ app.get('/api/orders/lookup', handleOrderLookup);
 app.post('/api/orders/lookup', handleOrderLookup);
 
 app.get('/mock-pay/:orderId', async (req, res) => {
+  if (!CONFIG.payapp.mock) return res.status(404).send('Not found');
   const order = await readOrder(req.params.orderId);
   if (!order) return res.status(404).send('Order not found');
   res.send(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mock Pay</title><style>body{font-family:sans-serif;background:#f7f3ee;padding:24px}.card{max-width:420px;margin:0 auto;background:#fff;padding:24px;border-radius:20px;border:1px solid #eadfd2}.btn{display:block;margin-top:12px;padding:14px 16px;border-radius:14px;text-align:center;text-decoration:none;font-weight:700}.ok{background:#cf8f7a;color:#fff}.cancel{background:#fff;border:1px solid #eadfd2;color:#352c29}</style></head><body><div class="card"><h1>Mock 결제 페이지</h1><p>${escapeHtml(order.product.name)} / ${order.product.price.toLocaleString('ko-KR')}원</p><a class="btn ok" href="/mock-pay/${encodeURIComponent(order.id)}/complete">결제 성공 처리</a><a class="btn cancel" href="/mock-pay/${encodeURIComponent(order.id)}/cancel">결제 취소 처리</a></div></body></html>`);
 });
 
 app.get('/mock-pay/:orderId/complete', async (req, res) => {
+  if (!CONFIG.payapp.mock) return res.status(404).send('Not found');
   const order = await readOrder(req.params.orderId);
   if (!order) return res.status(404).send('Order not found');
   order.payment.payState = 4;
@@ -465,17 +567,18 @@ app.get('/mock-pay/:orderId/complete', async (req, res) => {
   order.logs.push(logLine('mock_payment_success', {}));
   await saveOrder(order);
   triggerReportGeneration(order.id);
-  res.redirect(buildOrderStatusPageUrl(order.id));
+  res.redirect(buildOrderStatusPageUrl(order.id, order.publicBaseUrl));
 });
 
 app.get('/mock-pay/:orderId/cancel', async (req, res) => {
+  if (!CONFIG.payapp.mock) return res.status(404).send('Not found');
   const order = await readOrder(req.params.orderId);
   if (!order) return res.status(404).send('Order not found');
   order.status = 'payment_cancelled';
   order.payment.payState = 9;
   order.logs.push(logLine('mock_payment_cancelled', {}));
   await saveOrder(order);
-  res.redirect(buildOrderStatusPageUrl(order.id));
+  res.redirect(buildOrderStatusPageUrl(order.id, order.publicBaseUrl));
 });
 
 app.listen(PORT, () => {
@@ -815,15 +918,22 @@ function resolveLuckyAuthVariants() {
   ];
 }
 
-async function createPaymentRequest(order) {
+async function createPaymentRequest(order, options = {}) {
+  const publicBaseUrl = resolvePublicBaseUrl(null, { ...order, publicBaseUrl: options.publicBaseUrl || order.publicBaseUrl || '' });
   if (CONFIG.payapp.mock) {
     return {
       mulNo: `mock_${Date.now()}`,
-      payUrl: `${BASE_URL}/mock-pay/${encodeURIComponent(order.id)}`
+      payUrl: `${publicBaseUrl}/mock-pay/${encodeURIComponent(order.id)}`,
+      callbackUrl: `${publicBaseUrl}${CONFIG.payapp.feedbackPath}`,
+      returnUrl: `${publicBaseUrl}${CONFIG.payapp.returnPath}?orderId=${encodeURIComponent(order.id)}`
     };
   }
+  assertLivePaymentBaseUrl(publicBaseUrl);
   if (!CONFIG.payapp.userid) throw new Error('PAYAPP_USERID가 설정되지 않았습니다.');
+  if (!CONFIG.payapp.linkValue) throw new Error('PAYAPP_LINK_VALUE가 설정되지 않았습니다.');
 
+  const callbackUrl = `${publicBaseUrl}${CONFIG.payapp.feedbackPath}`;
+  const returnUrl = `${publicBaseUrl}${CONFIG.payapp.returnPath}?orderId=${encodeURIComponent(order.id)}`;
   const form = new URLSearchParams({
     cmd: 'payrequest',
     userid: CONFIG.payapp.userid,
@@ -831,11 +941,13 @@ async function createPaymentRequest(order) {
     goodname: order.product.name,
     price: String(order.product.price),
     recvphone: order.applicant.phone || '',
-    feedbackurl: `${BASE_URL}${CONFIG.payapp.feedbackPath}`,
-    returnurl: `${BASE_URL}${CONFIG.payapp.returnPath}?orderId=${encodeURIComponent(order.id)}`,
+    feedbackurl: callbackUrl,
+    returnurl: returnUrl,
     var1: order.id,
     var2: order.applicant.email || ''
   });
+  if (CONFIG.payapp.linkKey) form.set('linkkey', CONFIG.payapp.linkKey);
+  if (CONFIG.payapp.linkValue) form.set('linkval', CONFIG.payapp.linkValue);
 
   const response = await fetch(CONFIG.payapp.apiUrl, {
     method: 'POST',
@@ -848,11 +960,13 @@ async function createPaymentRequest(order) {
   }
   const parsed = Object.fromEntries(new URLSearchParams(raw));
   if (String(parsed.state) !== '1' || !parsed.payurl) {
-    throw new Error(parsed.errorMessage || 'PayApp 결제 URL을 생성하지 못했습니다.');
+    throw new Error(parsed.errorMessage || parsed.message || 'PayApp 결제 URL을 생성하지 못했습니다.');
   }
   return {
     mulNo: parsed.mul_no || null,
-    payUrl: parsed.payurl
+    payUrl: parsed.payurl,
+    callbackUrl,
+    returnUrl
   };
 }
 
@@ -3697,8 +3811,31 @@ function logLine(type, detail) {
   return { at: new Date().toISOString(), type, detail };
 }
 
-function buildOrderStatusPageUrl(orderId) {
-  return `${BASE_URL}/report-status.html?orderId=${encodeURIComponent(orderId)}`;
+function resolvePublicBaseUrl(req = null, order = null) {
+  const orderBaseUrl = String(order?.publicBaseUrl || '').trim().replace(/\/$/, '');
+  if (orderBaseUrl) return orderBaseUrl;
+  if (EXPLICIT_BASE_URL) return EXPLICIT_BASE_URL;
+  if (req) {
+    const forwardedProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+    const forwardedHost = String(req.headers['x-forwarded-host'] || req.get?.('host') || '').split(',')[0].trim();
+    if (forwardedHost) return `${forwardedProto}://${forwardedHost}`.replace(/\/$/, '');
+  }
+  return BASE_URL;
+}
+
+function assertLivePaymentBaseUrl(publicBaseUrl) {
+  const normalized = String(publicBaseUrl || '').trim();
+  if (CONFIG.payapp.mock) return;
+  if (!/^https:\/\//i.test(normalized)) {
+    throw new Error('실제 결제 모드에서는 BASE_URL 또는 SITE_URL을 https 공개 주소로 설정해야 합니다.');
+  }
+  if (/^https:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(normalized)) {
+    throw new Error('실제 결제 모드에서는 localhost 주소를 사용할 수 없습니다. BASE_URL 또는 SITE_URL을 Render 도메인으로 설정해 주세요.');
+  }
+}
+
+function buildOrderStatusPageUrl(orderId, publicBaseUrl = BASE_URL) {
+  return `${String(publicBaseUrl || BASE_URL).replace(/\/$/, '')}/report-status.html?orderId=${encodeURIComponent(orderId)}`;
 }
 
 function cloneRuntimeOrder(order) {

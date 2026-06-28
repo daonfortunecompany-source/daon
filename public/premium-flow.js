@@ -221,6 +221,12 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      if (!data.paymentUrl) {
+        throw new Error('결제 URL이 생성되지 않았습니다. 잠시 후 다시 시도해 주세요.');
+      }
+      if (data.paymentMode === 'live' && /\/mock-pay\//i.test(String(data.paymentUrl))) {
+        throw new Error('실제 결제 모드에서 mock 결제 URL이 반환되었습니다. 서버 결제 설정을 확인해 주세요.');
+      }
       showStatus('결제창으로 이동합니다. 결제 완료 후 현재 화면에서 리포트 생성 상태를 확인하실 수 있습니다.');
       window.location.href = data.paymentUrl;
     } catch (error) {
