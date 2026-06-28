@@ -100,7 +100,10 @@ if (CONFIG.ai.debugMode) {
       const mode = ['smoke', 'compact_report', 'full_report'].includes(String(req.query.mode || ''))
         ? String(req.query.mode)
         : 'smoke';
-      const result = await runKieSmokeTest(mode);
+      const candidate = ['configured', 'market', 'openai', 'all'].includes(String(req.query.candidate || ''))
+        ? String(req.query.candidate)
+        : 'all';
+      const result = await runKieSmokeTest(mode, candidate);
       res.json(result);
     } catch (error) {
       res.status(500).json({ ok: false, error: error.message || 'KIE smoke test failed' });
@@ -2340,32 +2343,37 @@ function resolveAiStyle() {
 
 function resolveAiEndpointPath(style = 'chat_completions') {
   let configured = String(CONFIG.ai.path || '').trim();
-  if (!configured) configured = style === 'responses' ? '/v1/responses' : '/v1/chat/completions';
+  if (!configured) configured = style === 'responses' ? '/v1/responses' : '/gpt-5-2/v1/chat/completions';
   if (!configured.startsWith('/')) configured = `/${configured}`;
-  if (/^\/[^/]+\/v1\/chat\/completions$/i.test(configured) && configured.includes(CONFIG.ai.model)) {
-    console.log('[KIE AI] suspicious endpointPath normalized', JSON.stringify({ configuredPath: configured, normalizedPath: '/v1/chat/completions', model: CONFIG.ai.model }));
-    return '/v1/chat/completions';
-  }
-  if (/^\/[^/]+\/v1\/responses$/i.test(configured) && configured.includes(CONFIG.ai.model)) {
-    console.log('[KIE AI] suspicious endpointPath normalized', JSON.stringify({ configuredPath: configured, normalizedPath: '/v1/responses', model: CONFIG.ai.model }));
-    return '/v1/responses';
-  }
   return configured;
+}
+
+function getAiEndpointCandidates(style = 'chat_completions') {
+  const configured = resolveAiEndpointPath(style);
+  const candidates = [configured];
+  if (style === 'chat_completions') {
+    candidates.push('/gpt-5-2/v1/chat/completions');
+    candidates.push('/v1/chat/completions');
+  } else {
+    candidates.push('/gpt-5-2/v1/responses');
+    candidates.push('/v1/responses');
+  }
+  return Array.from(new Set(candidates.filter(Boolean)));
 }
 
 function buildAiAttemptPlan(attempt) {
   if (attempt === 1) {
     return {
-      mode: 'full_report',
+      mode: 'compact_report',
       outputMode: 'json',
-      maxTokens: CONFIG.ai.maxTokens,
-      includeRawBundle: true
+      maxTokens: Math.min(CONFIG.ai.maxTokens, 8000),
+      includeRawBundle: false
     };
   }
   return {
     mode: 'compact_report',
     outputMode: 'text_titles',
-    maxTokens: Math.min(CONFIG.ai.maxTokens, 7000),
+    maxTokens: Math.min(CONFIG.ai.maxTokens, 6500),
     includeRawBundle: false
   };
 }
@@ -2394,9 +2402,9 @@ function buildAiRequestBody({ style, systemPrompt, userText, outputMode, maxToke
   return body;
 }
 
-async function callAiProvider({ label, attempt, payloadMode, outputMode, systemPrompt, userText, requiredSections }) {
+async function callAiProvider({ label, attempt, payloadMode, outputMode, systemPrompt, userText, requiredSections, endpointPathOverride = '' }) {
   const style = resolveAiStyle();
-  const endpointPath = resolveAiEndpointPath(style);
+  const endpointPath = endpointPathOverride || resolveAiEndpointPath(style);
   const endpoint = `${CONFIG.ai.baseUrl}${endpointPath}`;
   const requestBody = buildAiRequestBody({ style, systemPrompt, userText, outputMode, maxTokens: payloadMode.maxTokens });
   const requestSize = buildAiRequestSizeSummary({ systemPrompt, userText, requestBody, payloadMode: payloadMode.mode, payloadForAi: payloadMode.payloadForAi });
@@ -2433,7 +2441,11 @@ async function callAiProvider({ label, attempt, payloadMode, outputMode, systemP
     console.log(`[${label}] raw response preview`, JSON.stringify({ attempt, status: response.status, rawLength: raw.length, preview: sanitizeKiePreviewText(raw) }));
     const upstream = detectUpstreamAiError(raw, response.status, requiredSections);
     if (!response.ok || upstream.isError) {
+      const errorType = response.status >= 400
+        ? 'KIE_UPSTREAM_HTTP_ERROR'
+        : 'KIE_UPSTREAM_BODY_ERROR';
       console.log(`[${label}] upstream error`, JSON.stringify({
+        type: errorType,
         httpStatus: response.status,
         bodyCode: upstream.bodyCode,
         bodyMessage: upstream.bodyMessage,
@@ -2449,6 +2461,7 @@ async function callAiProvider({ label, attempt, payloadMode, outputMode, systemP
         requestSize,
         endpointPath,
         upstreamError: {
+          type: errorType,
           httpStatus: response.status,
           bodyCode: upstream.bodyCode,
           bodyMessage: upstream.bodyMessage || (!response.ok ? `HTTP ${response.status}` : 'upstream_error'),
@@ -2470,6 +2483,7 @@ async function callAiProvider({ label, attempt, payloadMode, outputMode, systemP
       requestSize,
       endpointPath,
       upstreamError: {
+        type: 'KIE_TRANSPORT_ERROR',
         httpStatus: 0,
         bodyCode: 'transport_error',
         bodyMessage: message,
@@ -2535,55 +2549,76 @@ function buildSmokePromptPayload() {
   };
 }
 
-async function runKieSmokeTest(mode = 'smoke') {
+async function runKieSmokeTest(mode = 'smoke', candidate = 'all') {
   if (!CONFIG.ai.apiKey) {
-    return { ok: false, mode, error: 'AI API key missing' };
+    return { ok: false, mode, candidate, error: 'AI API key missing' };
   }
+  const style = resolveAiStyle();
+  const allCandidates = getAiEndpointCandidates(style);
+  const selectedCandidates = candidate === 'configured'
+    ? [allCandidates[0]]
+    : candidate === 'market'
+      ? allCandidates.filter((path) => path.includes(`/${CONFIG.ai.model}/`)).slice(0, 1)
+      : candidate === 'openai'
+        ? allCandidates.filter((path) => /\/v1\/(chat\/completions|responses)$/.test(path)).slice(-1)
+        : allCandidates;
+
   const promptPayload = buildSmokePromptPayload();
   const fullSections = buildRequiredAiSections(true);
   const smokeSections = ['핵심 요약', '사주 원국 해석', '대운', '고민에 대한 조언', '관계/궁합 해석'];
-  if (mode === 'smoke') {
-    const systemPrompt = '당신은 JSON만 반환하는 응답기입니다. 반드시 {"ok":true,"message":"pong"}만 반환하세요.';
-    const userText = '안녕하세요. JSON으로 {"ok":true,"message":"pong"} 만 반환하세요.';
-    const payloadMode = { mode: 'smoke', maxTokens: 200, payloadForAi: { smoke: true } };
-    const result = await callAiProvider({ label: 'KIE SMOKE', attempt: 1, payloadMode, outputMode: 'json', systemPrompt, userText, requiredSections: [] });
-    if (!result.ok) {
-      console.log('[KIE SMOKE] ok', JSON.stringify({ ok: false, mode, upstreamError: result.upstreamError }));
-      return { ok: false, mode, ...result.upstreamError };
+  const tests = [];
+
+  for (const endpointPath of selectedCandidates) {
+    if (mode === 'smoke') {
+      const systemPrompt = '당신은 JSON만 반환하는 응답기입니다. 반드시 {"ok":true,"message":"pong"}만 반환하세요.';
+      const userText = 'JSON으로 {"ok":true,"message":"pong"} 만 반환하세요.';
+      const payloadMode = { mode: 'smoke', maxTokens: 200, payloadForAi: { smoke: true } };
+      console.log('[KIE SMOKE] request start', JSON.stringify({ mode, endpointPath }));
+      const result = await callAiProvider({ label: 'KIE SMOKE', attempt: 1, payloadMode, outputMode: 'json', systemPrompt, userText, requiredSections: [], endpointPathOverride: endpointPath });
+      if (!result.ok) {
+        console.log('[KIE SMOKE] endpointPath', endpointPath);
+        console.log('[KIE SMOKE] status', JSON.stringify({ ok: false, endpointPath, upstreamError: result.upstreamError }));
+        tests.push({ ok: false, endpointPath, ...result.upstreamError });
+        continue;
+      }
+      const parsed = tryParseJsonText(result.raw);
+      const ok = parsed?.ok === true && parsed?.message === 'pong';
+      console.log('[KIE SMOKE] endpointPath', endpointPath);
+      console.log('[KIE SMOKE] status', JSON.stringify({ ok, endpointPath, status: result.response.status }));
+      console.log('[KIE SMOKE] body preview', JSON.stringify({ endpointPath, preview: sanitizeKiePreviewText(result.raw) }));
+      tests.push({ ok, endpointPath, status: result.response.status, preview: sanitizeKiePreviewText(result.raw), parsed });
+      continue;
     }
-    const parsed = tryParseJsonText(result.raw);
-    const ok = parsed?.ok === true && parsed?.message === 'pong';
-    console.log('[KIE SMOKE] ok', JSON.stringify({ ok, mode, status: result.response.status }));
-    return { ok, mode, status: result.response.status, preview: sanitizeKiePreviewText(result.raw), parsed };
+
+    const requiredSections = mode === 'compact_report' ? smokeSections : fullSections;
+    const payloadForAi = buildAiPayloadForMode(promptPayload, requiredSections, mode === 'compact_report' ? 'compact_report' : 'full_report');
+    const systemPrompt = [
+      '당신은 숙련된 한국어 사주 해석 상담사입니다.',
+      mode === 'compact_report'
+        ? '반드시 JSON 객체만 반환하고, 아래 필수 섹션 5개만 작성하세요.'
+        : '반드시 JSON 객체만 반환하고, 아래 필수 섹션을 모두 작성하세요.',
+      '마크다운, 코드블록, 설명문을 금지합니다.'
+    ].join(' ');
+    const userText = JSON.stringify({ requiredSections, promptPayload: payloadForAi });
+    const payloadMode = { mode, maxTokens: mode === 'compact_report' ? 2500 : 5000, payloadForAi };
+    console.log('[KIE SMOKE] request start', JSON.stringify({ mode, endpointPath }));
+    const result = await callAiProvider({ label: 'KIE SMOKE', attempt: 1, payloadMode, outputMode: 'json', systemPrompt, userText, requiredSections, endpointPathOverride: endpointPath });
+    if (!result.ok) {
+      console.log('[KIE SMOKE] endpointPath', endpointPath);
+      console.log('[KIE SMOKE] status', JSON.stringify({ ok: false, endpointPath, upstreamError: result.upstreamError }));
+      tests.push({ ok: false, endpointPath, ...result.upstreamError });
+      continue;
+    }
+    const parsedMeta = parseKieSectionMap(result.raw, requiredSections);
+    const validation = validateAiSections(parsedMeta.sections || {}, { ...promptPayload, chartData: promptPayload.chartData, partnerInfo: promptPayload.partnerInfo }, parsedMeta);
+    console.log('[KIE SMOKE] endpointPath', endpointPath);
+    console.log('[KIE SMOKE] status', JSON.stringify({ ok: validation.ok, endpointPath, status: result.response.status }));
+    console.log('[KIE SMOKE] body preview', JSON.stringify({ endpointPath, preview: sanitizeKiePreviewText(result.raw) }));
+    tests.push({ ok: validation.ok, endpointPath, status: result.response.status, detectedFormat: parsedMeta.detectedFormat, preview: sanitizeKiePreviewText(result.raw), validation });
   }
 
-  const requiredSections = mode === 'compact_report' ? smokeSections : fullSections;
-  const payloadForAi = buildAiPayloadForMode(promptPayload, requiredSections, mode === 'compact_report' ? 'compact_report' : 'full_report');
-  const systemPrompt = [
-    '당신은 숙련된 한국어 사주 해석 상담사입니다.',
-    mode === 'compact_report'
-      ? '반드시 JSON 객체만 반환하고, 아래 필수 섹션 5개만 작성하세요.'
-      : '반드시 JSON 객체만 반환하고, 아래 필수 섹션을 모두 작성하세요.',
-    '마크다운, 코드블록, 설명문을 금지합니다.'
-  ].join(' ');
-  const userText = JSON.stringify({ requiredSections, promptPayload: payloadForAi });
-  const payloadMode = { mode, maxTokens: mode === 'compact_report' ? 2000 : 5000, payloadForAi };
-  const result = await callAiProvider({ label: 'KIE SMOKE', attempt: 1, payloadMode, outputMode: 'json', systemPrompt, userText, requiredSections });
-  if (!result.ok) {
-    console.log('[KIE SMOKE] ok', JSON.stringify({ ok: false, mode, upstreamError: result.upstreamError }));
-    return { ok: false, mode, ...result.upstreamError };
-  }
-  const parsedMeta = parseKieSectionMap(result.raw, requiredSections);
-  const validation = validateAiSections(parsedMeta.sections || {}, { ...promptPayload, chartData: promptPayload.chartData, partnerInfo: promptPayload.partnerInfo }, parsedMeta);
-  console.log('[KIE SMOKE] ok', JSON.stringify({ ok: validation.ok, mode, detectedFormat: parsedMeta.detectedFormat }));
-  return {
-    ok: validation.ok,
-    mode,
-    status: result.response.status,
-    detectedFormat: parsedMeta.detectedFormat,
-    preview: sanitizeKiePreviewText(result.raw),
-    validation
-  };
+  const winner = tests.find((item) => item.ok) || null;
+  return { ok: Boolean(winner), mode, candidate, configuredEndpointPath: allCandidates[0], tests, winner };
 }
 
 async function generateAiSections(promptPayload) {
@@ -2598,6 +2633,7 @@ async function generateAiSections(promptPayload) {
   const concernInstruction = buildConcernSpecificInstruction(promptPayload?.basicInfo?.concern || '', requiredSections.includes('관계/궁합 해석'));
   let retryReason = '';
   let lastError = null;
+  const endpointPath = resolveAiEndpointPath(resolveAiStyle());
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const plan = buildAiAttemptPlan(attempt);
@@ -2611,7 +2647,9 @@ async function generateAiSections(promptPayload) {
       '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 데이터를 근거로 프리미엄 리포트 수준의 상세 해석을 작성하세요.',
       plan.outputMode === 'json'
         ? '반드시 JSON 객체만 반환하고, 스키마 키 이름을 한 글자도 바꾸지 마세요. 마크다운 금지, 코드블록 금지, 설명문 금지입니다.'
-        : `JSON 대신 순수 텍스트로만 작성하세요. 각 제목은 반드시 다음 형식을 지키세요:\n${buildTextTitleTemplate(requiredSections)}\n제목 외의 도입 문구, 코드블록, 마크다운 설명문은 금지입니다.`,
+        : `JSON 대신 순수 텍스트로만 작성하세요. 각 제목은 반드시 다음 형식을 지키세요:
+${buildTextTitleTemplate(requiredSections)}
+제목 외의 도입 문구, 코드블록, 마크다운 설명문은 금지입니다.`,
       '각 섹션은 최소 3문단 이상, 관계/궁합 해석과 고민에 대한 조언은 최소 5문단 이상 작성하세요.',
       '같은 문장을 반복하지 말고, 실제 삶의 장면이 떠오르는 예시와 실행 조언을 포함하세요.',
       concernInstruction,
@@ -2630,7 +2668,8 @@ async function generateAiSections(promptPayload) {
       outputMode: plan.outputMode,
       systemPrompt,
       userText,
-      requiredSections
+      requiredSections,
+      endpointPathOverride: endpointPath
     });
 
     if (!result.ok) {
@@ -2638,7 +2677,8 @@ async function generateAiSections(promptPayload) {
       lastError.failedStep = 'kie_ai';
       lastError.progress = 88;
       retryReason = `${result.upstreamError?.bodyCode || 'error'}:${result.upstreamError?.bodyMessage || 'upstream_error'}`;
-      if (attempt < 2) {
+      const shouldRetry = attempt < 2 && result.upstreamError?.type !== 'KIE_UPSTREAM_HTTP_ERROR';
+      if (shouldRetry) {
         console.log('[KIE AI] retry start', JSON.stringify({ reason: retryReason, nextMode: 'compact_report', nextOutputMode: 'text_titles' }));
         continue;
       }
@@ -2648,6 +2688,7 @@ async function generateAiSections(promptPayload) {
     const parsedMeta = parseKieSectionMap(result.raw, requiredSections);
     if (!parsedMeta.sections) {
       console.log('[KIE AI] parse failure', JSON.stringify({
+        type: parsedMeta.rawLength < 1000 ? 'KIE_RESPONSE_TOO_SHORT' : 'KIE_PARSE_ERROR',
         detectedFormat: parsedMeta.detectedFormat,
         parseFailureReason: parsedMeta.parseFailureReason,
         sourcePath: parsedMeta.sourcePath,

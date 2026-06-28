@@ -2322,6 +2322,8 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     const timeHourSelect = document.getElementById('timeHour');
     const timeMinuteSelect = document.getElementById('timeMinute');
     let latestSummary = null;
+    window.__freeSummarySeed = null;
+    window.__getLatestSummaryState = () => ({ summary: latestSummary, seed: window.__freeSummarySeed || null });
 
     function isBirthTimeUnknown() {
       return Boolean(birthTimeUnknown?.checked);
@@ -2725,6 +2727,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
           body: JSON.stringify(payload)
         });
         latestSummary = data.result;
+        window.__freeSummarySeed = { ...payload };
         if (data.result.notice) {
           alert(data.result.notice);
         }
@@ -2732,6 +2735,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       } catch (error) {
         console.error(error);
         latestSummary = null;
+        window.__freeSummarySeed = null;
         resultCard.classList.add('hidden');
         alert(error.message || '무료 분석 결과를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
       } finally {
@@ -2740,14 +2744,6 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       }
     });
 
-    payButton.addEventListener('click', () => {
-      if (!latestSummary) {
-        alert('무료 분석 결과를 먼저 확인한 뒤 상세 풀이로 이어가면 더 자연스럽게 상담을 받을 수 있어요.');
-      }
-      openPremiumModal();
-    });
-
-    resultPremiumButton?.addEventListener('click', openPremiumModal);
 
     window.addEventListener('DOMContentLoaded', () => {
       populateTimeSelectors();

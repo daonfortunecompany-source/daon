@@ -2,6 +2,8 @@
   const modal = document.getElementById('premiumModal');
   const closeButton = document.getElementById('premiumModalClose');
   const bottomApplyButton = document.getElementById('bottomApplyButton');
+  const payButton = document.getElementById('payButton');
+  const resultPremiumButton = document.getElementById('resultPremiumButton');
   const premiumForm = document.getElementById('premiumRequestForm');
   const statusInline = document.getElementById('premiumStatusInline');
   const compatibilityToggle = document.getElementById('compatibilityToggle');
@@ -31,8 +33,15 @@
     statusInline.classList.remove('show');
   }
 
-  function openPremiumModal() {
-    syncPremiumFormFromSummary();
+  function getFreeSummarySeed() {
+    const state = typeof window.__getLatestSummaryState === 'function'
+      ? window.__getLatestSummaryState()
+      : { seed: window.__freeSummarySeed || null };
+    return state?.seed || window.__freeSummarySeed || null;
+  }
+
+  function openPremiumModal(options = {}) {
+    syncPremiumFormFromSummary({ force: options.force === true });
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
@@ -45,29 +54,34 @@
     document.body.style.overflow = '';
   }
 
-  function syncPremiumFormFromSummary() {
-    const setValue = (targetId, sourceId) => {
+  function syncPremiumFormFromSummary(options = {}) {
+    const seed = getFreeSummarySeed();
+    const force = options.force === true;
+    const setTargetValue = (targetId, nextValue) => {
       const target = document.getElementById(targetId);
-      const source = document.getElementById(sourceId);
-      if (target && source && !target.value) target.value = source.value || '';
+      if (!target) return;
+      if (force || !target.value) target.value = nextValue || '';
     };
+    const seedValue = (key, fallback = '') => seed && seed[key] != null ? seed[key] : fallback;
 
-    setValue('premiumName', 'name');
-    setValue('premiumYear', 'year');
-    setValue('premiumMonth', 'month');
-    setValue('premiumDay', 'day');
-    setValue('premiumCalendarType', 'calendarType');
-    setValue('premiumLeapMonth', 'leapMonth');
+    setTargetValue('premiumName', seedValue('name', document.getElementById('name')?.value || ''));
+    setTargetValue('premiumYear', seedValue('birthYear', seedValue('year', document.getElementById('year')?.value || '')));
+    setTargetValue('premiumMonth', seedValue('birthMonth', seedValue('month', document.getElementById('month')?.value || '')));
+    setTargetValue('premiumDay', seedValue('birthDay', seedValue('day', document.getElementById('day')?.value || '')));
+    setTargetValue('premiumCalendarType', seedValue('calendarType', document.getElementById('calendarType')?.value || 'solar'));
+    setTargetValue('premiumLeapMonth', String(seedValue('isLeapMonth', document.getElementById('leapMonth')?.value === 'true' ? 'true' : document.getElementById('leapMonth')?.value || 'false')));
 
+    const premiumTime = document.getElementById('premiumTime');
+    const seedTime = seedValue('birthTime', '');
     const timeHour = document.getElementById('timeHour')?.value || '';
     const timeMinute = document.getElementById('timeMinute')?.value || '';
-    const premiumTime = document.getElementById('premiumTime');
-    if (premiumTime && !premiumTime.value && timeHour) {
-      premiumTime.value = `${String(timeHour).padStart(2, '0')}:${String(timeMinute || '00').padStart(2, '0')}`;
+    const fallbackTime = timeHour ? `${String(timeHour).padStart(2, '0')}:${String(timeMinute || '00').padStart(2, '0')}` : '';
+    if (premiumTime && (force || !premiumTime.value)) {
+      premiumTime.value = seedTime || fallbackTime;
     }
 
-    const selectedGender = document.querySelector('input[name="gender"]:checked')?.value;
-    if (selectedGender && !document.querySelector('input[name="premiumGender"]:checked')) {
+    const selectedGender = seedValue('gender', document.querySelector('input[name="gender"]:checked')?.value || '');
+    if (selectedGender && (force || !document.querySelector('input[name="premiumGender"]:checked'))) {
       const targetGender = document.querySelector(`input[name="premiumGender"][value="${selectedGender}"]`);
       if (targetGender) targetGender.checked = true;
     }
@@ -116,20 +130,23 @@
 
   function buildPayload() {
     const product = currentProduct();
+    const applicant = {
+      name: document.getElementById('premiumName').value.trim(),
+      gender: document.querySelector('input[name="premiumGender"]:checked')?.value || '',
+      birthYear: cleanDigits(document.getElementById('premiumYear').value),
+      birthMonth: cleanDigits(document.getElementById('premiumMonth').value),
+      birthDay: cleanDigits(document.getElementById('premiumDay').value),
+      birthTime: normalizeTime(document.getElementById('premiumTime').value),
+      calendarType: document.getElementById('premiumCalendarType').value,
+      isLeapMonth: document.getElementById('premiumLeapMonth').value,
+      concern: document.getElementById('premiumConcern').value.trim()
+    };
     const payload = {
       productType: product.type,
-      applicant: {
-        name: document.getElementById('premiumName').value.trim(),
-        gender: document.querySelector('input[name="premiumGender"]:checked')?.value || '',
-        birthYear: cleanDigits(document.getElementById('premiumYear').value),
-        birthMonth: cleanDigits(document.getElementById('premiumMonth').value),
-        birthDay: cleanDigits(document.getElementById('premiumDay').value),
-        birthTime: normalizeTime(document.getElementById('premiumTime').value),
-        calendarType: document.getElementById('premiumCalendarType').value,
-        isLeapMonth: document.getElementById('premiumLeapMonth').value,
-        concern: document.getElementById('premiumConcern').value.trim()
-      },
+      applicant,
+      person1: { ...applicant },
       partner: null,
+      person2: null,
       compatibilityRequested: product.type === 'compatibility'
     };
 
@@ -144,6 +161,7 @@
         calendarType: document.getElementById('partnerCalendarType').value,
         memo: document.getElementById('partnerMemo').value.trim()
       };
+      payload.person2 = { ...payload.partner };
     }
 
     return payload;
@@ -262,8 +280,33 @@
     startSliderTimer();
   }
 
+  function launchPremiumFlow(options = {}) {
+    const source = options.source || 'unknown';
+    const force = options.force !== false;
+    const state = typeof window.__getLatestSummaryState === 'function' ? window.__getLatestSummaryState() : { summary: null, seed: getFreeSummarySeed() };
+    console.log('[PREMIUM CTA] launch', JSON.stringify({
+      source,
+      hasSummary: Boolean(state?.summary),
+      hasSeed: Boolean(state?.seed)
+    }));
+    openPremiumModal({ force });
+  }
+
   if (bottomApplyButton) {
-    bottomApplyButton.addEventListener('click', openPremiumModal);
+    bottomApplyButton.type = 'button';
+    bottomApplyButton.disabled = false;
+    bottomApplyButton.addEventListener('click', () => launchPremiumFlow({ source: 'bottom_cta', force: true }));
+  }
+  if (payButton) {
+    payButton.type = 'button';
+    payButton.disabled = false;
+    payButton.addEventListener('click', () => launchPremiumFlow({ source: 'main_cta', force: true }));
+  }
+  if (resultPremiumButton) {
+    resultPremiumButton.type = 'button';
+    resultPremiumButton.disabled = false;
+    resultPremiumButton.style.pointerEvents = 'auto';
+    resultPremiumButton.addEventListener('click', () => launchPremiumFlow({ source: 'result_cta', force: true }));
   }
   closeButton?.addEventListener('click', closePremiumModal);
   modal?.addEventListener('click', (event) => {
@@ -279,6 +322,7 @@
   document.querySelectorAll('input[name="premiumGender"]').forEach((input) => input.addEventListener('change', updateOrderSummary));
 
   window.openPremiumModal = openPremiumModal;
+  window.launchPremiumFlow = launchPremiumFlow;
 
   document.addEventListener('DOMContentLoaded', () => {
     initReviewSlider();
