@@ -50,7 +50,9 @@ const CONFIG = {
     path: process.env.AI_API_PATH || '/gpt-5-2/v1/chat/completions',
     style: process.env.AI_API_STYLE || 'chat_completions',
     model: process.env.AI_MODEL || 'gpt-5-2',
-    temperature: Number(process.env.AI_TEMPERATURE || 0.7)
+    temperature: Number(process.env.AI_TEMPERATURE || 0.4),
+    maxTokens: Number(process.env.AI_MAX_TOKENS || 12000),
+    timeoutMs: Number(process.env.AI_TIMEOUT_MS || 180000)
   },
   payapp: {
     apiUrl: process.env.PAYAPP_API_URL || 'https://api.payapp.kr/oapi/apiLoad.html',
@@ -653,6 +655,14 @@ function logLuckyResponseDiagnostics(label, data, fallbackPerson) {
   console.log(`[LUCKY API] candidate pillar fields (${label}): ${JSON.stringify(pillarDebug.candidates.slice(0, 12))}`);
   console.log(`[LUCKY API] selected pillar paths (${label}): ${JSON.stringify(pillarDebugToResponsePaths(pillarDebug))}`);
   console.log(`[LUCKY API] selected birth pillars (${label}): ${JSON.stringify(pillarDebug.pillars)}`);
+  console.log('[HOUR PILLAR DIAG]', JSON.stringify({
+    label,
+    inputBirthTime: String(fallbackPerson?.birthTime || ''),
+    expectedHourBranch: guessExpectedHourBranch(fallbackPerson?.birthTime || ''),
+    selectedHourPillar: pillarDebug?.pillars?.hour || '',
+    selectedHourPath: pillarDebug?.selectedPaths?.hour || '',
+    hourCandidates: (pillarDebug?.candidates || []).filter((item) => item.type === 'hour').slice(0, 6)
+  }));
 }
 
 function safeObjectKeys(value) {
@@ -1847,6 +1857,52 @@ function collectConcernKeywords(concern) {
     .filter((token) => token.length >= 2 && !stop.has(token)))).slice(0, 8);
 }
 
+function tryParseJsonText(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeKiePreviewText(text, limit = 500) {
+  return String(text || '')
+    .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer [redacted]')
+    .replace(/sk-[A-Za-z0-9_-]+/g, '[redacted-key]')
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[redacted-email]')
+    .replace(/"(name|birthYear|birthMonth|birthDay|birthHour|birthMinute|year|month|day|hour|minute|phone|email|concern|note|memo)"\s*:\s*"[^"]*"/gi, '"$1":"[redacted]"')
+    .slice(0, limit);
+}
+
+function normalizeKieStringValue(value) {
+  if (typeof value === 'string') return value.trim();
+  if (value == null) return '';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
+function extractTextFromMessageContent(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((part) => {
+    if (typeof part === 'string') return part;
+    if (part?.text && typeof part.text === 'string') return part.text;
+    if (part?.output_text && typeof part.output_text === 'string') return part.output_text;
+    if (typeof part?.content === 'string') return part.content;
+    return '';
+  }).filter(Boolean).join('\n');
+}
+
+function hasLikelySectionKeys(obj, requiredSections) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+  const aliases = {
+    '신살, 귀인': '신살,귀인',
+    '궁합 참고 해석': '관계/궁합 해석'
+  };
+  const keys = Object.keys(obj).map((key) => aliases[key] || key.trim());
+  return requiredSections.some((section) => keys.includes(section));
+}
+
 function normalizeAiSections(rawSections, requiredSections) {
   const aliases = {
     '신살, 귀인': '신살,귀인',
@@ -1856,13 +1912,103 @@ function normalizeAiSections(rawSections, requiredSections) {
   const normalized = {};
   for (const [key, value] of Object.entries(rawSections)) {
     const normalizedKey = aliases[key] || key.trim();
-    normalized[normalizedKey] = typeof value === 'string' ? value.trim() : JSON.stringify(value);
+    normalized[normalizedKey] = normalizeKieStringValue(value);
   }
   const output = {};
   requiredSections.forEach((key) => {
     output[key] = typeof normalized[key] === 'string' ? normalized[key].trim() : '';
   });
   return output;
+}
+
+function collectSectionObjectCandidates(parsed, requiredSections) {
+  const candidates = [];
+  const pushCandidate = (label, value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+    candidates.push({ label, value });
+  };
+  pushCandidate('root', parsed);
+  pushCandidate('root.sections', parsed?.sections);
+  pushCandidate('root.data.sections', parsed?.data?.sections);
+  pushCandidate('root.result.sections', parsed?.result?.sections);
+  pushCandidate('root.data', parsed?.data);
+  pushCandidate('root.result', parsed?.result);
+  return candidates.filter((item) => hasLikelySectionKeys(item.value, requiredSections));
+}
+
+function extractNestedJsonStringCandidates(parsed) {
+  const values = [];
+  const pushValue = (label, value) => {
+    if (typeof value === 'string' && value.trim()) values.push({ label, value: value.trim() });
+  };
+  pushValue('output_text', parsed?.output_text);
+  pushValue('output[0].content[0].text', parsed?.output?.[0]?.content?.[0]?.text);
+  pushValue('output[0].content[0].output_text', parsed?.output?.[0]?.content?.[0]?.output_text);
+  pushValue('choices[0].message.content', extractTextFromMessageContent(parsed?.choices?.[0]?.message?.content));
+  pushValue('data.text', parsed?.data?.text);
+  pushValue('text', parsed?.text);
+  pushValue('content', parsed?.content);
+  pushValue('result', typeof parsed?.result === 'string' ? parsed.result : '');
+  pushValue('message', typeof parsed?.message === 'string' ? parsed.message : '');
+  return values.filter((item) => item.value);
+}
+
+function detectKieResponseFormat(raw, parsed, requiredSections) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return 'empty';
+  if (/^```/m.test(trimmed)) return 'markdown';
+  if (hasLikelySectionKeys(parsed, requiredSections)) return 'json';
+  if (parsed?.sections || parsed?.data?.sections || parsed?.result?.sections) return 'json';
+  if (parsed && typeof parsed === 'object') return 'json_wrapper';
+  return 'plain_text';
+}
+
+function parseKieSectionMap(raw, requiredSections) {
+  const rawTrimmed = String(raw || '').trim();
+  const strippedRaw = stripCodeFences(rawTrimmed);
+  const parsedRaw = tryParseJsonText(strippedRaw);
+  const detectedFormat = detectKieResponseFormat(rawTrimmed, parsedRaw, requiredSections);
+  const result = {
+    detectedFormat,
+    sourcePath: '',
+    preview: sanitizeKiePreviewText(rawTrimmed),
+    parseFailureReason: '',
+    foundSectionKeys: [],
+    rawLength: rawTrimmed.length,
+    sections: null
+  };
+
+  const directCandidates = collectSectionObjectCandidates(parsedRaw, requiredSections);
+  if (directCandidates.length) {
+    const winner = directCandidates.sort((a, b) => Object.keys(b.value || {}).length - Object.keys(a.value || {}).length)[0];
+    result.sourcePath = winner.label;
+    result.foundSectionKeys = Object.keys(winner.value || {});
+    result.sections = normalizeAiSections(winner.value, requiredSections);
+    return result;
+  }
+
+  const textCandidates = extractNestedJsonStringCandidates(parsedRaw);
+  for (const candidate of textCandidates) {
+    const stripped = stripCodeFences(candidate.value);
+    const parsed = tryParseJsonText(stripped);
+    const nestedCandidates = collectSectionObjectCandidates(parsed, requiredSections);
+    if (nestedCandidates.length) {
+      const winner = nestedCandidates.sort((a, b) => Object.keys(b.value || {}).length - Object.keys(a.value || {}).length)[0];
+      result.sourcePath = `${candidate.label} -> ${winner.label}`;
+      result.preview = sanitizeKiePreviewText(candidate.value);
+      result.foundSectionKeys = Object.keys(winner.value || {});
+      result.sections = normalizeAiSections(winner.value, requiredSections);
+      return result;
+    }
+  }
+
+  result.parseFailureReason = parsedRaw
+    ? 'section_map_not_found_in_supported_paths'
+    : 'raw_response_not_valid_json';
+  if (detectedFormat === 'plain_text' && textCandidates.length) {
+    result.preview = sanitizeKiePreviewText(textCandidates[0].value);
+  }
+  return result;
 }
 
 function detectRepeatedSentences(sections) {
@@ -1876,7 +2022,7 @@ function detectRepeatedSentences(sections) {
   return Array.from(map.entries()).filter(([, count]) => count >= 3).map(([sentence, count]) => ({ sentence, count }));
 }
 
-function validateAiSections(sections, promptPayload) {
+function validateAiSections(sections, promptPayload, meta = {}) {
   const requiredSections = buildRequiredAiSections(Boolean(promptPayload?.partnerInfo?.name && promptPayload?.rawBundle?.compatibility));
   const errors = [];
   const paragraphCounts = {};
@@ -1895,6 +2041,10 @@ function validateAiSections(sections, promptPayload) {
     if (text && length < minLength) errors.push(`${key} 분량 부족`);
     if (text && banned.test(text)) errors.push(`${key} 개발용 문구 포함`);
   }
+  const totalLength = Object.values(sectionLengths).reduce((sum, value) => sum + Number(value || 0), 0);
+  if (Number(meta.rawLength || 0) < 1000) errors.push('raw_response_too_short_or_parse_failed');
+  if (totalLength < 5000) errors.push('total_section_length_too_short');
+  if (Object.values(sectionLengths).every((value) => Number(value || 0) === 0)) errors.push('all_sections_empty_parser_error');
   const concern = String(promptPayload?.basicInfo?.concern || '').trim();
   if (concern) {
     const concernText = String(sections?.['고민에 대한 조언'] || '');
@@ -1921,7 +2071,20 @@ function validateAiSections(sections, promptPayload) {
   }
   const repeated = detectRepeatedSentences(sections);
   if (repeated.length) errors.push('같은 문장 반복 과다');
-  return { ok: errors.length === 0, errors, paragraphCounts, sectionLengths, repeated: repeated.slice(0, 6) };
+  return {
+    ok: errors.length === 0,
+    reason: errors.length ? (errors.includes('raw_response_too_short_or_parse_failed') || errors.includes('all_sections_empty_parser_error') ? 'raw_response_too_short_or_parse_failed' : 'section_validation_failed') : 'ok',
+    errors,
+    paragraphCounts,
+    sectionLengths,
+    totalSectionLength: totalLength,
+    rawLength: Number(meta.rawLength || 0),
+    detectedFormat: meta.detectedFormat || 'unknown',
+    sourcePath: meta.sourcePath || '',
+    parseFailureReason: meta.parseFailureReason || '',
+    foundSectionKeys: meta.foundSectionKeys || [],
+    repeated: repeated.slice(0, 6)
+  };
 }
 
 function buildConcernSpecificInstruction(concern, hasCompatibility) {
@@ -1938,6 +2101,11 @@ function buildConcernSpecificInstruction(concern, hasCompatibility) {
   return lines.join(' ');
 }
 
+function buildRetryInstruction(reason) {
+  const base = '이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 모든 필수 섹션 key를 빠짐없이 포함하고, 각 key의 value는 빈 문자열 없이 최소 3문단 이상 작성하세요. "핵심 요약", "사주 원국 해석" 등 key 이름을 정확히 사용하세요.';
+  return reason ? `${base} 이전 실패 사유: ${reason}` : base;
+}
+
 async function generateAiSections(promptPayload) {
   if (!CONFIG.ai.apiKey) {
     const error = new Error('KIE AI API 키가 설정되지 않았습니다.');
@@ -1948,12 +2116,16 @@ async function generateAiSections(promptPayload) {
   const requiredSections = buildRequiredAiSections(Boolean(promptPayload?.partnerInfo?.name && promptPayload?.rawBundle?.compatibility));
   const schemaGuide = Object.fromEntries(requiredSections.map((key) => [key, 'string']));
   const concernInstruction = buildConcernSpecificInstruction(promptPayload?.basicInfo?.concern || '', requiredSections.includes('관계/궁합 해석'));
+  const endpoint = `${CONFIG.ai.baseUrl}${CONFIG.ai.path}`;
+  const style = CONFIG.ai.style || (endpoint.includes('/responses') ? 'responses' : 'chat_completions');
   let retryReason = '';
   let lastError = null;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CONFIG.ai.timeoutMs);
     try {
-      console.log('[KIE AI] request start', JSON.stringify({ attempt, model: CONFIG.ai.model }));
+      console.log('[KIE AI] request start', JSON.stringify({ attempt, model: CONFIG.ai.model, style, endpointPath: CONFIG.ai.path, maxTokens: CONFIG.ai.maxTokens, timeoutMs: CONFIG.ai.timeoutMs }));
       console.log('[KIE AI] input bundle keys', JSON.stringify({
         basicInfo: Object.keys(promptPayload?.basicInfo || {}),
         partnerInfo: Object.keys(promptPayload?.partnerInfo || {}),
@@ -1968,53 +2140,79 @@ async function generateAiSections(promptPayload) {
         '문체는 상담형으로 자연스럽고 친절하게 작성하세요.',
         '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 데이터를 근거로 프리미엄 리포트 수준의 상세 해석을 작성하세요.',
         '반드시 JSON 객체만 반환하고, 스키마 키 이름을 한 글자도 바꾸지 마세요.',
+        '마크다운 금지, 코드블록 금지, 설명문 금지입니다.',
         '각 섹션은 최소 3문단 이상, 관계/궁합 해석과 고민에 대한 조언은 최소 5문단 이상 작성하세요.',
         '같은 문장을 반복하지 말고, 실제 삶의 장면이 떠오르는 예시와 실행 조언을 포함하세요.',
         concernInstruction,
-        retryReason ? `이전 응답 보완 지시: ${retryReason}` : ''
+        attempt > 1 ? buildRetryInstruction(retryReason) : ''
       ].filter(Boolean).join(' ');
       const userPrompt = {
         requiredOutputSchema: schemaGuide,
         requiredSectionOrder: requiredSections,
         promptPayload
       };
-      const endpoint = `${CONFIG.ai.baseUrl}${CONFIG.ai.path}`;
+      const requestBody = style === 'responses'
+        ? {
+            model: CONFIG.ai.model,
+            max_output_tokens: CONFIG.ai.maxTokens,
+            input: [
+              { role: 'system', content: [{ type: 'input_text', text: systemPrompt }] },
+              { role: 'user', content: [{ type: 'input_text', text: JSON.stringify(userPrompt) }] }
+            ]
+          }
+        : {
+            model: CONFIG.ai.model,
+            temperature: CONFIG.ai.temperature,
+            max_tokens: CONFIG.ai.maxTokens,
+            response_format: { type: 'json_object' },
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: JSON.stringify(userPrompt) }
+            ]
+          };
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.ai.apiKey}` },
-        body: JSON.stringify({
-          model: CONFIG.ai.model,
-          temperature: CONFIG.ai.temperature,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: JSON.stringify(userPrompt) }
-          ]
-        })
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
       });
       const raw = await response.text();
+      clearTimeout(timeout);
       console.log('[KIE AI] response received', JSON.stringify({ attempt, status: response.status, rawLength: raw.length }));
+      console.log('[KIE AI] raw response preview', JSON.stringify({ attempt, status: response.status, rawLength: raw.length, preview: sanitizeKiePreviewText(raw) }));
       if (!response.ok) throw new Error(`KIE AI 호출 실패: ${response.status}`);
-      const parsed = safeJsonParse(raw);
-      const content = parsed?.choices?.[0]?.message?.content || parsed?.output_text || raw;
-      const cleaned = typeof content === 'string' ? stripCodeFences(content) : JSON.stringify(content || {});
-      const normalized = normalizeAiSections(safeJsonParse(cleaned), requiredSections);
-      if (!normalized) throw new Error('KIE AI 응답을 JSON 섹션 맵으로 해석하지 못했습니다.');
-      const validation = validateAiSections(normalized, promptPayload);
-      console.log('[KIE AI] section keys', JSON.stringify(Object.keys(normalized)));
+      const parsedMeta = parseKieSectionMap(raw, requiredSections);
+      if (!parsedMeta.sections) {
+        console.log('[KIE AI] parse failure', JSON.stringify({
+          detectedFormat: parsedMeta.detectedFormat,
+          parseFailureReason: parsedMeta.parseFailureReason,
+          sourcePath: parsedMeta.sourcePath,
+          rawLength: parsedMeta.rawLength,
+          preview: parsedMeta.preview
+        }));
+      }
+      const normalized = parsedMeta.sections || Object.fromEntries(requiredSections.map((key) => [key, '']));
+      const validation = validateAiSections(normalized, promptPayload, parsedMeta);
+      console.log('[KIE AI] section keys', JSON.stringify(validation.foundSectionKeys.length ? validation.foundSectionKeys : Object.keys(normalized)));
       console.log('[KIE AI] section lengths', JSON.stringify(validation.sectionLengths));
       console.log('[KIE AI] validation result', JSON.stringify(validation));
       if (validation.ok) return normalized;
-      retryReason = validation.errors.slice(0, 8).join(' | ');
+      retryReason = validation.parseFailureReason || validation.errors.slice(0, 8).join(' | ') || 'unknown';
       if (attempt < 2) {
         console.log('[KIE AI] retry start', JSON.stringify({ reason: retryReason }));
         continue;
       }
-      throw new Error('KIE AI section validation failed');
+      const error = new Error('KIE AI section validation failed');
+      error.failedStep = 'kie_ai';
+      error.progress = 88;
+      throw error;
     } catch (error) {
+      clearTimeout(timeout);
       lastError = error;
+      const reason = error?.name === 'AbortError' ? 'kie_ai_timeout' : (error.message || 'unknown');
       if (attempt < 2) {
-        console.log('[KIE AI] retry start', JSON.stringify({ reason: error.message || 'unknown' }));
+        retryReason = retryReason || reason;
+        console.log('[KIE AI] retry start', JSON.stringify({ reason }));
         continue;
       }
     }
