@@ -427,6 +427,7 @@
       const rawStatus = data.status || 'created';
       const status = rawStatus === 'ready' ? 'completed' : rawStatus;
       const failedStep = data.failedStep || null;
+      const currentStep = data.currentStep || null;
       const progress = Number.isFinite(Number(data.progress)) ? Number(data.progress) : null;
       const statusMap = {
         created: '결제창 준비 중',
@@ -514,6 +515,23 @@
         setStepState(stepDownload, 'pending');
       }
 
+      const stepProgressText = {
+        payment_success: '결제가 확인되어 리포트 생성을 시작했습니다.',
+        generation: '리포트 생성을 시작했습니다.',
+        mansae: '만세력 원국 데이터를 확인하고 있습니다.',
+        saju: '핵심 사주 원국과 세부 해석 데이터를 정리하고 있습니다.',
+        period: '대운, 세운, 월운의 기준 데이터를 불러오고 있습니다.',
+        compatibility_api: '궁합 원본 데이터를 분석하고 있습니다.',
+        kie_ai: '핵심 요약과 원국 해석을 생성하고 있습니다.',
+        core: '핵심 요약과 원국 해석을 생성하고 있습니다.',
+        timing: '대운, 세운, 월운 흐름을 분석하고 있습니다.',
+        analysis: '십성, 재물운, 직업운을 분석하고 있습니다.',
+        life: '애정운, 건강운, 실천 조언을 정리하고 있습니다.',
+        concern: '고민에 대한 맞춤 조언을 작성하고 있습니다.',
+        compatibility: '관계와 궁합 해석을 정리하고 있습니다.',
+        pdf: 'PDF를 생성하고 있습니다.',
+        completed: '리포트가 준비되었습니다.'
+      };
       const defaultProgress = status === 'payment_pending'
         ? 18
         : status === 'payment_success'
@@ -523,30 +541,31 @@
             : isCompleted
               ? 100
               : status === 'failed'
-                ? 72
+                ? 88
                 : status === 'payment_cancelled'
                   ? 0
                   : 8;
       const progressText = status === 'payment_pending'
         ? '결제 완료를 기다리고 있습니다.'
-        : status === 'payment_success'
-          ? '결제가 확인되어 리포트 생성을 시작했습니다.'
-          : status === 'generating'
-            ? '사주를 해석하고 PDF를 정리하고 있습니다.'
-            : isCompleted
-              ? '리포트가 준비되었습니다.'
-              : status === 'failed'
-                ? (failedStep === 'period'
-                    ? '기간운 분석 단계에서 문제가 감지되어 확인이 필요합니다.'
-                    : failedStep === 'kie_ai'
-                      ? '결제는 정상 확인되었으나 리포트 해석 생성이 일시 지연되고 있습니다.'
-                      : '생성 중 문제가 감지되어 확인이 필요합니다.')
-                : status === 'payment_cancelled'
-                  ? '결제가 취소되어 진행이 중단되었습니다.'
-                  : '주문 정보를 확인하고 있습니다.';
+        : status === 'payment_success' || status === 'generating'
+          ? (stepProgressText[currentStep] || '사주를 해석하고 PDF를 정리하고 있습니다.')
+          : isCompleted
+            ? '리포트가 준비되었습니다.'
+            : status === 'failed'
+              ? (failedStep === 'period'
+                  ? '기간운 분석 단계에서 문제가 감지되어 확인이 필요합니다.'
+                  : failedStep === 'kie_ai'
+                    ? '리포트 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
+                    : '생성 중 문제가 감지되어 확인이 필요합니다.')
+              : status === 'payment_cancelled'
+                ? '결제가 취소되어 진행이 중단되었습니다.'
+                : '주문 정보를 확인하고 있습니다.';
       applyProgress(progress ?? defaultProgress, progressText);
 
-      detailBox.textContent = data.message || '리포트 상태를 계속 확인하고 있습니다.';
+      const updatedText = data.updatedAt ? `
+
+최근 갱신: ${new Date(data.updatedAt).toLocaleString('ko-KR')}` : '';
+      detailBox.textContent = `${data.message || '리포트 상태를 계속 확인하고 있습니다.'}${updatedText}`;
 
       const existingDownload = document.getElementById('downloadButton');
       if (existingDownload) existingDownload.remove();
