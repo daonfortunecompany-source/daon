@@ -55,7 +55,8 @@ const CONFIG = {
     temperature: Number(process.env.AI_TEMPERATURE || 0.4),
     maxTokens: Number(process.env.AI_MAX_TOKENS || 12000),
     timeoutMs: Number(process.env.AI_TIMEOUT_MS || 180000),
-    debugMode: DEBUG_MODE
+    debugMode: DEBUG_MODE,
+    singleSectionMode: String(process.env.AI_SINGLE_SECTION_MODE || 'false').toLowerCase() === 'true'
   },
   payapp: {
     apiUrl: process.env.PAYAPP_API_URL || 'https://api.payapp.kr/oapi/apiLoad.html',
@@ -385,6 +386,8 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
     progress: getOrderProgress(order),
     currentStep: order.currentStep || null,
     failedStep: order.failedStep || null,
+    failedBatch: order.failedBatch || null,
+    failedSections: Array.isArray(order.failedSections) ? order.failedSections : [],
     message: buildStatusMessage(order),
     downloadUrl: downloadReady ? `${BASE_URL}/api/orders/${encodeURIComponent(order.id)}/report.pdf` : null,
     productName: order.product.name,
@@ -452,7 +455,7 @@ async function generatePremiumReport(orderId) {
     const order = await readOrder(orderId);
     if (!order || isOrderCompleted(order)) return;
 
-    updateOrderProgress(order, { status: 'generating', progress: 42, currentStep: 'generation', failedStep: null });
+    updateOrderProgress(order, { status: 'generating', progress: 42, currentStep: 'generation', failedStep: null, failedBatch: null, failedSections: [] });
     order.logs.push(logLine('generation_started', {}));
     await saveOrder(order);
 
@@ -552,12 +555,23 @@ async function generatePremiumReport(orderId) {
   } catch (error) {
     const order = await readOrder(orderId);
     if (order) {
-      const failedStep = error.failedStep || order.currentStep || 'generation';
-      const progress = Number.isFinite(Number(error.progress)) ? Number(error.progress) : getDefaultProgressForStep(failedStep);
-      updateOrderProgress(order, { status: 'failed', progress, currentStep: failedStep, failedStep, statusMessage: error.userMessage || buildFailureMessage(failedStep) });
-      order.logs.push(logLine('generation_failed', { failedStep, message: error.message }));
+      const currentStep = error.currentStep || order.currentStep || 'generation';
+      const failedStep = error.failedStep || (currentStep === 'generation' ? 'generation' : 'kie_ai');
+      const progress = Number.isFinite(Number(error.progress)) ? Number(error.progress) : getDefaultProgressForStep(currentStep);
+      const failedBatch = error.failedBatch || (failedStep === 'kie_ai' ? currentStep : null);
+      const failedSections = Array.isArray(error.failedSections) ? Array.from(new Set(error.failedSections.filter(Boolean))) : [];
+      updateOrderProgress(order, {
+        status: 'failed',
+        progress,
+        currentStep,
+        failedStep,
+        failedBatch,
+        failedSections,
+        statusMessage: error.userMessage || buildFailureMessage(failedStep)
+      });
+      order.logs.push(logLine('generation_failed', { failedStep, currentStep, failedBatch, failedSections, message: error.message }));
       await saveOrder(order);
-      console.log('[ORDER] status failed', JSON.stringify({ orderId: order.id, failedStep, progress }));
+      console.log('[ORDER] status failed', JSON.stringify({ orderId: order.id, failedStep, currentStep, failedBatch, failedSections, progress }));
     }
     await appendLog('generation_failed', { orderId, failedStep: error.failedStep || 'generation', message: error.message });
   } finally {
@@ -590,18 +604,10 @@ async function callLuckyApi(url, payloadCandidates, label) {
   if (label === 'compatibility') {
     console.log('[COMPATIBILITY API] request start');
   }
-  const candidates = Array.isArray(payloadCandidates) ? payloadCandidates : [payloadCandidates];
-  candidates.forEach((payload) => {
-    console.log(`[LUCKY API] final request payload (${label}): ${JSON.stringify(sanitizeLuckyPayloadForLog(payload))}`);
-    if (label === 'period') {
-      console.log('[PERIOD API] payload check:', JSON.stringify({
-        fieldNames: Object.keys(payload || {}),
-        calendarType: payload?.calendarType || null,
-        calendar: payload?.calendar || null,
-        targetMode: payload?.targetDate ? 'targetDate' : payload?.targetYear || payload?.targetMonth ? 'targetYearMonth' : payload?.targetDates ? 'targetDates' : 'unknown',
-        targetDateFormat: payload?.targetDate || (Array.isArray(payload?.targetDates) ? payload.targetDates[0] : null) || null
-      }));
-    }
+  const candidates = (Array.isArray(payloadCandidates) ? payloadCandidates : [payloadCandidates]).map((payload) => {
+    if (!payload || typeof payload !== 'object') return payload;
+    const clone = { ...payload };
+    return clone;
   });
   if (!CONFIG.lucky.apiKey) {
     throw new Error('LUCKY_API_KEY가 설정되지 않았습니다.');
@@ -609,7 +615,22 @@ async function callLuckyApi(url, payloadCandidates, label) {
   const authVariants = resolveLuckyAuthVariants();
   let lastError = new Error(`${label} API 호출 실패`);
 
-  for (const payload of candidates) {
+  for (let payloadIndex = 0; payloadIndex < candidates.length; payloadIndex += 1) {
+    const payload = candidates[payloadIndex];
+    console.log(`[LUCKY API] final request payload (${label}): ${JSON.stringify(sanitizeLuckyPayloadForLog(payload))}`);
+    if (label === 'period') {
+      console.log('[PERIOD API] payload check:', JSON.stringify({
+        fieldNames: Object.keys(payload || {}).filter((key) => !key.startsWith('__')),
+        calendarType: payload?.calendarType || null,
+        calendar: payload?.calendar || null,
+        targetMode: payload?.__periodMode || (payload?.targetDate ? 'targetDate' : payload?.targetYear || payload?.targetMonth ? 'targetYearMonth' : payload?.targetDates ? 'targetDates' : 'unknown'),
+        targetDateFormat: payload?.targetDate || (Array.isArray(payload?.targetDates) ? payload.targetDates[0] : null) || null,
+        fallbackAttempt: payloadIndex > 0
+      }));
+    }
+    const requestPayload = payload && typeof payload === 'object'
+      ? Object.fromEntries(Object.entries(payload).filter(([key]) => !key.startsWith('__')))
+      : payload;
     for (const authVariant of authVariants) {
       try {
         const headers = {
@@ -617,7 +638,7 @@ async function callLuckyApi(url, payloadCandidates, label) {
           Accept: 'application/json'
         };
         let requestUrl = url;
-        const body = JSON.stringify(payload);
+        const body = JSON.stringify(requestPayload);
         if (authVariant.mode === 'header') {
           headers[authVariant.header] = CONFIG.lucky.apiKey;
         } else if (authVariant.mode === 'bearer') {
@@ -849,6 +870,15 @@ function updateOrderProgress(order, updates = {}) {
   if (updates.status) order.status = updates.status;
   if (updates.currentStep) order.currentStep = updates.currentStep;
   if ('failedStep' in updates) order.failedStep = updates.failedStep || null;
+  if ('failedBatch' in updates) order.failedBatch = updates.failedBatch || null;
+  if ('failedSections' in updates) {
+    order.failedSections = Array.isArray(updates.failedSections)
+      ? Array.from(new Set(updates.failedSections.filter(Boolean)))
+      : [];
+  } else if (updates.status && updates.status !== 'failed') {
+    order.failedSections = [];
+  }
+  if (updates.status && updates.status !== 'failed' && !('failedBatch' in updates)) order.failedBatch = null;
   if ('statusMessage' in updates) order.statusMessage = String(updates.statusMessage || '').trim();
   if (Number.isFinite(Number(updates.progress))) order.progress = Number(updates.progress);
   order.updatedAt = new Date().toISOString();
@@ -1036,12 +1066,14 @@ function buildPeriodPayloadCandidates(applicantPayload) {
   return [
     {
       ...basePayload,
-      targetDate
+      targetDate,
+      __periodMode: 'targetDate'
     },
     {
       ...basePayload,
       targetYear,
-      targetMonth
+      targetMonth,
+      __periodMode: 'targetYearMonth'
     }
   ];
 }
@@ -2230,6 +2262,25 @@ const REPORT_BATCHES = [
   { batchName: 'compatibility', sections: ['관계/궁합 해석'] }
 ];
 
+const SECTION_PROMPT_TARGET_CHARS = {
+  '핵심 요약': 900,
+  '사주 원국 해석': 1300,
+  '대운': 1000,
+  '세운': 1000,
+  '월운': 1000,
+  '운성': 800,
+  '고민에 대한 조언': 1600,
+  '관계/궁합 해석': 1600
+};
+
+const SECTION_PROMPT_TARGET_PARAGRAPHS = {
+  '세운': 5,
+  '월운': 5,
+  '운성': 5,
+  '고민에 대한 조언': 5,
+  '관계/궁합 해석': 5
+};
+
 const KIE_BATCH_PROGRESS = {
   core: 88,
   timing: 90,
@@ -2278,15 +2329,30 @@ const META_RESPONSE_PHRASES = [
 ];
 
 function getReportBatches(hasCompatibility) {
-  return REPORT_BATCHES.filter((batch) => hasCompatibility || batch.batchName !== 'compatibility');
+  const baseBatches = REPORT_BATCHES.filter((batch) => hasCompatibility || batch.batchName !== 'compatibility');
+  if (!CONFIG.ai.singleSectionMode) return baseBatches;
+  return baseBatches.flatMap((batch) => batch.sections.map((section) => ({
+    batchName: `${batch.batchName}:${section}`,
+    sections: [section],
+    parentBatchName: batch.batchName,
+    singleSectionMode: true
+  })));
 }
 
 function getSectionMinVisibleChars(section) {
   return SECTION_MIN_VISIBLE_CHARS[section] || 500;
 }
 
+function getSectionPromptTargetChars(section) {
+  return SECTION_PROMPT_TARGET_CHARS[section] || getSectionMinVisibleChars(section);
+}
+
 function getSectionMinParagraphs(section) {
   return section === '고민에 대한 조언' || section === '관계/궁합 해석' ? 5 : 3;
+}
+
+function getSectionPromptTargetParagraphs(section) {
+  return SECTION_PROMPT_TARGET_PARAGRAPHS[section] || getSectionMinParagraphs(section);
 }
 
 function getBatchRootName(batchName = '') {
@@ -2335,6 +2401,7 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
   const requireRawLength = options.requireRawLength === true;
   const requireJsonOnly = options.requireJsonOnly === true;
   const errors = [];
+  const sectionErrors = Object.fromEntries(requiredSections.map((key) => [key, []]));
   if (requireJsonOnly && !isAcceptedJsonDetectedFormat(meta.detectedFormat || '')) {
     errors.push('json_only_response_required');
   }
@@ -2347,14 +2414,29 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
     const length = countVisibleChars(text);
     paragraphCounts[key] = paragraphs;
     sectionLengths[key] = length;
-    if (!text) errors.push(`${key} 누락`);
+    if (!text) {
+      sectionErrors[key].push('누락');
+      errors.push(`${key} 누락`);
+    }
     const minParagraphs = getSectionMinParagraphs(key);
     const minLength = getSectionMinVisibleChars(key);
-    if (text && paragraphs < minParagraphs) errors.push(`${key} 문단 수 부족`);
-    if (text && length < minLength) errors.push(`${key} 분량 부족`);
-    if (text && banned.test(text)) errors.push(`${key} 개발용 문구 포함`);
+    if (text && paragraphs < minParagraphs) {
+      sectionErrors[key].push('문단 수 부족');
+      errors.push(`${key} 문단 수 부족`);
+    }
+    if (text && length < minLength) {
+      sectionErrors[key].push('분량 부족');
+      errors.push(`${key} 분량 부족`);
+    }
+    if (text && banned.test(text)) {
+      sectionErrors[key].push('개발용 문구 포함');
+      errors.push(`${key} 개발용 문구 포함`);
+    }
     const metaResponse = detectMetaResponseText(text);
-    if (text && metaResponse.detected) errors.push(`${key} 메타 응답 포함`);
+    if (text && metaResponse.detected) {
+      sectionErrors[key].push('메타 응답 포함');
+      errors.push(`${key} 메타 응답 포함`);
+    }
   }
   const totalLength = Object.values(sectionLengths).reduce((sum, value) => sum + Number(value || 0), 0);
   const minimumTotal = requiredSections.reduce((sum, key) => sum + getSectionMinVisibleChars(key), 0);
@@ -2366,6 +2448,7 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
     const concernText = String(sections?.['고민에 대한 조언'] || '');
     const keywords = collectConcernKeywords(concern);
     if (keywords.length && !keywords.some((token) => concernText.includes(token))) {
+      sectionErrors['고민에 대한 조언'].push('사용자 질문 직접 응답 부족');
       errors.push('고민에 대한 조언이 사용자 질문에 직접 답하지 않음');
     }
     if (/온라인\s*사주\s*사업/.test(concern)) {
@@ -2375,22 +2458,31 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
         /(2026|타이밍|시기)/, /(3개월)/, /(6개월)/, /(1년)/, /(실패 가능성|실패를 줄|리스크를 줄)/, /(최종 결론|결론)/
       ];
       const passed = checks.filter((regex) => regex.test(concernText)).length;
-      if (passed < 10) errors.push('온라인 사주 사업 질문 필수 항목 부족');
+      if (passed < 10) {
+        sectionErrors['고민에 대한 조언'].push('온라인 사주 사업 질문 필수 항목 부족');
+        errors.push('온라인 사주 사업 질문 필수 항목 부족');
+      }
     }
   }
   if (hasCompatibilityPromptPayload(promptPayload) && requiredSections.includes('관계/궁합 해석')) {
     const relationText = String(sections?.['관계/궁합 해석'] || '');
     const relationChecks = [/(일간)/, /(오행)/, /(십성)/, /(감정)/, /(소통)/, /(갈등)/, /(회복)/, /(협업|사업)/, /(금전)/, /(종합|결론)/];
     if (relationChecks.filter((regex) => regex.test(relationText)).length < 7) {
+      sectionErrors['관계/궁합 해석'].push('핵심 포인트 부족');
       errors.push('관계/궁합 해석 핵심 포인트 부족');
     }
   }
   const repeated = detectRepeatedSentences(sections);
   if (repeated.length) errors.push('같은 문장 반복 과다');
+  const passedSections = requiredSections.filter((key) => sectionErrors[key].length === 0);
+  const failedSections = requiredSections.filter((key) => sectionErrors[key].length > 0);
   return {
     ok: errors.length === 0,
     reason: errors.length ? (errors.includes('raw_response_too_short_or_parse_failed') || errors.includes('all_sections_empty_parser_error') ? 'raw_response_too_short_or_parse_failed' : 'section_validation_failed') : 'ok',
     errors,
+    sectionErrors,
+    passedSections,
+    failedSections,
     paragraphCounts,
     sectionLengths,
     totalSectionLength: totalLength,
@@ -2424,7 +2516,7 @@ function buildRetryInstruction(reason, outputMode = 'json', requiredSections = [
     const base = `이전 응답은 실패했습니다. 이번에는 JSON이 아니라 순수 텍스트만 반환하세요. 코드블록, 마크다운 설명문, 사전 안내 문구를 금지합니다. 각 제목은 반드시 \`## 제목\` 형식을 쓰고, 제목 아래 본문만 작성하세요. 요청받은 섹션만 작성하고 다른 섹션은 절대 쓰지 마세요. ${sectionGuide}`;
     return reason ? `${base} 이전 실패 사유: ${reason}` : base;
   }
-  const base = `이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 요청받은 섹션 key만 포함하고 각 value는 빈 문자열 없이 충분한 문단과 분량으로 작성하세요. ${sectionGuide}`;
+  const base = `이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 요청받은 섹션 key만 포함하고 각 value는 빈 문자열 없이 충분한 문단과 분량으로 작성하세요. 각 문단은 2~3문장 이상으로 쓰고 실제 생활 예시, 주의점, 실천 조언을 포함하세요. ${sectionGuide}`;
   return reason ? `${base} 이전 실패 사유: ${reason}` : base;
 }
 
@@ -2573,10 +2665,19 @@ function buildAiAttemptPlan(attempt) {
 }
 
 
-function createKieBatchError(message) {
+function createKieBatchError(message, detail = {}) {
   const error = new Error(message || 'KIE AI batch generation failed');
-  error.failedStep = 'kie_ai';
-  error.progress = 88;
+  error.failedStep = detail.failedStep || 'kie_ai';
+  error.currentStep = detail.currentStep || getBatchRootName(detail.batchName || detail.failedBatch || '') || 'kie_ai';
+  error.failedBatch = detail.failedBatch || getBatchRootName(detail.batchName || detail.currentStep || '') || null;
+  error.failedSections = Array.isArray(detail.failedSections)
+    ? Array.from(new Set(detail.failedSections.filter(Boolean)))
+    : [];
+  const progressSource = Number.isFinite(Number(detail.progress))
+    ? Number(detail.progress)
+    : getBatchProgress(detail.batchName || detail.currentStep || detail.failedBatch || 'kie_ai');
+  error.progress = Number.isFinite(Number(progressSource)) ? Number(progressSource) : 88;
+  if (detail.userMessage) error.userMessage = detail.userMessage;
   return error;
 }
 
@@ -2586,10 +2687,28 @@ function shouldSplitBatchOnValidation(batch, validation) {
   return /(분량 부족|문단 수 부족|메타 응답 포함|json_only_response_required|section_map_not_found_in_supported_paths|raw_response_not_valid_json|all_sections_empty_parser_error|total_section_length_too_short|누락)/.test(joined);
 }
 
+function buildSingleSectionPromptGuide(section) {
+  return [
+    `이번 호출에서는 "${section}" 섹션 하나만 작성하세요.`,
+    `최소 ${getSectionPromptTargetChars(section)}자 이상 작성하세요.`,
+    `반드시 ${getSectionPromptTargetParagraphs(section)}문단 이상 작성하세요.`,
+    '각 문단은 2~3문장 이상으로 작성하세요.',
+    '짧게 요약하지 말고 실제 생활 예시, 주의점, 실천 조언을 반드시 포함하세요.',
+    `반드시 {"${section}":"본문"} 형식의 JSON 객체만 반환하세요.`
+  ].join(' ');
+}
+
+function buildSectionRequirementGuide(sections, isolated = false) {
+  return sections.map((section) => isolated
+    ? buildSingleSectionPromptGuide(section)
+    : `${section}: 최소 ${getSectionPromptTargetParagraphs(section)}문단, 최소 ${getSectionPromptTargetChars(section)}자, 각 문단 2~3문장 이상, 실제 예시/주의점/실천 조언 포함`).join(' | ');
+}
+
 async function generateKieBatch(promptPayload, batch, endpointPath, order = null) {
   let retryReason = '';
   let lastError = null;
   let lastValidation = null;
+  const isSingleSection = batch.sections.length === 1;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const plan = buildAiAttemptPlan(attempt);
     const payloadForAi = buildAiPayloadForMode(promptPayload, batch.sections, plan.mode);
@@ -2603,7 +2722,7 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       '반드시 요청받은 섹션 key만 포함하세요. 다른 섹션은 절대 작성하지 마세요.',
       '각 섹션 값에는 실제 리포트 본문만 작성하세요.',
       '"한 번에 작성할 수 없습니다" 같은 메타 문장을 절대 쓰지 마세요.',
-      batch.sections.map((section) => `${section}: 최소 ${getSectionMinParagraphs(section)}문단, 최소 ${getSectionMinVisibleChars(section)}자`).join(' | '),
+      buildSectionRequirementGuide(batch.sections, isSingleSection),
       buildConcernSpecificInstruction(promptPayload?.basicInfo?.concern || '', batch.sections.includes('관계/궁합 해석')),
       attempt > 1 ? buildRetryInstruction(retryReason, 'json', batch.sections) : ''
     ].filter(Boolean).join(' ');
@@ -2637,7 +2756,10 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
     });
 
     if (!result.ok) {
-      lastError = createKieBatchError(result.upstreamError?.bodyMessage || 'KIE upstream error');
+      lastError = createKieBatchError(result.upstreamError?.bodyMessage || 'KIE upstream error', {
+        batchName: batch.batchName,
+        failedSections: batch.sections
+      });
       if (result.upstreamError?.bodyMessage === 'kie_ai_timeout') {
         lastError.userMessage = '리포트 해석 생성 단계에서 응답이 지연되었습니다. 잠시 후 다시 시도해주세요.';
         console.log('[KIE AI BATCH] error timeout', JSON.stringify({ batchName: batch.batchName, attempt, timeoutMs: getBatchTimeoutMs(batch.batchName) }));
@@ -2659,10 +2781,10 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
     const metaResponse = detectMetaResponseText(result.raw);
     if (metaResponse.detected) {
       console.log('[KIE AI] meta response detected', JSON.stringify({ batchName: batch.batchName, matches: metaResponse.matches }));
-      if (batch.sections.length > 1) {
-        return { ok: false, splitRecommended: true, splitReason: 'meta_response_detected', matches: metaResponse.matches };
+      if (!isSingleSection) {
+        return { ok: false, splitRecommended: true, splitReason: 'meta_response_detected', matches: metaResponse.matches, partialSections: {} };
       }
-      lastError = createKieBatchError('KIE AI meta response detected');
+      lastError = createKieBatchError('KIE AI meta response detected', { batchName: batch.batchName, failedSections: batch.sections });
       retryReason = metaResponse.matches.join(', ') || 'meta_response_detected';
       if (attempt < 2) {
         await persistBatchProgress(order, batch.batchName, 'kie_batch_retry', { attempt, reason: retryReason });
@@ -2683,6 +2805,8 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
     lastValidation = validation;
     console.log('[KIE AI BATCH] parsed section keys', JSON.stringify(validation.foundSectionKeys.length ? validation.foundSectionKeys : Object.keys(normalized)));
     console.log('[KIE AI BATCH] section lengths', JSON.stringify(validation.sectionLengths));
+    console.log('[KIE AI BATCH] passed sections', JSON.stringify(validation.passedSections || []));
+    console.log('[KIE AI BATCH] failed sections', JSON.stringify(validation.failedSections || []));
     console.log('[KIE AI BATCH] validation result', JSON.stringify(validation));
     if (validation.ok) {
       console.log('[KIE AI BATCH] success', JSON.stringify({ batchName: batch.batchName, sections: batch.sections }));
@@ -2695,31 +2819,67 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       continue;
     }
     if (shouldSplitBatchOnValidation(batch, validation)) {
-      return { ok: false, splitRecommended: true, splitReason: retryReason, validation };
+      return { ok: false, splitRecommended: true, splitReason: retryReason, validation, partialSections: normalized };
     }
-    lastError = createKieBatchError('KIE AI batch validation failed');
+    lastError = createKieBatchError('KIE AI batch validation failed', {
+      batchName: batch.batchName,
+      failedSections: validation.failedSections?.length ? validation.failedSections : batch.sections
+    });
     throw lastError;
   }
   if (lastValidation && shouldSplitBatchOnValidation(batch, lastValidation)) {
-    return { ok: false, splitRecommended: true, splitReason: lastValidation.errors.join(' | ') || lastValidation.reason, validation: lastValidation };
+    return {
+      ok: false,
+      splitRecommended: true,
+      splitReason: lastValidation.errors.join(' | ') || lastValidation.reason,
+      validation: lastValidation,
+      partialSections: {}
+    };
   }
-  throw lastError || createKieBatchError('KIE AI batch generation failed');
+  throw lastError || createKieBatchError('KIE AI batch generation failed', { batchName: batch.batchName, failedSections: batch.sections });
 }
 
 async function generateKieBatchOrSplit(promptPayload, batch, endpointPath, order = null) {
   const batchResult = await generateKieBatch(promptPayload, batch, endpointPath, order);
   if (batchResult?.ok) return batchResult.sections;
   if (batchResult?.splitRecommended && batch.sections.length > 1) {
-    const merged = {};
-    for (const section of batch.sections) {
-      const singleBatch = { batchName: `${batch.batchName}:${section}`, sections: [section] };
-      const singleResult = await generateKieBatch(promptPayload, singleBatch, endpointPath, order);
-      if (!singleResult?.ok) throw createKieBatchError(`KIE AI single-section batch failed: ${section}`);
+    const validation = batchResult.validation || {};
+    const partialSections = batchResult.partialSections || {};
+    const passedSections = Array.isArray(validation.passedSections)
+      ? validation.passedSections.filter((section) => String(partialSections?.[section] || '').trim())
+      : [];
+    const failedSections = Array.isArray(validation.failedSections) && validation.failedSections.length
+      ? validation.failedSections
+      : batch.sections.filter((section) => !passedSections.includes(section));
+    const regenTargets = failedSections.length ? failedSections : batch.sections;
+    const merged = Object.fromEntries(passedSections.map((section) => [section, partialSections[section]]));
+    console.log('[KIE AI BATCH] passed sections', JSON.stringify(passedSections));
+    console.log('[KIE AI BATCH] failed sections', JSON.stringify(regenTargets));
+    console.log('[KIE AI BATCH] regenerate failed sections only', JSON.stringify({ batchName: batch.batchName, failedSections: regenTargets }));
+    for (const section of regenTargets) {
+      const singleBatch = { batchName: `${batch.batchName}:${section}`, sections: [section], parentBatchName: batch.batchName, singleSectionMode: true };
+      let singleResult;
+      try {
+        singleResult = await generateKieBatch(promptPayload, singleBatch, endpointPath, order);
+      } catch (error) {
+        if (!error.failedStep) error.failedStep = 'kie_ai';
+        if (!error.currentStep) error.currentStep = getBatchRootName(batch.batchName);
+        if (!error.failedBatch) error.failedBatch = getBatchRootName(batch.batchName);
+        if (!Array.isArray(error.failedSections) || !error.failedSections.length) error.failedSections = [section];
+        if (!Number.isFinite(Number(error.progress))) error.progress = getBatchProgress(batch.batchName);
+        throw error;
+      }
+      if (!singleResult?.ok) {
+        throw createKieBatchError(`KIE AI single-section batch failed: ${section}`, {
+          batchName: batch.batchName,
+          failedSections: [section]
+        });
+      }
       Object.assign(merged, singleResult.sections || {});
     }
     return merged;
   }
-  throw createKieBatchError(`KIE AI batch failed: ${batch.batchName}`);
+  throw createKieBatchError(`KIE AI batch failed: ${batch.batchName}`, { batchName: batch.batchName, failedSections: batch.sections });
 }
 
 function buildAiRequestBody({ style, systemPrompt, userText, outputMode, maxTokens }) {
@@ -2995,7 +3155,10 @@ async function generateAiSections(promptPayload, order = null) {
     } catch (error) {
       console.log('[KIE AI BATCH] failed batchName', JSON.stringify({ batchName: batch.batchName, final: true, message: error.message || 'unknown' }));
       if (!error.failedStep) error.failedStep = 'kie_ai';
-      if (!Number.isFinite(Number(error.progress))) error.progress = 88;
+      if (!error.currentStep) error.currentStep = getBatchRootName(batch.batchName);
+      if (!error.failedBatch) error.failedBatch = getBatchRootName(batch.batchName);
+      if (!Array.isArray(error.failedSections)) error.failedSections = [];
+      if (!Number.isFinite(Number(error.progress))) error.progress = getBatchProgress(batch.batchName);
       throw error;
     }
   }
@@ -3015,7 +3178,10 @@ async function generateAiSections(promptPayload, order = null) {
   });
   console.log('[KIE AI FINAL] validation result', JSON.stringify(finalValidation));
   if (!finalValidation.ok) {
-    throw createKieBatchError('KIE AI final validation failed');
+    throw createKieBatchError('KIE AI final validation failed', {
+      batchName: batches[batches.length - 1]?.batchName || 'kie_ai',
+      failedSections: finalValidation.failedSections || []
+    });
   }
   return finalSections;
 }

@@ -428,6 +428,8 @@
       const status = rawStatus === 'ready' ? 'completed' : rawStatus;
       const failedStep = data.failedStep || null;
       const currentStep = data.currentStep || null;
+      const failedBatch = data.failedBatch || null;
+      const failedSections = Array.isArray(data.failedSections) ? data.failedSections : [];
       const progress = Number.isFinite(Number(data.progress)) ? Number(data.progress) : null;
       const statusMap = {
         created: '결제창 준비 중',
@@ -562,10 +564,15 @@
                 : '주문 정보를 확인하고 있습니다.';
       applyProgress(progress ?? defaultProgress, progressText);
 
+      const failureMeta = status === 'failed'
+        ? `
+실패 배치: ${failedBatch || '-'}
+실패 섹션: ${failedSections.length ? failedSections.join(', ') : '-'}`
+        : '';
       const updatedText = data.updatedAt ? `
 
 최근 갱신: ${new Date(data.updatedAt).toLocaleString('ko-KR')}` : '';
-      detailBox.textContent = `${data.message || '리포트 상태를 계속 확인하고 있습니다.'}${updatedText}`;
+      detailBox.textContent = `${data.message || '리포트 상태를 계속 확인하고 있습니다.'}${failureMeta}${updatedText}`;
 
       const existingDownload = document.getElementById('downloadButton');
       if (existingDownload) existingDownload.remove();
