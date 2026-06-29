@@ -739,6 +739,19 @@
       }, 2600);
     }
 
+    function getReportSectionTitle(title) {
+      return title === '신살,귀인' ? '신살·귀인' : title;
+    }
+
+    function renderHtmlParagraphs(text) {
+      return String(text || '')
+        .split(/\n{2,}/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => `<p>${escapeHtml(item).replace(/\n/g, '<br>')}</p>`)
+        .join('');
+    }
+
     function renderHtmlReport(data) {
       if (!reportView) return;
       const currentOrderId = data.orderId || activeOrderId || '';
@@ -747,13 +760,8 @@
       const cards = REPORT_SECTION_ORDER
         .filter((title) => String(sections[title] || '').trim())
         .map((title) => {
-          const paragraphs = String(sections[title] || '')
-            .split(/\n{2,}/)
-            .map((item) => item.trim())
-            .filter(Boolean)
-            .map((item) => `<p>${escapeHtml(item)}</p>`)
-            .join('');
-          return `<article class="report-card"><h2>${escapeHtml(title)}</h2>${paragraphs}</article>`;
+          const paragraphs = renderHtmlParagraphs(sections[title] || '');
+          return `<article class="report-card"><h2>${escapeHtml(getReportSectionTitle(title))}</h2>${paragraphs}</article>`;
         })
         .join('');
       reportView.hidden = false;
@@ -831,7 +839,7 @@
                 ? '리포트 생성이 완료되었습니다.'
                 : '리포트 표시 중 문제가 발생했습니다. 고객센터로 문의해 주세요.')
             : status === 'failed'
-              ? '리포트 생성 중 일시적인 문제가 발생했습니다. 결제는 정상 확인되었으나, 해석 생성 단계에서 문제가 발생했습니다. 잠시 후 다시 시도하거나 고객센터로 문의해 주세요.'
+              ? '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.'
               : isQueued
                 ? '리포트 생성이 접수되었습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.'
                 : status === 'payment_cancelled'
@@ -884,8 +892,8 @@
         setStepState(stepGenerating, 'done');
         setStepState(stepDownload, 'done');
       } else if (status === 'failed') {
-        generationStep.textContent = '리포트 생성 중 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.';
-        downloadStep.textContent = '잠시 후 다시 조회하거나 고객센터로 문의해 주세요.';
+        generationStep.textContent = '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.';
+        downloadStep.textContent = '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.';
         setStepState(stepGenerating, 'active');
         setStepState(stepDownload, 'pending');
       } else if (status === 'payment_cancelled') {
@@ -939,7 +947,7 @@
               ? '리포트 생성이 완료되었습니다.'
               : '리포트 표시를 다시 확인해 주세요.')
           : status === 'failed'
-            ? '리포트 제작 중 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해주세요.'
+            ? '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.'
             : status === 'payment_cancelled'
               ? '결제가 취소되어 진행이 중단되었습니다.'
               : (stepProgressText[currentStep || status] || '리포트 제작 상태를 확인하고 있습니다.');

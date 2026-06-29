@@ -2264,8 +2264,31 @@ function buildAiPromptPayload(order, apiSnapshots, warnings) {
   };
 }
 
+function cleanSectionText(text) {
+  return String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function normalizeSectionKeyAlias(section = '') {
+  const normalized = String(section || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\s*[·•ㆍ]\s*/g, '·')
+    .replace(/\s*,\s*/g, ',');
+  if (normalized === '신살·귀인' || normalized === '신살, 귀인' || normalized === '신살,귀인') return '신살,귀인';
+  if (normalized === '궁합 참고 해석') return '관계/궁합 해석';
+  return normalized;
+}
+
 function splitParagraphs(text) {
-  return String(text || '').split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  return cleanSectionText(text).split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
 }
 
 function countMeaningfulParagraphs(text) {
@@ -2343,10 +2366,10 @@ function sanitizeKiePreviewText(text, limit = 500) {
 }
 
 function normalizeKieStringValue(value) {
-  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'string') return cleanSectionText(value);
   if (value == null) return '';
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return JSON.stringify(value);
+  return cleanSectionText(JSON.stringify(value));
 }
 
 function extractTextFromMessageContent(content) {
@@ -2364,28 +2387,21 @@ function extractTextFromMessageContent(content) {
 
 function hasLikelySectionKeys(obj, requiredSections) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
-  const aliases = {
-    '신살, 귀인': '신살,귀인',
-    '궁합 참고 해석': '관계/궁합 해석'
-  };
-  const keys = Object.keys(obj).map((key) => aliases[key] || key.trim());
-  return requiredSections.some((section) => keys.includes(section));
+  const keys = Object.keys(obj).map((key) => normalizeSectionKeyAlias(key));
+  return requiredSections.some((section) => keys.includes(normalizeSectionKeyAlias(section)));
 }
 
 function normalizeAiSections(rawSections, requiredSections) {
-  const aliases = {
-    '신살, 귀인': '신살,귀인',
-    '궁합 참고 해석': '관계/궁합 해석'
-  };
   if (!rawSections || typeof rawSections !== 'object' || Array.isArray(rawSections)) return null;
   const normalized = {};
   for (const [key, value] of Object.entries(rawSections)) {
-    const normalizedKey = aliases[key] || key.trim();
+    const normalizedKey = normalizeSectionKeyAlias(key);
     normalized[normalizedKey] = normalizeKieStringValue(value);
   }
   const output = {};
   requiredSections.forEach((key) => {
-    output[key] = typeof normalized[key] === 'string' ? normalized[key].trim() : '';
+    const normalizedKey = normalizeSectionKeyAlias(key);
+    output[key] = typeof normalized[normalizedKey] === 'string' ? cleanSectionText(normalized[normalizedKey]) : '';
   });
   return output;
 }
@@ -2434,14 +2450,17 @@ function formatHonorificName(name) {
   return base ? `${base}님` : '';
 }
 
-function normalizeHonorificSpacing(text) {
-  return String(text || '')
-    .replace(/([가-힣A-Za-z0-9]+)님\s+님/g, '$1님')
-    .replace(/([가-힣A-Za-z0-9]+)\s+님/g, '$1님')
+function fixHonorifics(text) {
+  return cleanSectionText(String(text || '')
+    .replace(/([가-힣A-Za-z0-9]+)님[ \t]+님/g, '$1님')
+    .replace(/([가-힣A-Za-z0-9]+)[ \t]+님/g, '$1님')
     .replace(/님님+/g, '님')
-    .replace(/님\s+(?=(은|는|이|가|을|를|의|과|와|도|만|께서|께|에게|한테|처럼|보다|부터|까지|랑|으로|로|에|이나|나|이며|인데|입니다|입니까|일|적))/g, '님')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+    .replace(/님[ \t]+(?=(은|는|이|가|을|를|의|과|와|도|만|께서|께|에게|한테|처럼|보다|부터|까지|랑|으로|로|에|이나|나|이며|인데|입니다|입니까|일|적))/g, '님')
+    .replace(/[ \t]{2,}/g, ' '));
+}
+
+function normalizeHonorificSpacing(text) {
+  return fixHonorifics(text);
 }
 
 function applyHonorificsToText(text, names = []) {
@@ -2603,8 +2622,7 @@ function appendHealthDisclaimer(text) {
 function stripCustomerFacingArtifacts(text) {
   let output = String(text || '');
   output = output.replace(/[^\n.!?]*(downloadUrl|pdfPath|pdf|debug)[^\n.!?]*(?:[.!?]|$)/gi, ' ');
-  output = output.replace(/\s{2,}/g, ' ').replace(/\n{3,}/g, '\n\n');
-  return output.trim();
+  return cleanSectionText(output);
 }
 
 function normalizeFormalKoreanStyle(text) {
@@ -2664,24 +2682,25 @@ function postProcessReportSections(promptPayload, sections) {
   const seenSentences = new Map();
   const output = {};
   for (const [section, rawText] of Object.entries(sections || {})) {
-    let nextText = String(rawText || '').trim();
+    const normalizedSection = normalizeSectionKeyAlias(section);
+    let nextText = cleanSectionText(rawText);
     if (!nextText) {
-      output[section] = '';
+      output[normalizedSection] = '';
       continue;
     }
     nextText = stripCustomerFacingArtifacts(nextText);
-    nextText = prependSectionIntro(section, nextText);
-    nextText = ensureSectionPerspective(section, nextText);
+    nextText = prependSectionIntro(normalizedSection, nextText);
+    nextText = ensureSectionPerspective(normalizedSection, nextText);
     nextText = annotateJargonFirstUse(nextText, explainedTerms);
     nextText = normalizeFormalKoreanStyle(nextText);
-    if (section === '월운') nextText = convertMonthlySectionToFormalStyle(nextText);
+    if (normalizedSection === '월운') nextText = convertMonthlySectionToFormalStyle(nextText);
     nextText = applyHonorificsToText(nextText, inputNames);
     nextText = removeRepeatedSentencesFromText(nextText, seenSentences);
     nextText = splitLongParagraphsForMobile(nextText);
-    nextText = appendSectionSummary(section, nextText);
-    if (section === '건강운') nextText = appendHealthDisclaimer(nextText);
-    nextText = normalizeHonorificSpacing(nextText);
-    output[section] = nextText.replace(/\n{3,}/g, '\n\n').trim();
+    nextText = appendSectionSummary(normalizedSection, nextText);
+    if (normalizedSection === '건강운') nextText = appendHealthDisclaimer(nextText);
+    nextText = fixHonorifics(nextText);
+    output[normalizedSection] = cleanSectionText(nextText);
   }
   return output;
 }
@@ -2720,7 +2739,7 @@ function extractNestedJsonStringCandidates(parsed) {
 }
 
 function normalizeSectionHeading(label) {
-  return String(label || '').replace(/^#+\s*/, '').replace(/\s+/g, ' ').replace(/\s*,\s*/g, ',').trim();
+  return normalizeSectionKeyAlias(String(label || '').replace(/^#+\s*/, ''));
 }
 
 function parseTextTitleSections(raw, requiredSections) {
@@ -3067,6 +3086,10 @@ function summarizeSectionLengths(sections, requiredSections) {
   return Object.fromEntries(requiredSections.map((key) => [key, countVisibleChars(sections?.[key] || '')]));
 }
 
+function validateSectionMap(sectionMap, promptPayload, meta = {}, options = {}) {
+  return validateAiSections(sectionMap, promptPayload, meta, options);
+}
+
 function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
   const requiredSections = options.requiredSections || buildRequiredAiSections(hasCompatibilityPromptPayload(promptPayload));
   const enforceTotalLength = options.enforceTotalLength !== false;
@@ -3081,7 +3104,7 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
   const sectionLengths = {};
   const banned = /(api|json|system|model|data structure|raw|debug|missingfields|requiredfields|계산 확인 메모|fallback|prompt|engine|content-type|status\s*500|error|downloadurl|pdfpath|pdf)/i;
   for (const key of requiredSections) {
-    const text = String(sections?.[key] || '').trim();
+    const text = cleanSectionText(sections?.[key] || '');
     const paragraphs = countMeaningfulParagraphs(text);
     const length = countVisibleChars(text);
     paragraphCounts[key] = paragraphs;
@@ -3212,6 +3235,7 @@ function buildConcernSpecificInstruction(concern, hasCompatibility, birthTimeUnk
     '추상적인 일반론 대신 실제 상담 장면이 떠오르는 구체 예시를 포함하세요.',
     '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 자료를 실제 해석 문장에 직접 연결하세요.',
     '편관격, 신약, 용신, 희신, 재성, 관성, 비겁 같은 용어가 처음 나오면 쉬운 설명과 "쉽게 말하면" 풀이를 반드시 붙이세요.',
+    '사주 해석은 자기이해와 현실 점검을 돕는 참고용 조언입니다. 미래를 확정하는 예언처럼 단정하지 말고, 반드시·절대·확실히 같은 표현 대신 가능성·경향성 중심으로 설명하세요.',
     '같은 문장과 조언이 여러 섹션에서 반복되지 않도록 관점과 표현을 바꾸고, 대운·세운·월운은 서로 다른 역할로 구분해 쓰세요.',
     '고민에 대한 조언은 최소 5문단 이상 작성하고 사용자의 질문에 직접 답하세요. 같은 문장을 복사하지 말고 현실적인 선택 기준과 행동 순서를 제시하세요.'
   ];
@@ -3558,6 +3582,7 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       '같은 문장과 조언을 여러 섹션에서 반복하지 말고, 섹션마다 관점과 예시를 다르게 쓰세요. 신약, 편관격, 용신, 희신 등은 필요한 곳에서만 간결하게 언급하고 같은 설명을 복사하지 마세요.',
       '대운은 장기 흐름, 세운은 해당 연도의 일·돈·관계·건강 또는 상반기/하반기 흐름, 월운은 이번 달 실천 포인트 중심으로 서로 다르게 작성하세요.',
       '건강운 끝에는 건강운은 의학적 진단이 아니라 생활 습관을 점검하기 위한 참고용 해석이며, 불편한 증상이 있다면 전문의 상담을 권장한다는 안내를 자연스럽게 포함하세요.',
+      '사주 해석은 자기이해와 현실 점검을 돕는 참고용 조언입니다. 미래를 확정하는 예언처럼 단정하지 말고, 반드시·절대·확실히 같은 표현 대신 가능성·경향성 중심으로 설명하세요.',
       '반드시 요청받은 섹션 key만 포함하세요. 다른 섹션은 절대 작성하지 마세요.',
       '각 섹션 값에는 실제 리포트 본문만 작성하세요.',
       '"한 번에 작성할 수 없습니다" 같은 메타 문장을 절대 쓰지 마세요.',
@@ -3656,7 +3681,7 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
 
     const parsedMeta = parseKieSectionMap(result.raw, batch.sections);
     const normalized = parsedMeta.sections || Object.fromEntries(batch.sections.map((key) => [key, '']));
-    const validation = validateAiSections(normalized, promptPayload, parsedMeta, {
+    const validation = validateSectionMap(normalized, promptPayload, parsedMeta, {
       requiredSections: batch.sections,
       enforceTotalLength: true,
       requireRawLength: false,
@@ -4124,7 +4149,7 @@ async function generateAiSections(promptPayload, order = null) {
   console.log('[KIE AI FINAL] merged section keys', JSON.stringify(Object.keys(finalSections)));
   console.log('[KIE AI FINAL] total length', JSON.stringify({ totalLength, requiredSections }));
   const processedFinalSections = postProcessReportSections(promptPayload, finalSections);
-  const finalValidation = validateAiSections(processedFinalSections, promptPayload, {
+  const finalValidation = validateSectionMap(processedFinalSections, promptPayload, {
     rawLength: totalLength,
     detectedFormat: 'merged_sections',
     sourcePath: 'batch_merge'
@@ -4135,14 +4160,15 @@ async function generateAiSections(promptPayload, order = null) {
   });
   console.log('[KIE AI FINAL] validation result', JSON.stringify(finalValidation));
   if (!finalValidation.ok) {
-    const failedSections = Array.isArray(finalValidation.failedSections) ? finalValidation.failedSections : [];
-    const failedBatchName = getPrimaryFailedBatchName(failedSections, batches[batches.length - 1]?.batchName || 'kie_ai');
+    const failedSections = Array.isArray(finalValidation.failedSections) ? Array.from(new Set(finalValidation.failedSections.filter(Boolean))) : [];
     throw createKieBatchError('KIE AI final validation failed', {
-      batchName: failedBatchName,
-      failedBatch: failedBatchName,
-      currentStep: failedBatchName,
-      progress: getBatchProgress(failedBatchName),
-      failedSections
+      batchName: 'final_validation',
+      failedBatch: 'final_validation',
+      failedStep: 'final_validation',
+      currentStep: 'final_validation',
+      progress: getBatchProgress('html_render'),
+      failedSections,
+      userMessage: '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.'
     });
   }
   return processedFinalSections;
