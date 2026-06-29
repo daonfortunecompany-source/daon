@@ -518,6 +518,8 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
 
   const publicStatus = getPublicOrderStatus(order.status);
   const normalizedFailedSections = Array.isArray(order.failedSections) ? Array.from(new Set(order.failedSections.filter(Boolean))) : [];
+  const normalizedRecoverableSections = Array.isArray(order.recoverableSections) ? Array.from(new Set(order.recoverableSections.filter(Boolean))) : [];
+  const normalizedFatalSections = Array.isArray(order.fatalSections) ? Array.from(new Set(order.fatalSections.filter(Boolean))) : [];
   const hasRuntimeSections = Boolean(order.runtimeReport?.sections && Object.keys(order.runtimeReport.sections || {}).length);
   const hasRecoverablePartialSections = Boolean(order.artifacts?.partialAiSections && Object.keys(order.artifacts.partialAiSections || {}).length);
   const normalizedPublicStatus = publicStatus === 'failed' && normalizedFailedSections.length === 0
@@ -533,6 +535,8 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
     failedStep: normalizedPublicStatus === 'failed' ? (order.failedStep || null) : null,
     failedBatch: normalizedPublicStatus === 'failed' ? (order.failedBatch || null) : null,
     failedSections: normalizedPublicStatus === 'failed' ? normalizedFailedSections : [],
+    recoverableSections: normalizedRecoverableSections,
+    fatalSections: normalizedFatalSections,
     message: normalizedPublicStatus === 'failed' ? buildStatusMessage(order) : buildGeneratingMessage(hasRuntimeSections ? 'completed' : (order.currentStep || 'generation')),
     viewMode: normalizedPublicStatus === 'completed' ? 'html' : null,
     reportSections: deliveredSections,
@@ -631,7 +635,7 @@ async function generatePremiumReport(orderId) {
     }
     if (isOrderCompleted(order)) return;
 
-    updateOrderProgress(order, { status: 'generating', progress: getDefaultProgressForStep('generation'), currentStep: 'generation', failedStep: null, failedBatch: null, failedSections: [], statusMessage: buildGeneratingMessage('generation') });
+    updateOrderProgress(order, { status: 'generating', progress: getDefaultProgressForStep('generation'), currentStep: 'generation', failedStep: null, failedBatch: null, failedSections: [], recoverableSections: [], fatalSections: [], statusMessage: buildGeneratingMessage('generation') });
     order.logs.push(logLine('generation_started', {}));
     await saveOrder(order);
 
@@ -720,7 +724,17 @@ async function generatePremiumReport(orderId) {
     await saveOrder(order);
     console.log('[REPORT HTML] render start', JSON.stringify({ orderId: order.id, sections: Object.keys(aiSections || {}) }));
 
-    updateOrderProgress(order, { status: 'completed', progress: 100, currentStep: 'completed', failedStep: null, failedBatch: null, failedSections: [], statusMessage: buildGeneratingMessage('completed') });
+    updateOrderProgress(order, {
+      status: 'completed',
+      progress: 100,
+      currentStep: 'completed',
+      failedStep: null,
+      failedBatch: null,
+      failedSections: [],
+      recoverableSections: Array.isArray(order.recoverableSections) ? order.recoverableSections : [],
+      fatalSections: Array.isArray(order.fatalSections) ? order.fatalSections : [],
+      statusMessage: buildGeneratingMessage('completed')
+    });
     order.runtimeReport = {
       sections: aiSections,
       deliveredAt: null,
@@ -744,21 +758,47 @@ async function generatePremiumReport(orderId) {
       const partialSections = error.partialSections && typeof error.partialSections === 'object'
         ? error.partialSections
         : (order.artifacts?.partialAiSections && typeof order.artifacts.partialAiSections === 'object' ? order.artifacts.partialAiSections : {});
+      const requiredSections = buildRequiredAiSections(Boolean(order.compatibilityRequested || hasPartnerCoreFields(order.partner)));
+      const allRequiredSectionsHaveText = requiredSections.every((section) => hasDeliverableSectionText(section, partialSections?.[section] || ''));
+      const recoverableSections = Array.isArray(error.recoverableSections)
+        ? Array.from(new Set(error.recoverableSections.filter(Boolean)))
+        : Array.isArray(error.validationSummary?.recoverableSections)
+          ? Array.from(new Set(error.validationSummary.recoverableSections.filter(Boolean)))
+          : [];
+      const fatalSections = Array.isArray(error.fatalSections)
+        ? Array.from(new Set(error.fatalSections.filter(Boolean)))
+        : Array.isArray(error.validationSummary?.fatalSections)
+          ? Array.from(new Set(error.validationSummary.fatalSections.filter(Boolean)))
+          : [];
       const recoveryState = failedStep === 'kie_ai'
         ? collectFailedSectionRecoveryState(failedSections, partialSections)
         : { failedSections, usableRecoveredSections: [], unrecoveredFailedSections: failedSections };
       const hasRecoverablePartialSections = Boolean(partialSections && Object.keys(partialSections).length);
-      if (failedStep === 'kie_ai' && hasRecoverablePartialSections && recoveryState.unrecoveredFailedSections.length === 0) {
+      let downgradedToRecoverable = false;
+      if (failedStep === 'kie_ai' && hasRecoverablePartialSections && (recoveryState.unrecoveredFailedSections.length === 0 || (fatalSections.length === 0 && allRequiredSectionsHaveText))) {
+        const canFinalizeCompleted = fatalSections.length === 0 && allRequiredSectionsHaveText;
         order.artifacts = order.artifacts || {};
-        order.artifacts.partialAiSections = { ...partialSections };
+        order.artifacts.partialAiSections = canFinalizeCompleted ? null : { ...partialSections };
+        order.recoverableSections = recoverableSections.slice();
+        order.fatalSections = fatalSections.slice();
+        if (canFinalizeCompleted) {
+          order.runtimeReport = {
+            sections: { ...partialSections },
+            deliveredAt: null,
+            copyReady: true,
+            createdAt: order.runtimeReport?.createdAt || new Date().toISOString()
+          };
+        }
         updateOrderProgress(order, {
-          status: order.runtimeReport?.sections ? 'completed' : 'generating',
-          progress: order.runtimeReport?.sections ? 100 : Math.max(progress, getDefaultProgressForStep(currentStep)),
-          currentStep: order.runtimeReport?.sections ? 'completed' : currentStep,
+          status: canFinalizeCompleted ? 'completed' : 'generating',
+          progress: canFinalizeCompleted ? 100 : Math.max(progress, getDefaultProgressForStep(currentStep)),
+          currentStep: canFinalizeCompleted ? 'completed' : currentStep,
           failedStep: null,
           failedBatch: null,
           failedSections: [],
-          statusMessage: order.runtimeReport?.sections ? buildGeneratingMessage('completed') : buildGeneratingMessage(currentStep)
+          recoverableSections,
+          fatalSections,
+          statusMessage: canFinalizeCompleted ? buildGeneratingMessage('completed') : '리포트 생성 상태를 확인하고 있습니다. 잠시 후 다시 확인해 주세요.'
         });
         order.logs.push(logLine('generation_failure_downgraded', {
           failedStep,
@@ -767,10 +807,15 @@ async function generatePremiumReport(orderId) {
           failedSections,
           usableRecoveredSections: recoveryState.usableRecoveredSections,
           unrecoveredFailedSections: [],
+          recoverableSections,
+          fatalSections,
+          allRequiredSectionsHaveText,
+          completed: canFinalizeCompleted,
           message: error.message
         }));
         await saveOrder(order);
-        console.log('[ORDER] failure downgraded to recoverable', JSON.stringify({ orderId: order.id, currentStep, usableRecoveredSections: recoveryState.usableRecoveredSections }));
+        console.log('[ORDER] failure downgraded to recoverable', JSON.stringify({ orderId: order.id, currentStep, usableRecoveredSections: recoveryState.usableRecoveredSections, recoverableSections, fatalSections, completed: canFinalizeCompleted }));
+        downgradedToRecoverable = true;
       } else {
         updateOrderProgress(order, {
           status: 'failed',
@@ -779,14 +824,20 @@ async function generatePremiumReport(orderId) {
           failedStep,
           failedBatch,
           failedSections: recoveryState.unrecoveredFailedSections,
+          recoverableSections,
+          fatalSections,
           statusMessage: error.userMessage || buildFailureMessage(failedStep)
         });
-        order.logs.push(logLine('generation_failed', { failedStep, currentStep, failedBatch, failedSections: recoveryState.unrecoveredFailedSections, message: error.message }));
+        order.logs.push(logLine('generation_failed', { failedStep, currentStep, failedBatch, failedSections: recoveryState.unrecoveredFailedSections, recoverableSections, fatalSections, message: error.message }));
         await saveOrder(order);
-        console.log('[ORDER] status failed', JSON.stringify({ orderId: order.id, failedStep, currentStep, failedBatch, failedSections: recoveryState.unrecoveredFailedSections, progress }));
+        console.log('[ORDER] status failed', JSON.stringify({ orderId: order.id, failedStep, currentStep, failedBatch, failedSections: recoveryState.unrecoveredFailedSections, recoverableSections, fatalSections, progress }));
+      }
+      if (downgradedToRecoverable) {
+        await appendLog('generation_recovered', { orderId, failedStep: error.failedStep || 'generation', recoverableSections, fatalSections, message: error.message });
+      } else {
+        await appendLog('generation_failed', { orderId, failedStep: error.failedStep || 'generation', recoverableSections, fatalSections, message: error.message });
       }
     }
-    await appendLog('generation_failed', { orderId, failedStep: error.failedStep || 'generation', message: error.message });
   } finally {
     generatingOrders.delete(orderId);
   }
@@ -913,6 +964,40 @@ function sanitizeLuckyUrlForLog(url) {
   }
 }
 
+function normalizeGenderValue(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (['male', 'm', 'man', 'boy', '남', '남자', '남성'].includes(normalized)) return 'male';
+  if (['female', 'f', 'woman', 'girl', '여', '여자', '여성'].includes(normalized)) return 'female';
+  return '';
+}
+
+function formatGenderForLucky(value) {
+  const normalized = normalizeGenderValue(value);
+  if (normalized === 'male') return '남자';
+  if (normalized === 'female') return '여자';
+  return '';
+}
+
+function alignLoggedBirthInfoGender(value, requestedGender = '') {
+  const luckyGender = formatGenderForLucky(requestedGender);
+  if (!luckyGender) return summarizeLooseValue(value, 6);
+  const rewrite = (input, depth = 0) => {
+    if (input == null || depth > 4) return input;
+    if (Array.isArray(input)) return input.map((item) => rewrite(item, depth + 1));
+    if (typeof input === 'object') {
+      const output = {};
+      for (const [key, nested] of Object.entries(input)) {
+        output[key] = /gender|sex|성별/i.test(String(key || '')) ? luckyGender : rewrite(nested, depth + 1);
+      }
+      return output;
+    }
+    if (typeof input === 'string' && /^(male|female|남자|여자|남성|여성)$/i.test(input.trim())) return luckyGender;
+    return input;
+  };
+  return summarizeLooseValue(rewrite(value), 6);
+}
+
 function logLuckyResponseDiagnostics(label, data, fallbackPerson) {
   console.log(`[LUCKY API] response top-level keys (${label}): ${JSON.stringify(safeObjectKeys(data))}`);
   console.log(`[LUCKY API] response data keys (${label}): ${JSON.stringify(collectResponseDataKeys(data))}`);
@@ -937,7 +1022,7 @@ function logLuckyResponseDiagnostics(label, data, fallbackPerson) {
     actualHourBranch,
     selectedHourPillar,
     selectedHourPath: pillarDebug?.selectedPaths?.hour || '',
-    rawBirthInfo: summarizeLooseValue(searchLooseValue(data, [['birthinfo'], ['birth', 'info'], ['출생', '정보']]), 6),
+    rawBirthInfo: alignLoggedBirthInfoGender(searchLooseValue(data, [['birthinfo'], ['birth', 'info'], ['출생', '정보']]), fallbackPerson?.gender),
     rawHourGanji: summarizeLooseValue(searchLooseValue(data, [['hourganji'], ['hour', 'ganji'], ['시간', '간지']]), 6),
     rawGanjiHour: summarizeLooseValue(searchLooseValue(data, [['ganji', 'hour'], ['ganjihour']]), 6),
     rawPillarsHour: summarizeLooseValue(searchLooseValue(data, [['pillars', 'hour'], ['hour', 'pillar'], ['시주']]), 6),
@@ -1125,6 +1210,20 @@ function updateOrderProgress(order, updates = {}) {
   } else if (updates.status && updates.status !== 'failed') {
     order.failedSections = [];
   }
+  if ('recoverableSections' in updates) {
+    order.recoverableSections = Array.isArray(updates.recoverableSections)
+      ? Array.from(new Set(updates.recoverableSections.filter(Boolean)))
+      : [];
+  } else if (updates.status && !['failed', 'completed'].includes(updates.status)) {
+    order.recoverableSections = [];
+  }
+  if ('fatalSections' in updates) {
+    order.fatalSections = Array.isArray(updates.fatalSections)
+      ? Array.from(new Set(updates.fatalSections.filter(Boolean)))
+      : [];
+  } else if (updates.status && !['failed', 'completed'].includes(updates.status)) {
+    order.fatalSections = [];
+  }
   if (updates.status && updates.status !== 'failed' && !('failedBatch' in updates)) order.failedBatch = null;
   if ('statusMessage' in updates) order.statusMessage = String(updates.statusMessage || '').trim();
   if (Number.isFinite(Number(updates.progress))) order.progress = Number(updates.progress);
@@ -1254,7 +1353,7 @@ function normalizeApplicant(raw, isPartner = false) {
     : (normalizedBirthTime || combinedBirthTime || '');
   return {
     name: String(raw.name || '').trim(),
-    gender: raw.gender === 'male' ? 'male' : raw.gender === 'female' ? 'female' : '',
+    gender: normalizeGenderValue(raw.gender),
     birthYear,
     birthMonth,
     birthDay,
@@ -1331,7 +1430,8 @@ function toLuckyFlatPayload(person) {
     calendarType: calendarLabel,
     calendar,
     calendarLabel,
-    gender: person.gender,
+    gender: formatGenderForLucky(person.gender),
+    genderCode: normalizeGenderValue(person.gender),
     isLeapMonth: person.isLeapMonth === true,
     leapMonth: person.isLeapMonth === true,
     useYajasiRule: true
@@ -3564,6 +3664,28 @@ function repairSectionsWithFallback(promptPayload, sections, targetSections = []
   return merged;
 }
 
+function applySectionRepairResults(baseSections = {}, repairedSections = {}, targetSections = [], label = '') {
+  const output = { ...(baseSections || {}) };
+  const applied = [];
+  const uniqueSections = Array.from(new Set((Array.isArray(targetSections) ? targetSections : []).filter(Boolean)));
+  for (const section of uniqueSections) {
+    const currentText = cleanSectionText(output?.[section] || '');
+    const repairedText = cleanSectionText(repairedSections?.[section] || '');
+    if (!repairedText) continue;
+    const currentLength = countVisibleChars(currentText);
+    const repairedLength = countVisibleChars(repairedText);
+    const shouldReplace = !currentText
+      || !isSectionReadyForDelivery(section, currentText)
+      || repairedLength > currentLength
+      || (!currentText.includes(repairedText) && repairedLength >= Math.floor(currentLength * 0.95));
+    if (!shouldReplace) continue;
+    output[section] = repairedText;
+    applied.push({ section, from: currentLength, to: repairedLength });
+  }
+  if (label) console.log('[KIE AI REPAIR APPLY]', JSON.stringify({ label, applied }));
+  return output;
+}
+
 function collectSectionObjectCandidates(parsed, requiredSections) {
   const candidates = [];
   const pushCandidate = (label, value) => {
@@ -4000,6 +4122,22 @@ function hasUsableSectionContent(section, text) {
   return inspectSectionUsability(section, text).usable;
 }
 
+const SOFT_REQUIRED_SECTION_MIN_CHARS = Object.freeze({
+  '실천 조언': 400,
+  '주의할 점': 400
+});
+
+function hasDeliverableSectionText(section, text) {
+  const cleaned = restoreParagraphBreaks(text);
+  if (!cleaned) return false;
+  const usability = inspectSectionUsability(section, cleaned);
+  if (usability.metaResponse.detected || usability.policyRefusal.detected) return false;
+  if (/(api|json|system|model|data structure|raw|debug|missingfields|requiredfields|계산 확인 메모|fallback|prompt|engine|content-type|status\s*500|error|downloadurl|pdfpath|pdf|orderid|stack trace)/i.test(cleaned)) return false;
+  const minChars = SOFT_REQUIRED_SECTION_MIN_CHARS[section] || Math.max(180, Math.min(getSectionMinVisibleChars(section), 260));
+  const length = usability.length || countVisibleChars(cleaned);
+  return length >= minChars;
+}
+
 function isSectionReadyForDelivery(section, text) {
   const cleaned = restoreParagraphBreaks(text);
   if (!cleaned) return false;
@@ -4007,6 +4145,7 @@ function isSectionReadyForDelivery(section, text) {
   if (usability.usable) return true;
   if (usability.metaResponse.detected || usability.policyRefusal.detected) return false;
   if (/(api|json|system|model|data structure|raw|debug|missingfields|requiredfields|계산 확인 메모|fallback|prompt|engine|content-type|status\s*500|error|downloadurl|pdfpath|pdf|orderid|stack trace)/i.test(cleaned)) return false;
+  if (SOFT_REQUIRED_SECTION_MIN_CHARS[section]) return hasDeliverableSectionText(section, cleaned);
   const minLength = ['직업운', '대운'].includes(section) ? 600 : getSectionMinVisibleChars(section);
   const minParagraphs = ['직업운', '대운'].includes(section) ? 4 : getSectionMinParagraphs(section);
   const paragraphFloor = Math.max(2, minParagraphs - 1);
@@ -4042,7 +4181,7 @@ function collectFailedSectionRecoveryState(failedSections = [], finalSections = 
   const normalizedFailedSections = Array.from(new Set((Array.isArray(failedSections) ? failedSections : []).filter(Boolean)));
   const usableRecoveredSections = normalizedFailedSections.filter((section) => {
     const candidateText = String(finalSections?.[section] || fallbackSections?.[section] || '');
-    return hasUsableSectionContent(section, candidateText);
+    return isSectionReadyForDelivery(section, candidateText);
   });
   const unrecoveredFailedSections = pruneFailedSectionsWithAvailableContent(normalizedFailedSections, finalSections, usableRecoveredSections, fallbackSections);
   return {
@@ -5478,12 +5617,17 @@ function finalizeReportSections(promptPayload, sections, requiredSections) {
       enforceTotalLength: false,
       requireRawLength: false
     });
-    const failedSections = recalculateFailedSections(requiredSections, working, validation);
+    const allRequiredSectionsHaveText = requiredSections.every((section) => hasDeliverableSectionText(section, working?.[section] || ''));
+    const fatalSections = Array.isArray(validation.fatalSections) ? validation.fatalSections : [];
+    const shouldComplete = fatalSections.length === 0 && allRequiredSectionsHaveText;
+    const failedSections = shouldComplete ? [] : recalculateFailedSections(requiredSections, working, validation);
     logFinalSectionSnapshot(label, working, requiredSections, {
       failedSections,
       recoverableSections: validation.recoverableSections || [],
-      fatalSections: validation.fatalSections || [],
-      validationOk: validation.ok
+      fatalSections,
+      validationOk: validation.ok,
+      allRequiredSectionsHaveText,
+      shouldComplete
     });
     console.log('[KIE AI FINAL] validation audit', JSON.stringify({
       label,
@@ -5491,26 +5635,30 @@ function finalizeReportSections(promptPayload, sections, requiredSections) {
       finalSectionKeys: Object.keys(working || {}).filter((key) => String(working[key] || '').trim()),
       failedSections,
       recoverableSections: validation.recoverableSections || [],
-      fatalSections: validation.fatalSections || []
+      fatalSections,
+      allRequiredSectionsHaveText,
+      shouldComplete
     }));
-    return { validation, failedSections };
+    return { validation, failedSections, allRequiredSectionsHaveText, shouldComplete };
   };
 
   let state = validateCurrent('finalize:initial_validation');
   if ((state.validation.recoverableSections || []).length) {
     const repairedRecoverable = repairSectionsWithFallback(promptPayload, working, state.validation.recoverableSections, 'final_recoverable_repair');
-    working = postProcessReportSections(promptPayload, mergeSectionMaps(working, repairedRecoverable, { requiredSections, label: 'finalize:recoverable_repair' }));
+    working = postProcessReportSections(promptPayload, applySectionRepairResults(working, repairedRecoverable, state.validation.recoverableSections, 'finalize:recoverable_repair'));
     state = validateCurrent('finalize:after_recoverable_repair');
   }
-  if (state.failedSections.length) {
+  if (state.failedSections.length && !state.shouldComplete) {
     const repairedFailed = repairSectionsWithFallback(promptPayload, working, state.failedSections, 'final_failed_repair');
-    working = postProcessReportSections(promptPayload, mergeSectionMaps(working, repairedFailed, { requiredSections, label: 'finalize:failed_repair' }));
+    working = postProcessReportSections(promptPayload, applySectionRepairResults(working, repairedFailed, state.failedSections, 'finalize:failed_repair'));
     state = validateCurrent('finalize:after_failed_repair');
   }
   return {
     sections: working,
     validation: state.validation,
-    failedSections: state.failedSections
+    failedSections: state.failedSections,
+    allRequiredSectionsHaveText: state.allRequiredSectionsHaveText,
+    shouldComplete: state.shouldComplete
   };
 }
 
@@ -5668,22 +5816,36 @@ async function generateAiSections(promptPayload, order = null) {
 
   const requiredSections = buildRequiredAiSections(hasCompatibility);
   const finalized = finalizeReportSections(promptPayload, finalSections, requiredSections);
-  console.log('[KIE AI FINAL] validation result', JSON.stringify({
+  const validationSummary = {
     failedSections: finalized.failedSections,
     recoverableSections: finalized.validation.recoverableSections || [],
-    fatalSections: finalized.validation.fatalSections || [],
-    errors: finalized.validation.errors || []
+    fatalSections: finalized.validation.fatalSections || []
+  };
+  if (order) {
+    order.recoverableSections = validationSummary.recoverableSections.slice();
+    order.fatalSections = validationSummary.fatalSections.slice();
+  }
+  console.log('[KIE AI FINAL] validation result', JSON.stringify({
+    failedSections: validationSummary.failedSections,
+    recoverableSections: validationSummary.recoverableSections,
+    fatalSections: validationSummary.fatalSections,
+    errors: finalized.validation.errors || [],
+    allRequiredSectionsHaveText: finalized.allRequiredSectionsHaveText,
+    shouldComplete: finalized.shouldComplete
   }));
-  if (finalized.failedSections.length === 0) {
-    console.log('[KIE AI FINAL] validation success', JSON.stringify({ requiredSections, failedSections: [] }));
+  if (finalized.shouldComplete || validationSummary.failedSections.length === 0) {
+    console.log('[KIE AI FINAL] validation success', JSON.stringify({ requiredSections, failedSections: [], recoverableSections: validationSummary.recoverableSections, fatalSections: validationSummary.fatalSections }));
     return finalized.sections;
   }
   const fatal = createKieBatchError('KIE AI final validation failed after retries', {
-    batchName: getPrimaryFailedBatchName(finalized.failedSections, 'kie_ai'),
-    failedSections: finalized.failedSections,
-    progress: getBatchProgress(getPrimaryFailedBatchName(finalized.failedSections, 'kie_ai'))
+    batchName: getPrimaryFailedBatchName(validationSummary.failedSections, 'kie_ai'),
+    failedSections: validationSummary.failedSections,
+    progress: getBatchProgress(getPrimaryFailedBatchName(validationSummary.failedSections, 'kie_ai'))
   });
   fatal.partialSections = { ...finalized.sections };
+  fatal.validationSummary = validationSummary;
+  fatal.recoverableSections = validationSummary.recoverableSections.slice();
+  fatal.fatalSections = validationSummary.fatalSections.slice();
   throw fatal;
 }
 

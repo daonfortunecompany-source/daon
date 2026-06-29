@@ -690,6 +690,8 @@
         return;
       }
       const failedSections = Array.isArray(data.failedSections) ? data.failedSections.filter(Boolean) : [];
+      const recoverableSections = Array.isArray(data.recoverableSections) ? data.recoverableSections.filter(Boolean) : [];
+      const fatalSections = Array.isArray(data.fatalSections) ? data.fatalSections.filter(Boolean) : [];
       debugBox.hidden = false;
       debugBox.innerHTML = [
         '<strong>개발 확인용 상태</strong>',
@@ -699,6 +701,8 @@
         `<div>failedStep: <code>${escapeHtml(data.failedStep || '-')}</code></div>`,
         `<div>failedBatch: <code>${escapeHtml(data.failedBatch || '-')}</code></div>`,
         `<div>failedSections: <code>${escapeHtml(failedSections.join(', ') || '-')}</code></div>`,
+        `<div>recoverableSections: <code>${escapeHtml(recoverableSections.join(', ') || '-')}</code></div>`,
+        `<div>fatalSections: <code>${escapeHtml(fatalSections.join(', ') || '-')}</code></div>`,
         `<div>message: <code>${escapeHtml(data.message || '-')}</code></div>`
       ].join('');
     }
@@ -864,6 +868,9 @@
           : rawStatus;
       const renderData = hasRenderableSections ? { ...data, status, reportSections: cachedSections } : { ...data, status };
       const completedButMissingSections = status === 'completed' && renderData.viewMode === 'html' && !hasRenderableSections;
+      const updatedAtMs = renderData.updatedAt ? Date.parse(renderData.updatedAt) : 0;
+      const isHighProgressDelay = !hasRenderableSections && status !== 'completed' && Number(progress || 0) >= 90 && updatedAtMs && (Date.now() - updatedAtMs >= 60000);
+      const showDelayNotice = status === 'failed' || isHighProgressDelay;
       renderReceiptMeta(renderData);
       renderDebugState(renderData);
       const statusMap = {
@@ -877,7 +884,7 @@
         payment_cancelled: '결제 취소',
         failed: '일시적 지연'
       };
-      statusBadge.textContent = statusMap[status] || '상태 확인 중';
+      statusBadge.textContent = showDelayNotice ? '확인 지연' : (statusMap[status] || '상태 확인 중');
 
       const isCompleted = status === 'completed';
       const isQueued = status === 'queued' || status === 'payment_success';
@@ -891,8 +898,8 @@
             ? (hasRenderableSections
                 ? '리포트 생성이 완료되었습니다.'
                 : '리포트 표시 중 문제가 발생했습니다. 고객센터로 문의해 주세요.')
-            : status === 'failed'
-              ? '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.'
+            : showDelayNotice
+              ? '리포트 생성 상태를 확인하고 있습니다. 잠시 후 다시 확인해 주세요.'
               : isQueued
                 ? '리포트 생성이 접수되었습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.'
                 : status === 'payment_cancelled'
@@ -906,8 +913,8 @@
         ? '리포트 표시 오류'
         : isCompleted
           ? '리포트 준비 완료'
-          : status === 'failed'
-            ? '리포트 생성을 다시 확인하고 있습니다'
+          : showDelayNotice
+            ? '리포트 확인이 지연되고 있습니다'
             : status === 'payment_cancelled'
               ? '결제가 취소되었습니다'
               : isQueued
@@ -929,7 +936,12 @@
         setStepState(stepPayment, status === 'payment_pending' ? 'active' : 'pending');
       }
 
-      if (status === 'queued' || status === 'payment_success' || status === 'generating') {
+      if (showDelayNotice) {
+        generationStep.textContent = '리포트 생성 상태를 확인하고 있습니다. 잠시 후 다시 확인해 주세요.';
+        downloadStep.textContent = '문제가 계속되면 고객센터로 문의해 주세요.';
+        setStepState(stepGenerating, 'active');
+        setStepState(stepDownload, 'pending');
+      } else if (status === 'queued' || status === 'payment_success' || status === 'generating') {
         generationStep.textContent = '사주 계산과 해석 문장을 정리하고 있습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.';
         downloadStep.textContent = '완료 후 모바일 리포트를 현재 화면에서 확인할 수 있습니다.';
         setStepState(stepGenerating, 'active');
@@ -999,8 +1011,8 @@
           ? (hasRenderableSections
               ? '리포트 생성이 완료되었습니다.'
               : '리포트 표시를 다시 확인해 주세요.')
-          : status === 'failed'
-            ? '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.'
+          : showDelayNotice
+            ? '리포트 확인이 지연되고 있습니다. 잠시 후 다시 확인해 주세요.'
             : status === 'payment_cancelled'
               ? '결제가 취소되어 진행이 중단되었습니다.'
               : (stepProgressText[currentStep || status] || '리포트 제작 상태를 확인하고 있습니다.');
