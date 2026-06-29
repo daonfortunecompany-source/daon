@@ -532,6 +532,7 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
     viewMode: publicStatus === 'completed' ? 'html' : null,
     reportSections: deliveredSections,
     reportExpired: publicStatus === 'completed' && !canDeliverHtml,
+    debugVisible: CONFIG.env !== 'production',
     applicant: {
       name: order.applicant?.name || '',
       birthDate: [order.applicant?.birthYear, order.applicant?.birthMonth, order.applicant?.birthDay].filter(Boolean).join('-'),
@@ -1050,11 +1051,107 @@ function uniqValidationList(values = []) {
     .filter(Boolean)));
 }
 
+function matchesDaeunPeriodExpression(text = '') {
+  const value = String(text || '');
+  return /(\d{1,2}세\s*[~\-]\s*\d{1,2}세|\d{1,2}세부터\s*\d{1,2}세|\d{1,2}세\s*~\s*\d{1,2}세)/.test(value);
+}
+
+function hasMinimumUsableSectionContent(section, text = '') {
+  const cleaned = cleanSectionText(text || '');
+  if (!cleaned) return false;
+  if (detectMetaResponseText(cleaned).detected) return false;
+  const length = countVisibleChars(cleaned);
+  const paragraphs = countMeaningfulParagraphs(cleaned);
+  if (section === '대운') {
+    return length >= 600 && paragraphs >= 4 && (matchesDaeunPeriodExpression(cleaned) || /대운/.test(cleaned));
+  }
+  if (section === '운성') {
+    return length >= 500 && paragraphs >= 4;
+  }
+  const minLength = getSectionMinVisibleChars(section);
+  const minParagraphs = getSectionMinParagraphs(section);
+  if (length >= minLength && paragraphs >= minParagraphs) return true;
+  return canAcceptSectionLengthShortfall(section, length, minLength, paragraphs, length, minLength);
+}
+
+function buildRecoverableSupplementParagraph(section, promptPayload = {}) {
+  const applicantInfo = promptPayload?.basicInfo || promptPayload?.applicant || {};
+  const name = stripHonorificSuffix(applicantInfo.name || '') || '고객';
+  switch (section) {
+    case '대운':
+      return `${name}님의 대운 흐름은 시기별 변화를 단정적으로 확정하기보다, 각 구간에서 무엇을 안정화하고 어떤 선택 기준을 세우면 좋은지 살펴보는 참고 자료로 보시면 좋습니다. 흐름이 바뀌는 시기에는 일·돈·관계의 우선순위를 다시 정리해 두는 것이 도움이 될 수 있습니다.`;
+    case '운성':
+      return '운성은 사주에서 기운이 어떤 상태로 움직이는지를 비유적으로 살펴보는 요소입니다. 이는 좋고 나쁨을 단정하기보다 현재 성향과 흐름의 강약을 이해하는 참고 자료로 보는 것이 좋습니다.';
+    case '세운':
+      return `${name}님은 한 해의 흐름을 무리하게 단정하기보다, 올해 반복되기 쉬운 선택 패턴과 생활 리듬을 현실적으로 점검해 보시면 좋습니다.`;
+    case '월운':
+      return `${name}님은 이번 달의 변화를 결과로 단정하기보다, 일정과 지출, 감정 사용량을 함께 점검하는 방식으로 참고하시면 도움이 될 수 있습니다.`;
+    case '재물운':
+    case '직업운':
+    case '애정운':
+    case '자녀운':
+    case '건강운':
+      return `${name}님은 이 영역을 좋고 나쁨으로 단정하기보다, 현재 반복되는 패턴과 생활 속 조정 포인트를 현실적으로 점검해 보시면 좋습니다.`;
+    default:
+      return '';
+  }
+}
+
+function normalizeBatchFailureState({ batchName = '', failedSections = [], finalSections = {}, promptPayload = null, fallbackSections = {} } = {}) {
+  const uniqueFailedSections = Array.from(new Set((Array.isArray(failedSections) ? failedSections : []).filter(Boolean)));
+  const repairedSections = {};
+  const recoverableSections = [];
+  const usableRecoveredSections = [];
+  const serverSupplementedSections = [];
+  const unrecoveredFailedSections = [];
+  const qualityStatus = {};
+
+  for (const section of uniqueFailedSections) {
+    const originalText = cleanSectionText(finalSections?.[section] || fallbackSections?.[section] || '');
+    let nextText = originalText;
+    let fatal = true;
+    let action = 'fatal';
+    const warnings = [];
+
+    if (hasMinimumUsableSectionContent(section, originalText)) {
+      fatal = false;
+      action = 'server_supplement';
+      recoverableSections.push(section);
+      usableRecoveredSections.push(section);
+      warnings.push(section === '대운'
+        ? '대운 구조 기준 일부 불일치 - 서버 보정 후 사용'
+        : `${section} 섹션 일부 형식 부족 - 서버 보정 후 사용`);
+      if (promptPayload) {
+        const repaired = applyRecoverableValidationRepairs(promptPayload, { [section]: originalText }, { recoverableSections: [section] });
+        nextText = cleanSectionText(repaired?.[section] || originalText);
+        if (nextText && nextText !== originalText) serverSupplementedSections.push(section);
+      }
+    } else {
+      unrecoveredFailedSections.push(section);
+    }
+
+    if (nextText) repairedSections[section] = nextText;
+    qualityStatus[section] = { section, qualityStatus: fatal ? 'fatal' : 'recoverable', action, warnings, fatal };
+  }
+
+  return {
+    batchName: getBatchRootName(batchName || getPrimaryFailedBatchName(uniqueFailedSections, 'kie_ai')) || 'kie_ai',
+    failedSections: uniqueFailedSections,
+    repairedSections,
+    recoverableSections: uniqValidationList(recoverableSections),
+    usableRecoveredSections: uniqValidationList(usableRecoveredSections),
+    serverSupplementedSections: uniqValidationList(serverSupplementedSections),
+    unrecoveredFailedSections: uniqValidationList(unrecoveredFailedSections),
+    fatalSections: uniqValidationList(unrecoveredFailedSections),
+    qualityStatus
+  };
+}
+
 function isRecoverableValidationIssue(section, issue = '') {
   const label = String(issue || '').trim();
   if (!label) return false;
   if (section === '대운' && /대운 구조 기준 불일치/.test(label)) return true;
-  return /(문단 수 부족|분량 부족|건강운 도입문 중복|건강운 참고 문구 중복|고민 후반 중복 문단|운성 의미 설명 부족|신살·귀인 내용 부족|신살·귀인 표기 미통일|조사 문법 오류|재물운 핵심 항목 부족|직업운 핵심 항목 부족|애정운 핵심 항목 부족|자녀운 핵심 항목 부족)/.test(label);
+  return /(문단 수 부족|분량 부족|건강운 도입문 중복|건강운 참고 문구 중복|고민 후반 중복 문단|운성 의미 설명 부족|신살·귀인 내용 부족|신살·귀인 표기 미통일|조사 문법 오류|재물운 핵심 항목 부족|직업운 핵심 항목 부족|애정운 핵심 항목 부족|자녀운 핵심 항목 부족|세운 .*누락|월운 .*누락|소제목.*누락|세부 항목.*누락|같은 문장 반복 과다)/.test(label);
 }
 
 function isFatalValidationIssue(section, issue = '') {
@@ -1135,14 +1232,22 @@ function applyRecoverableValidationRepairs(promptPayload, sections, validation) 
   for (const section of recoverableSections) {
     let nextText = cleanSectionText(output[section] || '');
     if (!nextText) continue;
-    if (section === '대운') {
-      nextText = buildDaeunSupplement(promptPayload);
-    } else {
-      nextText = ensureSectionSpecificStructure(promptPayload, section, nextText);
-      if (countMeaningfulParagraphs(nextText) < getSectionMinParagraphs(section) || countVisibleChars(nextText) < getSectionMinVisibleChars(section)) {
+    nextText = ensureSectionSpecificStructure(promptPayload, section, nextText);
+    const supplement = buildRecoverableSupplementParagraph(section, promptPayload);
+    const needsSupplement = !hasMinimumUsableSectionContent(section, nextText)
+      || (section === '대운' && !matchesDaeunPeriodExpression(nextText))
+      || (section === '운성' && !/(운성은|장생|목욕|관대|건록|제왕|쇠|병|사|묘|절|태|양)/.test(nextText));
+    if (supplement && needsSupplement && !nextText.includes(supplement.slice(0, 24))) {
+      nextText = `${nextText}
+
+${supplement}`.trim();
+    }
+    if (countMeaningfulParagraphs(nextText) < getSectionMinParagraphs(section) || countVisibleChars(nextText) < getSectionMinVisibleChars(section)) {
+      const fallbackText = buildMissingSectionFallback(promptPayload, section);
+      if (fallbackText && !nextText.includes(String(fallbackText).slice(0, 24))) {
         nextText = `${nextText}
 
-${buildMissingSectionFallback(promptPayload, section)}`.trim();
+${fallbackText}`.trim();
       }
     }
     nextText = ensureSingleSectionIntro(promptPayload, section, nextText);
@@ -4664,10 +4769,24 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
     const metaResponse = detectMetaResponseText(result.raw);
     if (metaResponse.detected) {
       console.log('[KIE AI] meta response detected', JSON.stringify({ batchName: batch.batchName, matches: metaResponse.matches }));
-      if (!isSingleSection) {
-        return { ok: false, splitRecommended: true, splitReason: 'meta_response_detected', matches: metaResponse.matches, partialSections: {} };
+      if (Object.keys(preservedUsableSections).length === batch.sections.length) {
+        console.log('[KIE AI BATCH] discard meta/refusal attempt and keep previous usable sections', JSON.stringify({ batchName: batch.batchName, preservedSections: Object.keys(preservedUsableSections), matches: metaResponse.matches }));
+        return {
+          ok: true,
+          sections: preservedUsableSections,
+          validation: {
+            ok: true,
+            passedSections: Object.keys(preservedUsableSections),
+            failedSections: [],
+            recoverableSections: []
+          }
+        };
       }
-      lastError = createKieBatchError('KIE AI meta response detected', { batchName: batch.batchName, failedSections: batch.sections });
+      if (!isSingleSection) {
+        return { ok: false, splitRecommended: true, splitReason: 'meta_response_detected', matches: metaResponse.matches, partialSections: { ...preservedUsableSections } };
+      }
+      lastError = createKieBatchError('KIE AI meta response detected', { batchName: batch.batchName, failedSections: batch.sections.filter((section) => !preservedUsableSections[section]) });
+      lastError.partialSections = { ...preservedUsableSections };
       retryReason = metaResponse.matches.join(', ') || 'meta_response_detected';
       if (attempt < maxAttempts) {
         await persistBatchProgress(order, batch.batchName, 'kie_batch_retry', { attempt, reason: retryReason });
@@ -4691,6 +4810,7 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
     console.log('[KIE AI BATCH] passed sections', JSON.stringify(validation.passedSections || []));
     console.log('[KIE AI BATCH] failed sections', JSON.stringify(validation.failedSections || []));
     console.log('[KIE AI BATCH] validation result', JSON.stringify(validation));
+    rememberUsableSections(normalized, validation);
     if (isCompatibilityBatch) {
       console.log('[KIE AI COMPATIBILITY] parsed keys', JSON.stringify(validation.foundSectionKeys.length ? validation.foundSectionKeys : Object.keys(normalized)));
       console.log('[KIE AI COMPATIBILITY] section length', JSON.stringify(validation.sectionLengths));
@@ -4722,10 +4842,24 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
     if (shouldSplitBatchOnValidation(batch, validation)) {
       return { ok: false, splitRecommended: true, splitReason: retryReason, validation, partialSections: normalized };
     }
+    if (Object.keys(preservedUsableSections).length === batch.sections.length) {
+      console.log('[KIE AI BATCH] recovered from earlier usable attempt', JSON.stringify({ batchName: batch.batchName, preservedSections: Object.keys(preservedUsableSections) }));
+      return {
+        ok: true,
+        sections: preservedUsableSections,
+        validation: {
+          ok: true,
+          passedSections: Object.keys(preservedUsableSections),
+          failedSections: [],
+          recoverableSections: []
+        }
+      };
+    }
     lastError = createKieBatchError('KIE AI batch validation failed', {
       batchName: batch.batchName,
-      failedSections: Array.isArray(validation.failedSections) ? Array.from(new Set(validation.failedSections.filter(Boolean))) : []
+      failedSections: Array.isArray(validation.failedSections) ? Array.from(new Set(validation.failedSections.filter(Boolean))).filter((section) => !preservedUsableSections[section]) : []
     });
+    lastError.partialSections = { ...(lastError.partialSections || {}), ...preservedUsableSections };
     if (isCompatibilityBatch) {
       console.log('[KIE AI COMPATIBILITY] failed', JSON.stringify({ attempt, reason: retryReason, willRetry: false }));
     }
@@ -5142,15 +5276,53 @@ async function generateAiSections(promptPayload, order = null) {
           : [];
       }
       if (!Number.isFinite(Number(error.progress))) error.progress = getBatchProgress(firstFailure.batch.batchName);
-      console.log('[KIE AI FINAL] batch failure fallback', JSON.stringify({
+      const normalizedFailure = normalizeBatchFailureState({
         batchName: firstFailure.batch.batchName,
         failedSections: Array.isArray(error.failedSections) ? error.failedSections : [],
+        finalSections,
+        promptPayload
+      });
+      if (Object.keys(normalizedFailure.repairedSections || {}).length) {
+        Object.assign(finalSections, normalizedFailure.repairedSections);
+      }
+      console.log('[KIE AI FINAL] batch failure normalized', JSON.stringify({
+        batchName: normalizedFailure.batchName,
+        recoverableSections: normalizedFailure.recoverableSections,
+        usableRecoveredSections: normalizedFailure.usableRecoveredSections,
+        unrecoveredFailedSections: normalizedFailure.unrecoveredFailedSections,
+        serverSupplementedSections: normalizedFailure.serverSupplementedSections,
+        qualityStatus: normalizedFailure.qualityStatus
+      }));
+      if (!normalizedFailure.unrecoveredFailedSections.length) {
+        console.log('[KIE AI FINAL] batch recovered_success', JSON.stringify({
+          batchName: firstFailure.batch.batchName,
+          passedSections: firstFailure.batch.sections.filter((section) => !normalizedFailure.recoverableSections.includes(section)),
+          recoverableSections: normalizedFailure.recoverableSections,
+          usableRecoveredSections: normalizedFailure.usableRecoveredSections,
+          serverSupplementedSections: normalizedFailure.serverSupplementedSections,
+          failedSections: [],
+          unrecoveredFailedSections: []
+        }));
+        if (order) {
+          await persistBatchProgress(order, firstFailure.batch.batchName, 'kie_batch_recovered', {
+            recoverableSections: normalizedFailure.recoverableSections,
+            usableRecoveredSections: normalizedFailure.usableRecoveredSections,
+            serverSupplementedSections: normalizedFailure.serverSupplementedSections,
+            unrecoveredFailedSections: normalizedFailure.unrecoveredFailedSections,
+            qualityStatus: normalizedFailure.qualityStatus
+          });
+        }
+        continue;
+      }
+      console.log('[KIE AI FINAL] batch failure fallback', JSON.stringify({
+        batchName: firstFailure.batch.batchName,
+        failedSections: normalizedFailure.unrecoveredFailedSections,
         message: error.message || 'unknown'
       }));
       if (!CONFIG.allowLocalFallback) {
         const fatal = createKieBatchError('KIE AI batch generation failed after retries', {
           batchName: firstFailure.batch.batchName,
-          failedSections: Array.isArray(error.failedSections) ? error.failedSections : [],
+          failedSections: normalizedFailure.unrecoveredFailedSections,
           progress: error.progress || getBatchProgress(firstFailure.batch.batchName)
         });
         fatal.partialSections = { ...finalSections };
@@ -5187,12 +5359,37 @@ async function generateAiSections(promptPayload, order = null) {
     return repairedFinalSections;
   }
   const failedSections = Array.isArray(finalValidation.failedSections) ? Array.from(new Set(finalValidation.failedSections.filter(Boolean))) : [];
-  console.log('[KIE AI FINAL] validation fallback', JSON.stringify({ failedSections, errors: finalValidation.errors || [], recoverableSections: finalValidation.recoverableSections || [] }));
+  const normalizedFinalFailure = normalizeBatchFailureState({
+    batchName: getPrimaryFailedBatchName(failedSections, 'kie_ai'),
+    failedSections,
+    finalSections: repairedFinalSections,
+    promptPayload
+  });
+  if (Object.keys(normalizedFinalFailure.repairedSections || {}).length) {
+    Object.assign(repairedFinalSections, normalizedFinalFailure.repairedSections);
+  }
+  console.log('[KIE AI FINAL] final failedSections recomputed', JSON.stringify({
+    failedSections,
+    recoverableSections: normalizedFinalFailure.recoverableSections,
+    usableRecoveredSections: normalizedFinalFailure.usableRecoveredSections,
+    serverSupplementedSections: normalizedFinalFailure.serverSupplementedSections,
+    unrecoveredFailedSections: normalizedFinalFailure.unrecoveredFailedSections,
+    qualityStatus: normalizedFinalFailure.qualityStatus
+  }));
+  if (!normalizedFinalFailure.unrecoveredFailedSections.length) {
+    console.log('[KIE AI FINAL] validation success after failure normalization', JSON.stringify({
+      failedSections: [],
+      recoverableSections: normalizedFinalFailure.recoverableSections,
+      serverSupplementedSections: normalizedFinalFailure.serverSupplementedSections
+    }));
+    return repairedFinalSections;
+  }
+  console.log('[KIE AI FINAL] validation fallback', JSON.stringify({ failedSections: normalizedFinalFailure.unrecoveredFailedSections, errors: finalValidation.errors || [], recoverableSections: finalValidation.recoverableSections || [] }));
   if (!CONFIG.allowLocalFallback) {
     const fatal = createKieBatchError('KIE AI final validation failed after retries', {
-      batchName: getPrimaryFailedBatchName(failedSections, 'kie_ai'),
-      failedSections,
-      progress: getBatchProgress(getPrimaryFailedBatchName(failedSections, 'kie_ai'))
+      batchName: getPrimaryFailedBatchName(normalizedFinalFailure.unrecoveredFailedSections, 'kie_ai'),
+      failedSections: normalizedFinalFailure.unrecoveredFailedSections,
+      progress: getBatchProgress(getPrimaryFailedBatchName(normalizedFinalFailure.unrecoveredFailedSections, 'kie_ai'))
     });
     fatal.partialSections = { ...repairedFinalSections };
     throw fatal;
