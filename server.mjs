@@ -873,7 +873,8 @@ async function generatePremiumReport(orderId) {
         ? error.partialSections
         : (order.artifacts?.partialAiSections && typeof order.artifacts.partialAiSections === 'object' ? order.artifacts.partialAiSections : {});
       const requiredSections = buildRequiredAiSections(Boolean(order.compatibilityRequested || hasPartnerCoreFields(order.partner)));
-      const allRequiredSectionsHaveText = requiredSections.every((section) => hasDeliverableSectionText(section, partialSections?.[section] || ''));
+      const allRequiredSectionsPresent = requiredSections.every((section) => Object.prototype.hasOwnProperty.call(partialSections || {}, section));
+      const allRequiredSectionsHaveText = requiredSections.every((section) => hasTrimmedSectionText(partialSections?.[section] || ''));
       const recoverableSections = Array.isArray(error.recoverableSections)
         ? Array.from(new Set(error.recoverableSections.filter(Boolean)))
         : Array.isArray(error.validationSummary?.recoverableSections)
@@ -889,8 +890,8 @@ async function generatePremiumReport(orderId) {
         : { failedSections, usableRecoveredSections: [], unrecoveredFailedSections: failedSections };
       const hasRecoverablePartialSections = Boolean(partialSections && Object.keys(partialSections).length);
       let downgradedToRecoverable = false;
-      if (failedStep === 'kie_ai' && hasRecoverablePartialSections && (recoveryState.unrecoveredFailedSections.length === 0 || (fatalSections.length === 0 && allRequiredSectionsHaveText))) {
-        const canFinalizeCompleted = fatalSections.length === 0 && allRequiredSectionsHaveText;
+      if (failedStep === 'kie_ai' && hasRecoverablePartialSections && (recoveryState.unrecoveredFailedSections.length === 0 || (fatalSections.length === 0 && allRequiredSectionsPresent && allRequiredSectionsHaveText))) {
+        const canFinalizeCompleted = fatalSections.length === 0 && allRequiredSectionsPresent && allRequiredSectionsHaveText;
         order.artifacts = order.artifacts || {};
         order.artifacts.partialAiSections = canFinalizeCompleted ? null : { ...partialSections };
         order.recoverableSections = recoverableSections.slice();
@@ -923,6 +924,7 @@ async function generatePremiumReport(orderId) {
           unrecoveredFailedSections: [],
           recoverableSections,
           fatalSections,
+          allRequiredSectionsPresent,
           allRequiredSectionsHaveText,
           completed: canFinalizeCompleted,
           message: error.message
@@ -3819,11 +3821,13 @@ function polishFinalReportSections(promptPayload, sections) {
   const polished = {};
   for (const [section, rawText] of Object.entries(sections || {})) {
     const normalizedSection = normalizeSectionKeyAlias(section);
+    const originalText = cleanSectionText(rawText);
     let output = polishSectionBody(promptPayload, normalizedSection, rawText);
     output = applyReportPostCorrections(promptPayload, output);
     output = formatSummaryBullets(output);
     if (normalizedSection !== '건강운') output = stripHealthDisclaimerOutsideHealth(output);
     if (normalizedSection === '건강운') output = dedupeHealthDisclaimer(output);
+    output = mergeSectionTextConservatively(normalizedSection, originalText, output, { preserveRatio: 0.8, allowAppendShorter: true });
     polished[normalizedSection] = cleanSectionText(output);
   }
   if (polished['건강운']) polished['건강운'] = dedupeHealthDisclaimer(polished['건강운']);
@@ -3933,7 +3937,8 @@ function postProcessReportSections(promptPayload, sections) {
   const sourceSections = isNearFinalReport ? ensureRequiredSectionsPresent(promptPayload, sections) : (sections || {});
   for (const [section, rawText] of Object.entries(sourceSections || {})) {
     const normalizedSection = normalizeSectionKeyAlias(section);
-    let nextText = cleanSectionText(rawText);
+    const originalText = cleanSectionText(rawText);
+    let nextText = originalText;
     if (!nextText) {
       output[normalizedSection] = '';
       continue;
@@ -3959,6 +3964,7 @@ function postProcessReportSections(promptPayload, sections) {
     if (normalizedSection === '건강운') nextText = appendHealthDisclaimer(removeDuplicateHealthIntroAndDisclaimer(nextText));
     nextText = polishSectionBody(promptPayload, normalizedSection, nextText);
     nextText = fixHonorifics(applyReportPostCorrections(promptPayload, nextText));
+    nextText = mergeSectionTextConservatively(normalizedSection, originalText, nextText, { preserveRatio: 0.8, allowAppendShorter: true });
     output[normalizedSection] = cleanSectionText(nextText);
   }
   return orderReportSections(promptPayload, output);
@@ -4000,15 +4006,10 @@ function applySectionRepairResults(baseSections = {}, repairedSections = {}, tar
     const currentText = cleanSectionText(output?.[section] || '');
     const repairedText = cleanSectionText(repairedSections?.[section] || '');
     if (!repairedText) continue;
-    const currentLength = countVisibleChars(currentText);
-    const repairedLength = countVisibleChars(repairedText);
-    const shouldReplace = !currentText
-      || !isSectionReadyForDelivery(section, currentText)
-      || repairedLength > currentLength
-      || (!currentText.includes(repairedText) && repairedLength >= Math.floor(currentLength * 0.95));
-    if (!shouldReplace) continue;
-    output[section] = repairedText;
-    applied.push({ section, from: currentLength, to: repairedLength });
+    const mergedText = mergeSectionTextConservatively(section, currentText, repairedText, { preserveRatio: 0.8, allowAppendShorter: true });
+    if (!mergedText || mergedText === currentText) continue;
+    output[section] = mergedText;
+    applied.push({ section, from: countVisibleChars(currentText), to: countVisibleChars(mergedText), repairedLength: countVisibleChars(repairedText) });
   }
   if (label) console.log('[KIE AI REPAIR APPLY]', JSON.stringify({ label, applied }));
   return output;
@@ -4450,6 +4451,73 @@ function hasUsableSectionContent(section, text) {
   return inspectSectionUsability(section, text).usable;
 }
 
+function hasTrimmedSectionText(text) {
+  return Boolean(cleanSectionText(text));
+}
+
+function containsForbiddenInternalText(text) {
+  return /(api|json|system|model|data structure|raw|debug|missingfields|requiredfields|계산 확인 메모|fallback|prompt|engine|content-type|status\s*500|error|downloadurl|pdfpath|pdf|orderid|stack trace)/i.test(String(text || ''));
+}
+
+function appendDistinctParagraphs(baseText = '', additionText = '') {
+  const base = cleanSectionText(baseText);
+  const addition = cleanSectionText(additionText);
+  if (!addition) return base;
+  if (!base) return addition;
+  const paragraphs = splitParagraphs(addition).filter(Boolean);
+  const uniqueParagraphs = paragraphs.filter((paragraph) => {
+    const normalized = paragraph.replace(/\s+/g, ' ').trim();
+    if (!normalized) return false;
+    return !base.includes(normalized);
+  });
+  if (!uniqueParagraphs.length) return base;
+  return cleanSectionText([base, ...uniqueParagraphs].join('\n\n'));
+}
+
+function mergeSectionTextConservatively(section, currentText = '', candidateText = '', options = {}) {
+  const preserveRatio = Number.isFinite(Number(options.preserveRatio)) ? Math.max(0.5, Math.min(1, Number(options.preserveRatio))) : 0.8;
+  const allowAppendShorter = options.allowAppendShorter !== false;
+  const current = cleanSectionText(currentText);
+  const candidate = cleanSectionText(candidateText);
+  if (!candidate) return current;
+  if (!current) return candidate;
+
+  const currentUsability = inspectSectionUsability(section, current);
+  const candidateUsability = inspectSectionUsability(section, candidate);
+  const currentLength = currentUsability.length || countVisibleChars(current);
+  const candidateLength = candidateUsability.length || countVisibleChars(candidate);
+  const currentReady = isSectionReadyForDelivery(section, current);
+  const candidateReady = isSectionReadyForDelivery(section, candidate);
+  const currentForbidden = containsForbiddenInternalText(current) || currentUsability.metaResponse.detected || currentUsability.policyRefusal.detected;
+  const candidateForbidden = containsForbiddenInternalText(candidate) || candidateUsability.metaResponse.detected || candidateUsability.policyRefusal.detected;
+
+  if (candidateForbidden && !currentForbidden) return current;
+
+  const clearlyImproved = (candidateReady && !currentReady)
+    || (candidateUsability.usable && !currentUsability.usable)
+    || (currentForbidden && !candidateForbidden);
+
+  if (candidateLength >= currentLength) return candidate;
+
+  if (clearlyImproved && candidateLength >= Math.floor(currentLength * preserveRatio)) {
+    return candidate;
+  }
+
+  if (candidateLength < currentLength) {
+    if (allowAppendShorter && !candidateForbidden) {
+      const appended = appendDistinctParagraphs(current, candidate);
+      if (appended !== current) return appended;
+    }
+    return current;
+  }
+
+  if (candidateLength < Math.floor(currentLength * preserveRatio) && !clearlyImproved) {
+    return current;
+  }
+
+  return candidate;
+}
+
 const SOFT_REQUIRED_SECTION_MIN_CHARS = Object.freeze({
   '실천 조언': 400,
   '주의할 점': 400
@@ -4490,8 +4558,7 @@ function recalculateFailedSections(requiredSections = [], finalSections = {}, va
   return requiredSections.filter((section) => {
     const text = cleanSectionText(finalSections?.[section] || '');
     if (!text) return true;
-    if (severities[section] === VALIDATION_SEVERITY.FATAL) return true;
-    return !isSectionReadyForDelivery(section, text);
+    return severities[section] === VALIDATION_SEVERITY.FATAL;
   });
 }
 
@@ -5953,15 +6020,17 @@ function finalizeReportSections(promptPayload, sections, requiredSections) {
       enforceTotalLength: false,
       requireRawLength: false
     });
-    const allRequiredSectionsHaveText = requiredSections.every((section) => hasDeliverableSectionText(section, working?.[section] || ''));
+    const allRequiredSectionsPresent = requiredSections.every((section) => Object.prototype.hasOwnProperty.call(working || {}, section));
+    const allRequiredSectionsHaveText = requiredSections.every((section) => hasTrimmedSectionText(working?.[section] || ''));
     const fatalSections = Array.isArray(validation.fatalSections) ? validation.fatalSections : [];
-    const shouldComplete = fatalSections.length === 0 && allRequiredSectionsHaveText;
+    const shouldComplete = fatalSections.length === 0 && allRequiredSectionsPresent && allRequiredSectionsHaveText;
     const failedSections = shouldComplete ? [] : recalculateFailedSections(requiredSections, working, validation);
     logFinalSectionSnapshot(label, working, requiredSections, {
       failedSections,
       recoverableSections: validation.recoverableSections || [],
       fatalSections,
       validationOk: validation.ok,
+      allRequiredSectionsPresent,
       allRequiredSectionsHaveText,
       shouldComplete
     });
@@ -5972,10 +6041,11 @@ function finalizeReportSections(promptPayload, sections, requiredSections) {
       failedSections,
       recoverableSections: validation.recoverableSections || [],
       fatalSections,
+      allRequiredSectionsPresent,
       allRequiredSectionsHaveText,
       shouldComplete
     }));
-    return { validation, failedSections, allRequiredSectionsHaveText, shouldComplete };
+    return { validation, failedSections, allRequiredSectionsPresent, allRequiredSectionsHaveText, shouldComplete };
   };
 
   let state = validateCurrent('finalize:initial_validation');
