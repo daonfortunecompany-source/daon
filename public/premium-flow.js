@@ -87,7 +87,7 @@
       }
     }
 
-    const selectedGender = seedValue('gender', document.querySelector('input[name="gender"]:checked')?.value || '');
+    const selectedGender = normalizeGenderChoice(seedValue('gender', document.querySelector('input[name="gender"]:checked')?.value || ''));
     if (selectedGender && (force || !document.querySelector('input[name="premiumGender"]:checked'))) {
       const targetGender = document.querySelector(`input[name="premiumGender"][value="${selectedGender}"]`);
       if (targetGender) targetGender.checked = true;
@@ -149,6 +149,13 @@
     return raw;
   }
 
+  function normalizeGenderChoice(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (['male', 'm', 'man', 'boy', '남', '남자', '남성', '1'].includes(raw)) return 'male';
+    if (['female', 'f', 'woman', 'girl', '여', '여자', '여성', '2'].includes(raw)) return 'female';
+    return '';
+  }
+
   function buildPayload() {
     const product = currentProduct();
     const premiumTimeInput = document.getElementById('premiumTime');
@@ -159,7 +166,7 @@
     const normalizedPhone = normalizePhone(document.getElementById('premiumPhone')?.value || '');
     const applicant = {
       name: document.getElementById('premiumName').value.trim(),
-      gender: document.querySelector('input[name="premiumGender"]:checked')?.value || '',
+      gender: normalizeGenderChoice(document.querySelector('input[name="premiumGender"]:checked')?.value || ''),
       birthYear: cleanDigits(document.getElementById('premiumYear').value),
       birthMonth: cleanDigits(document.getElementById('premiumMonth').value),
       birthDay: cleanDigits(document.getElementById('premiumDay').value),
@@ -188,7 +195,7 @@
     if (payload.compatibilityRequested || isPartnerDataPresent()) {
       payload.partner = {
         name: document.getElementById('partnerName').value.trim(),
-        gender: document.querySelector('input[name="partnerGender"]:checked')?.value || '',
+        gender: normalizeGenderChoice(document.querySelector('input[name="partnerGender"]:checked')?.value || ''),
         birthYear: cleanDigits(document.getElementById('partnerYear').value),
         birthMonth: cleanDigits(document.getElementById('partnerMonth').value),
         birthDay: cleanDigits(document.getElementById('partnerDay').value),
@@ -204,7 +211,7 @@
 
   function validatePayload(payload) {
     const a = payload.applicant;
-    if (!a.name || !a.gender || !a.birthYear || !a.birthMonth || !a.birthDay) {
+    if (!a.name || !normalizeGenderChoice(a.gender) || !a.birthYear || !a.birthMonth || !a.birthDay) {
       throw new Error('이름, 성별, 생년월일은 필수입니다.');
     }
     if (!a.phone || !isValidKoreanMobilePhone(a.phone)) {
@@ -212,7 +219,7 @@
     }
     if (payload.compatibilityRequested) {
       const p = payload.partner || {};
-      const enoughPartner = p.name && p.gender && p.birthYear && p.birthMonth && p.birthDay;
+      const enoughPartner = p.name && normalizeGenderChoice(p.gender) && p.birthYear && p.birthMonth && p.birthDay;
       if (!enoughPartner) {
         throw new Error('2인 사주는 상대방 이름, 성별, 생년월일을 입력해 주세요.');
       }

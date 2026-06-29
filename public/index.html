@@ -2416,6 +2416,13 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
 
     const UNKNOWN_BIRTH_TIME_FALLBACK = Object.freeze({ hour: '12', minute: '00', label: '출생시간 미상' });
 
+    function normalizeGenderChoice(value) {
+      const raw = String(value || '').trim().toLowerCase();
+      if (['male', 'm', 'man', 'boy', '남', '남자', '남성', '1'].includes(raw)) return 'male';
+      if (['female', 'f', 'woman', 'girl', '여', '여자', '여성', '2'].includes(raw)) return 'female';
+      return '';
+    }
+
     function getFormPayload() {
       const year = cleanNumeric(document.getElementById('year')?.value, 4);
       const month = cleanNumeric(document.getElementById('month')?.value, 2);
@@ -2428,7 +2435,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       const birthHour = unknown ? UNKNOWN_BIRTH_TIME_FALLBACK.hour : selectedHour;
       const birthMinute = unknown ? UNKNOWN_BIRTH_TIME_FALLBACK.minute : selectedMinute;
       const calendarType = document.getElementById('calendarType').value;
-      const gender = document.querySelector('input[name="gender"]:checked')?.value || '';
+      const gender = normalizeGenderChoice(document.querySelector('input[name="gender"]:checked')?.value || '');
       const displayBirthTime = unknown
         ? UNKNOWN_BIRTH_TIME_FALLBACK.label
         : (birthHour && birthMinute ? `${birthHour}:${birthMinute}` : '');

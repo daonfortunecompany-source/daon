@@ -391,25 +391,6 @@
       word-break: keep-all;
     }
 
-    .report-summary-title {
-      margin: 2px 0 10px;
-      font-weight: 700;
-      color: #352c29;
-    }
-
-    .report-list {
-      margin: 2px 0 14px 0;
-      padding-left: 18px;
-      color: #4d4340;
-    }
-
-    .report-list li {
-      margin: 0 0 8px;
-      line-height: 1.85;
-      font-size: 15px;
-      word-break: keep-all;
-    }
-
     .report-copy-wrap {
       position: static;
       display: grid;
@@ -737,9 +718,6 @@
           ? '운성'
           : '에너지 리듬과 회복 패턴';
       }
-      if (title === '고민에 대한 조언' && /^현재 흐름에 대한 조언/.test(String(body || '').trim())) {
-        return '현재 흐름에 대한 조언';
-      }
       return title;
     }
 
@@ -765,7 +743,7 @@
       REPORT_SECTION_ORDER.forEach((title) => {
         const body = getReportSectionBody(sections, title);
         if (!body) return;
-        blocks.push(getReportSectionTitle(title, body, applicantName), normalizeInlineSummaryBullets(body), '');
+        blocks.push(getReportSectionTitle(title, body, applicantName), body, '');
       });
       return blocks.join('\n');
     }
@@ -813,52 +791,13 @@
     }
 
 
-    function normalizeInlineSummaryBullets(text) {
-      let output = String(text || '').replace(/•\s*/g, '- ');
-      const replacements = [
-        [/((?:[가-힣A-Za-z0-9\s]+님을 위한 핵심 정리|핵심 정리|대운 3줄 요약))\s*-\s*(강점|흐름):\s*([^\n]+?)\s*-\s*주의:\s*([^\n]+?)\s*-\s*실천:\s*([^\n]+)/g, '$1\n\n- $2: $3\n- 주의: $4\n- 실천: $5'],
-        [/((?:[가-힣A-Za-z0-9\s]+님을 위한 핵심 정리|핵심 정리|대운 3줄 요약))\s+(강점|흐름):\s*([^\n]+?)\s+주의:\s*([^\n]+?)\s+실천:\s*([^\n]+)/g, '$1\n\n- $2: $3\n- 주의: $4\n- 실천: $5'],
-        [/((?:[가-힣A-Za-z0-9\s]+님을 위한 핵심 정리|핵심 정리|대운 3줄 요약))\s*\n\s*(강점|흐름):\s*([^\n]+?)\s*\n\s*주의:\s*([^\n]+?)\s*\n\s*실천:\s*([^\n]+)/g, '$1\n\n- $2: $3\n- 주의: $4\n- 실천: $5']
-      ];
-      for (const [pattern, replacement] of replacements) output = output.replace(pattern, replacement);
-      output = output.replace(/\n(강점|흐름|주의|실천):\s*/g, '\n- $1: ');
-      return output;
-    }
-
     function renderHtmlParagraphs(text) {
-      const blocks = normalizeInlineSummaryBullets(text)
+      return String(text || '')
         .split(/\n{2,}/)
         .map((item) => item.trim())
-        .filter(Boolean);
-      const rendered = [];
-      for (let index = 0; index < blocks.length; index += 1) {
-        const block = blocks[index];
-        const lines = block.split(/\n/).map((item) => item.trim()).filter(Boolean);
-        if (!lines.length) continue;
-        const bulletLines = lines.filter((line) => /^-\s+/.test(line));
-        const nextBlock = blocks[index + 1] || '';
-        const nextLines = nextBlock.split(/\n/).map((item) => item.trim()).filter(Boolean);
-        const nextBulletLines = nextLines.filter((line) => /^-\s+/.test(line));
-        const isStandaloneSummaryTitle = lines.length === 1 && /(핵심 정리|3줄 요약)/.test(lines[0]) && nextBulletLines.length && nextBulletLines.length === nextLines.length;
-        if (isStandaloneSummaryTitle) {
-          rendered.push(`<p class="report-summary-title">${escapeHtml(lines[0])}</p><ul class="report-list">${nextBulletLines.map((line) => `<li>${escapeHtml(line.replace(/^-\s+/, ''))}</li>`).join('')}</ul>`);
-          index += 1;
-          continue;
-        }
-        if (bulletLines.length && bulletLines.length === lines.length) {
-          rendered.push(`<ul class="report-list">${bulletLines.map((line) => `<li>${escapeHtml(line.replace(/^-\s+/, ''))}</li>`).join('')}</ul>`);
-          continue;
-        }
-        if (bulletLines.length && !/^-\s+/.test(lines[0])) {
-          const introLines = lines.slice(0, lines.length - bulletLines.length);
-          const introClass = /(핵심 정리|3줄 요약)/.test(introLines.join(' ')) ? ' class="report-summary-title"' : '';
-          rendered.push(`<p${introClass}>${escapeHtml(introLines.join('\n')).replace(/\n/g, '<br>')}</p><ul class="report-list">${bulletLines.map((line) => `<li>${escapeHtml(line.replace(/^-\s+/, ''))}</li>`).join('')}</ul>`);
-          continue;
-        }
-        const paragraphClass = /(핵심 정리|3줄 요약)/.test(lines.join(' ')) ? ' class="report-summary-title"' : '';
-        rendered.push(`<p${paragraphClass}>${escapeHtml(lines.join('\n')).replace(/\n/g, '<br>')}</p>`);
-      }
-      return rendered.join('');
+        .filter(Boolean)
+        .map((item) => `<p>${escapeHtml(item).replace(/\n/g, '<br>')}</p>`)
+        .join('');
     }
 
     function renderHtmlReport(data) {
@@ -1143,6 +1082,5 @@
     });
     poll();
   </script>
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
