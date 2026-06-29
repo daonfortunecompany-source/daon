@@ -517,7 +517,8 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
   if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' });
 
   const publicStatus = getPublicOrderStatus(order.status);
-  const canDeliverHtml = publicStatus === 'completed' && order.runtimeReport && !order.runtimeReport.deliveredAt;
+  const hasRuntimeSections = Boolean(order.runtimeReport?.sections && Object.keys(order.runtimeReport.sections || {}).length);
+  const canDeliverHtml = publicStatus === 'completed' && hasRuntimeSections;
   const deliveredSections = canDeliverHtml ? cloneRuntimeOrder(order.runtimeReport.sections || {}) : null;
   const payload = {
     orderId: order.id,
@@ -548,11 +549,6 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
     createdAt: order.createdAt,
     updatedAt: order.updatedAt
   };
-  if (canDeliverHtml) {
-    order.runtimeReport.deliveredAt = new Date().toISOString();
-    order.runtimeReport.sections = null;
-    await saveOrder(order);
-  }
   res.json(payload);
 });
 
@@ -3324,12 +3320,15 @@ function postProcessReportSections(promptPayload, sections) {
 function buildSectionRepairFallback(promptPayload, section, currentText = '', reason = '') {
   const cleaned = cleanSectionText(currentText);
   const fallbackBase = buildMissingSectionFallback(promptPayload, section);
+  const qualitySupplement = buildSectionQualitySupplement(promptPayload, section);
   let candidate = cleaned ? removeRepeatedSentencesFromText(cleaned, new Map(), { threshold: 2 }) : '';
   candidate = cleanSectionText(candidate);
-  if (!candidate) candidate = fallbackBase;
+  if (!candidate) candidate = cleanSectionText([fallbackBase, qualitySupplement].filter(Boolean).join('\n\n')) || fallbackBase;
   if (candidate && countVisibleChars(candidate) < getSectionMinVisibleChars(section)) {
-    const supplement = fallbackBase && fallbackBase !== candidate ? `\n\n${fallbackBase}` : '';
-    candidate = `${candidate}${supplement}`.trim();
+    const extraParts = [];
+    if (fallbackBase && fallbackBase !== candidate) extraParts.push(fallbackBase);
+    if (qualitySupplement && !candidate.includes(qualitySupplement)) extraParts.push(qualitySupplement);
+    candidate = cleanSectionText([candidate, ...extraParts].filter(Boolean).join('\n\n'));
   }
   const processed = postProcessReportSections(promptPayload, { [section]: candidate || fallbackBase });
   const nextText = processed?.[section] || cleanSectionText(candidate || fallbackBase);
@@ -3618,7 +3617,11 @@ const META_RESPONSE_PHRASES = [
   '제공된 지시에는',
   '다음과 같이 나누어',
   '죄송합니다',
-  '작성할 수 없습니다'
+  '작성할 수 없습니다',
+  '제공된 정보가 부족합니다',
+  '요청하신 형식의 내용을 그대로 작성해 드릴 수는 없습니다',
+  '근거 없이 단정',
+  '죄송하지만'
 ];
 
 const KIE_POLICY_REFUSAL_PHRASES = [
@@ -3630,6 +3633,9 @@ const KIE_POLICY_REFUSAL_PHRASES = [
   '성공 가능성',
   '예측할 수 없습니다',
   '제공된 정보만으로',
+  '제공된 정보가 부족합니다',
+  '요청하신 형식의 내용을 그대로 작성해 드릴 수는 없습니다',
+  '근거 없이 단정',
   '운세나 사업 성공',
   '상세한 사주 해석',
   '미래를 예측',
@@ -3745,6 +3751,35 @@ function detectMetaResponseText(text) {
     detected: matches.length > 0,
     matches
   };
+}
+
+function inspectSectionUsability(section, text) {
+  const cleaned = cleanSectionText(text);
+  const length = countVisibleChars(cleaned);
+  const paragraphs = countMeaningfulParagraphs(cleaned);
+  const metaResponse = detectMetaResponseText(cleaned);
+  const policyRefusal = detectKiePolicyRefusal(cleaned);
+  const minLength = section === '직업운' ? 600 : getSectionMinVisibleChars(section);
+  const minParagraphs = section === '직업운' ? 4 : getSectionMinParagraphs(section);
+  return {
+    usable: Boolean(cleaned) && length >= minLength && paragraphs >= minParagraphs && !metaResponse.detected && !policyRefusal.detected,
+    text: cleaned,
+    length,
+    paragraphs,
+    minLength,
+    minParagraphs,
+    metaResponse,
+    policyRefusal
+  };
+}
+
+function hasUsableSectionContent(section, text) {
+  return inspectSectionUsability(section, text).usable;
+}
+
+function isRecoverableLifeSectionValidationError(section, label = '') {
+  if (!['재물운', '직업운', '애정운', '자녀운', '건강운'].includes(String(section || ''))) return false;
+  return /(핵심 항목 부족|도입문 중복|참고 문구 중복)/.test(String(label || ''));
 }
 
 function isAcceptedJsonDetectedFormat(format = '') {
@@ -3907,6 +3942,7 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
   const requireRawLength = options.requireRawLength === true;
   const requireJsonOnly = options.requireJsonOnly === true;
   const errors = [];
+  const warnings = [];
   const sectionErrors = Object.fromEntries(requiredSections.map((key) => [key, []]));
   if (requireJsonOnly && !isAcceptedJsonDetectedFormat(meta.detectedFormat || '')) errors.push('json_only_response_required');
   const paragraphCounts = {};
@@ -3959,11 +3995,10 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
       }
     }
     if (key === '직업운') {
-      const checks = [/(환경|업무)/, /(피해야|맞지 않는)/, /(강점)/, /(이직|전환)/, /(기획|운영|관리|데이터 정리|교육|상담|행정|품질관리|프로젝트 매니징)/];
-      if (checks.filter((regex) => regex.test(text)).length < 5) {
-        sectionErrors[key].push('직업운 핵심 항목 부족');
-        errors.push('직업운 핵심 항목 부족');
-      }
+      const checks = [/(직업적 성향|일하는 방식|역할이 분명한 조직|기준이 명확한 환경)/, /(업무 환경|환경|협업 구조|조직)/, /(강점|성장 가능성|전문성을 꾸준히 쌓는 방식)/, /(주의|피해야|맞지 않는|책임을 혼자 떠안지 않는 것이 중요)/, /(협업|도움|함께 일|커리어 조언|이직|전환)/];
+      const matched = checks.filter((regex) => regex.test(text)).length;
+      const careerUsable = length >= 600 && paragraphs >= 4;
+      if (matched < 4 && careerUsable) warnings.push('직업운 핵심 항목 일부 부족 - 생성 본문 사용');
     }
     if (key === '애정운') {
       const checks = [/(기준)/, /(상대|유형)/, /(조심|피로)/, /(감정 표현|표현)/, /(연애|결혼|현실)/];
@@ -4008,6 +4043,11 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
       sectionErrors[key].push('메타 응답 포함');
       errors.push(`${key} 메타 응답 포함`);
     }
+    const policyRefusal = detectKiePolicyRefusal(text);
+    if (policyRefusal.detected) {
+      sectionErrors[key].push('거절문 포함');
+      errors.push(`${key} 거절문 포함`);
+    }
     if (/(님\s+님|님님)/.test(text)) {
       sectionErrors[key].push('중복 호칭 포함');
       errors.push(`${key} 중복 호칭 포함`);
@@ -4026,12 +4066,34 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
     const errorIndex = errors.indexOf(errorLabel);
     if (errorIndex >= 0) errors.splice(errorIndex, 1);
   }
+  for (const key of requiredSections) {
+    if (!sectionErrors[key]?.length) continue;
+    const usability = inspectSectionUsability(key, sections?.[key] || '');
+    if (!usability.usable) continue;
+    const recoverable = sectionErrors[key].filter((label) => isRecoverableLifeSectionValidationError(key, label));
+    if (!recoverable.length) continue;
+    sectionErrors[key] = sectionErrors[key].filter((label) => !recoverable.includes(label));
+    for (const label of recoverable) {
+      const variants = [label, `${key} ${label}`];
+      for (const variant of variants) {
+        let index = errors.indexOf(variant);
+        while (index >= 0) {
+          errors.splice(index, 1);
+          index = errors.indexOf(variant);
+        }
+      }
+    }
+    if (recoverable.some((label) => /핵심 항목 부족/.test(label))) {
+      warnings.push(`${key} 핵심 항목 일부 부족 - 생성 본문 사용`);
+    } else {
+      warnings.push(`${key} 경미한 검증 이슈 - 생성 본문 사용`);
+    }
+  }
   if (requireRawLength && Number(meta.rawLength || 0) < 500) errors.push('raw_response_too_short_or_parse_failed');
   if (enforceTotalLength && totalLength < minimumTotal) errors.push('total_section_length_too_short');
   if (Object.values(sectionLengths).every((value) => Number(value || 0) === 0)) errors.push('all_sections_empty_parser_error');
   const repeatInspection = inspectRepeatedSentences(sections, { warningThreshold: 2, strictThreshold: 3 });
   const repeated = repeatInspection.critical;
-  const warnings = [];
   if (repeatInspection.warnings.length) warnings.push('같은 문장 반복 감지');
   if (repeatInspection.critical.length) warnings.push('동일 문장 과다 반복 섹션 후처리 필요');
   const passedSections = requiredSections.filter((key) => sectionErrors[key].length === 0);
@@ -4343,6 +4405,13 @@ function buildSingleSectionPromptGuide(section) {
     base.push('결혼/이별/성공/실패를 단정하지 말고, 운명론적 표현과 확정적 예언을 금지하세요.');
     base.push('사과문, 거절문, 안내문, 코드블록, 요청받지 않은 다른 key를 절대 쓰지 마세요.');
   }
+  if (section === '직업운') {
+    base.push('직업운에는 직업적 성향, 잘 맞는 업무 환경, 강점과 성장 가능성, 조심해야 할 업무 패턴, 협업 방식, 현실적인 커리어 조언을 자연스러운 문단 속에 반드시 포함하세요.');
+    base.push('위 항목명을 소제목으로 나눌 필요는 없지만, 6문단 이상 10문단 이하의 상담 문체로 작성하세요.');
+    base.push('점술적 단정 표현은 피하고 가능성이 있습니다, 도움이 될 수 있습니다, 참고하시면 좋습니다 같은 표현을 사용하세요.');
+    base.push('이 리포트는 자기이해와 엔터테인먼트 목적의 참고 자료이며 실제 직업 선택, 재무 판단, 의료 판단, 법률 판단을 대체하지 않는다는 취지를 자연스럽게 반영하세요.');
+    base.push('죄송하지만, 작성할 수 없습니다, 제공된 정보가 부족합니다, 요청하신 형식의 내용을 그대로 작성해 드릴 수는 없습니다 같은 메타 응답은 절대 쓰지 마세요.');
+  }
   return base.join(' ');
 }
 
@@ -4396,7 +4465,12 @@ function buildSectionSpecificPromptInstructions(sections, promptPayload = {}) {
     lines.push('재물운에는 돈이 들어오는 방식, 소비 패턴, 지출이 새는 지점, 저축/투자 주의점, 직업 수입 또는 부업 가능성, 올해 재물 관리 팁을 반드시 포함하고 최소 4문단 이상 작성하세요.');
   }
   if (sections.includes('직업운')) {
-    lines.push('직업운에는 잘 맞는 업무 환경, 피해야 할 업무 환경, 강점이 드러나는 역할, 이직/전환 시 확인할 기준, 기획·운영·관리·데이터 정리·교육·상담·행정·품질관리·프로젝트 매니징 같은 추천 직무 예시를 단정하지 않는 표현으로 포함하고 최소 4문단 이상 작성하세요.');
+    lines.push('직업운에는 반드시 직업적 성향, 잘 맞는 업무 환경, 강점과 성장 가능성, 조심해야 할 업무 패턴, 협업 방식, 현실적인 커리어 조언을 자연스러운 상담 문체로 포함하세요.');
+    lines.push('직업운은 항목명을 소제목으로 나눌 필요는 없지만 최소 6문단 이상 10문단 이하로 작성하고, 각 문단은 2~4문장 이내로 유지하세요.');
+    lines.push('역할이 분명한 조직, 기준이 명확한 환경, 협력과 도움을 주고받는 환경, 전문성을 꾸준히 쌓는 방식, 책임을 혼자 떠안지 않는 기준 같은 표현을 활용해도 좋으며, 정확한 키워드 반복보다 의미가 자연스럽게 전달되도록 작성하세요.');
+    lines.push('점술적 단정 표현은 피하고 가능성이 있습니다, 도움이 될 수 있습니다, 참고하시면 좋습니다 같은 표현을 사용하세요.');
+    lines.push('기획·운영·관리·데이터 정리·교육·상담·행정·품질관리·프로젝트 매니징 같은 역할 예시는 단정하지 않는 표현으로만 포함하고, 죄송하지만/작성할 수 없습니다/제공된 정보가 부족합니다 같은 메타 응답은 절대 쓰지 마세요.');
+    lines.push('이 리포트는 자기이해와 엔터테인먼트 목적의 참고 자료이며 실제 직업 선택, 재무 판단, 의료 판단, 법률 판단을 대체하지 않는다는 취지를 자연스럽게 반영하세요.');
   }
   if (sections.includes('애정운')) {
     lines.push('애정운에는 관계에서 중요하게 보는 기준, 잘 맞는 상대 유형, 조심해야 할 관계 패턴, 감정 표현 방식, 연애/결혼에서 현실적으로 점검할 부분을 포함하고 반드시 가능성 중심 표현만 사용하세요. 최소 4문단 이상 작성하세요.');
@@ -4717,12 +4791,16 @@ async function generateKieBatchOrSplit(promptPayload, batch, endpointPath, order
     const failedSections = Array.isArray(validation.failedSections)
       ? Array.from(new Set(validation.failedSections.filter(Boolean)))
       : [];
+    const usableSections = batch.sections.filter((section) => hasUsableSectionContent(section, partialSections?.[section] || ''));
+    const preservedSections = Array.from(new Set([...passedSections, ...usableSections]));
     const missingSections = batch.sections.filter((section) => !String(partialSections?.[section] || '').trim());
-    const regenTargets = failedSections.length ? failedSections : (missingSections.length ? missingSections : batch.sections);
-    const merged = Object.fromEntries(passedSections.map((section) => [section, partialSections[section]]));
-    console.log('[KIE AI BATCH] passed sections', JSON.stringify(passedSections));
+    const regenTargets = batch.sections.filter((section) => !preservedSections.includes(section) && (failedSections.includes(section) || missingSections.includes(section) || !String(partialSections?.[section] || '').trim()));
+    const merged = Object.fromEntries(preservedSections.map((section) => [section, partialSections[section]]));
+    console.log('[KIE AI BATCH] passed sections', JSON.stringify(preservedSections));
     console.log('[KIE AI BATCH] failed sections', JSON.stringify(regenTargets));
+    console.log('[KIE AI BATCH] usable partial sections', JSON.stringify(usableSections));
     console.log('[KIE AI BATCH] regenerate failed sections only', JSON.stringify({ batchName: batch.batchName, failedSections: regenTargets }));
+    if (!regenTargets.length) return merged;
     for (const section of regenTargets) {
       const singleBatch = { batchName: `${batch.batchName}:${section}`, sections: [section], parentBatchName: batch.batchName, singleSectionMode: true };
       let singleResult;
@@ -5092,33 +5170,60 @@ async function generateAiSections(promptPayload, order = null) {
           : [];
       }
       if (!Number.isFinite(Number(error.progress))) error.progress = getBatchProgress(firstFailure.batch.batchName);
+      const aggregatedFailedSections = Array.from(new Set(failures.flatMap(({ batch, error: batchError }) => {
+        const fromError = Array.isArray(batchError?.failedSections) && batchError.failedSections.length ? batchError.failedSections : [];
+        return fromError.length ? fromError : (Array.isArray(batch?.sections) ? batch.sections : []);
+      }).filter(Boolean)));
+      const usableRecoveredSections = aggregatedFailedSections.filter((section) => hasUsableSectionContent(section, finalSections?.[section] || ''));
+      const unrecoveredFailedSections = aggregatedFailedSections.filter((section) => !usableRecoveredSections.includes(section));
       console.log('[KIE AI FINAL] batch failure fallback', JSON.stringify({
         batchName: firstFailure.batch.batchName,
-        failedSections: Array.isArray(error.failedSections) ? error.failedSections : [],
+        failedSections: aggregatedFailedSections,
+        usableRecoveredSections,
+        unrecoveredFailedSections,
         message: error.message || 'unknown'
       }));
       if (!CONFIG.allowLocalFallback) {
         const fatal = createKieBatchError('KIE AI batch generation failed after retries', {
           batchName: firstFailure.batch.batchName,
-          failedSections: Array.isArray(error.failedSections) ? error.failedSections : [],
+          failedSections: aggregatedFailedSections,
           progress: error.progress || getBatchProgress(firstFailure.batch.batchName)
         });
         fatal.partialSections = { ...finalSections };
         throw fatal;
       }
-      return fallbackAiSections({
-        ...promptPayload,
-        applicant: promptPayload?.basicInfo || promptPayload?.applicant || {},
-        partner: promptPayload?.partnerInfo || promptPayload?.partner || null
-      });
+      if (unrecoveredFailedSections.length) {
+        Object.assign(finalSections, repairSectionsWithFallback(promptPayload, finalSections, unrecoveredFailedSections, 'wave_failure_local_fallback'));
+      }
+      Object.assign(finalSections, ensureRequiredSectionsPresent(promptPayload, finalSections));
+      if (order) {
+        order.artifacts = order.artifacts || {};
+        order.artifacts.partialAiSections = { ...finalSections };
+        order.logs.push(logLine('kie_wave_soft_recovered', {
+          batches: wave.map((batch) => batch.batchName),
+          usableRecoveredSections,
+          unrecoveredFailedSections
+        }));
+        await saveOrder(order);
+      }
+      continue;
     }
   }
 
   const requiredSections = buildRequiredAiSections(hasCompatibility);
-  const totalLength = requiredSections.reduce((sum, key) => sum + countVisibleChars(finalSections[key] || ''), 0);
-  console.log('[KIE AI FINAL] merged section keys', JSON.stringify(Object.keys(finalSections)));
+  const guardedSections = ensureRequiredSectionsPresent(promptPayload, finalSections);
+  const unusableSections = requiredSections.filter((section) => {
+    const value = guardedSections?.[section] || '';
+    if (!String(value || '').trim()) return true;
+    return detectMetaResponseText(value).detected || detectKiePolicyRefusal(value).detected;
+  });
+  const preparedFinalSections = unusableSections.length
+    ? repairSectionsWithFallback(promptPayload, guardedSections, unusableSections, 'pre_final_section_guard')
+    : guardedSections;
+  const totalLength = requiredSections.reduce((sum, key) => sum + countVisibleChars(preparedFinalSections[key] || ''), 0);
+  console.log('[KIE AI FINAL] merged section keys', JSON.stringify(Object.keys(preparedFinalSections)));
   console.log('[KIE AI FINAL] total length', JSON.stringify({ totalLength, requiredSections }));
-  const processedFinalSections = postProcessReportSections(promptPayload, finalSections);
+  const processedFinalSections = postProcessReportSections(promptPayload, preparedFinalSections);
   const finalValidation = validateSectionMap(processedFinalSections, promptPayload, {
     rawLength: totalLength,
     detectedFormat: 'merged_sections',
