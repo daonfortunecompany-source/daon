@@ -767,6 +767,21 @@
       return stripInlineFormatting(String(sections[title] || '').trim());
     }
 
+    function keepSingleSummaryBulletSet(text) {
+      const raw = String(text || '').trim();
+      if (!raw) return '';
+      const summaryPattern = /(핵심 정리|대운 3줄 요약)[^\n]*\n(?:-\s*(?:강점|흐름):[^\n]*\n){1,2}-\s*주의:[^\n]*\n-\s*실천:[^\n]*/g;
+      const matches = raw.match(summaryPattern);
+      if (!matches || matches.length <= 1) return raw;
+      const first = matches[0].trim();
+      let seen = false;
+      return raw.replace(summaryPattern, () => {
+        if (seen) return '';
+        seen = true;
+        return first;
+      }).replace(/\n{3,}/g, '\n\n').trim();
+    }
+
     function buildReportText(data) {
       const sections = data.reportSections || {};
       const applicant = data.applicant || {};
@@ -831,16 +846,28 @@
 
 
     function normalizeInlineSummaryBullets(text) {
-      let output = stripInlineFormatting(String(text || '')).replace(/•\s*/g, '- ');
+      let output = stripInlineFormatting(String(text || ''))
+        .replace(/•\s*/g, '- ')
+        .replace(/([가-힣A-Za-z0-9]+님)(일상(?:에서는|에서|은|에도|까지|과))/g, '$1 $2')
+        .replace(/(^|[\n.!?]\s*)건강운은\s+/g, '$1건강 측면에서는 ');
       const replacements = [
         [/((?:[가-힣A-Za-z0-9\s]+님을 위한 핵심 정리|핵심 정리|대운 3줄 요약))\s*-\s*(강점|흐름):\s*([^\n]+?)\s*-\s*주의:\s*([^\n]+?)\s*-\s*실천:\s*([^\n]+)/g, '$1\n\n- $2: $3\n- 주의: $4\n- 실천: $5'],
         [/((?:[가-힣A-Za-z0-9\s]+님을 위한 핵심 정리|핵심 정리|대운 3줄 요약))\s+(강점|흐름):\s*([^\n]+?)\s+주의:\s*([^\n]+?)\s+실천:\s*([^\n]+)/g, '$1\n\n- $2: $3\n- 주의: $4\n- 실천: $5'],
         [/((?:[가-힣A-Za-z0-9\s]+님을 위한 핵심 정리|핵심 정리|대운 3줄 요약))\s*\n\s*(강점|흐름):\s*([^\n]+?)\s*\n\s*주의:\s*([^\n]+?)\s*\n\s*실천:\s*([^\n]+)/g, '$1\n\n- $2: $3\n- 주의: $4\n- 실천: $5']
       ];
       for (const [pattern, replacement] of replacements) output = output.replace(pattern, replacement);
-      output = output.replace(/\n(강점|흐름|주의|실천):\s*/g, '\n- $1: ');
-      return output;
+      const labelPattern = '강점|흐름|주의|실천|핵심|조언';
+      output = output.replace(new RegExp(`\s+-\s*(${labelPattern}):\s*`, 'g'), '\n- $1: ');
+      output = output.replace(new RegExp(`(^|[^\n])\s+(${labelPattern}):\s*`, 'g'), (match, prefix, label) => `${prefix}\n- ${label}: `);
+      output = output.replace(new RegExp(`(^|\n)\s*(${labelPattern}):\s*`, 'g'), '$1- $2: ');
+      if (/^\s*자녀운\s*-\s*(강점|흐름|주의|실천|핵심|조언):/m.test(output)) {
+        output = output.replace(/^\s*자녀운\s*-\s*/m, '- ');
+        output = `자녀운은 실제 자녀와의 관계뿐 아니라 후배, 가족, 주변 사람을 돌보는 태도를 함께 살펴보는 항목입니다.\n\n${output.trim()}`;
+      }
+      output = keepSingleSummaryBulletSet(output);
+      return output.replace(/\n{3,}/g, '\n\n').trim();
     }
+
 
     function renderHtmlParagraphs(text) {
       const blocks = normalizeInlineSummaryBullets(text)
