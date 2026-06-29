@@ -2,1019 +2,368 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>리포트 생성 상태 | 다온사주</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Daon Premium Saju 리포트 상태</title>
   <style>
     :root {
-      --bg: #f8f5f0;
+      --bg: #faf6f1;
       --card: #fffdf9;
-      --line: #eadfd2;
-      --text: #352c29;
-      --muted: #6f625b;
-      --primary: #cf8f7a;
-      --primary-soft: #fff5f0;
-      --good: #7db4a5;
-      --shadow: 0 20px 40px rgba(95, 72, 56, .08);
-      --radius: 26px;
+      --line: #eadccf;
+      --text: #332924;
+      --sub: #6e6057;
+      --accent: #8b5e3c;
+      --accent-soft: #f7efe8;
+      --ok: #216e4f;
+      --ok-bg: #eaf7f0;
+      --warn: #8d5b00;
+      --warn-bg: #fff5dd;
+      --err: #9d2f2f;
+      --err-bg: #fdeaea;
+      --shadow: 0 18px 40px rgba(71, 44, 25, 0.08);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      background: linear-gradient(180deg, #f7f3ee 0%, #fdfaf6 100%);
-      color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif;
-      padding: 18px;
+      background: linear-gradient(180deg, #fffaf5 0%, var(--bg) 100%);
+      color: var(--text);
+      padding: 24px;
+    }
+    .wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      display: grid;
+      gap: 18px;
     }
     .card {
-      width: min(100%, 430px);
       background: var(--card);
       border: 1px solid var(--line);
-      border-radius: var(--radius);
+      border-radius: 24px;
+      padding: 22px;
       box-shadow: var(--shadow);
-      padding: 24px 20px;
     }
-    h1, h2, p { margin: 0; }
-    h1 { font-size: 26px; letter-spacing: -.04em; }
-    .sub { margin-top: 10px; color: var(--muted); line-height: 1.7; font-size: 14px; }
-
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 18px;
-      padding: 10px 14px;
-      border-radius: 999px;
-      background: var(--primary-soft);
-      border: 1px solid #f0ddd1;
-      color: #8b5d53;
-      font-weight: 800;
-      font-size: 13px;
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.25;
     }
-
-    .loading-panel {
-      margin-top: 18px;
-      border: 1px solid #f0e2d6;
-      border-radius: 22px;
-      background: linear-gradient(180deg, #fffaf6 0%, #fff 100%);
-      padding: 16px;
-      display: grid;
-      gap: 14px;
+    h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      line-height: 1.4;
     }
-
-    .loading-row {
+    p {
+      margin: 0;
+      line-height: 1.7;
+      color: var(--sub);
+    }
+    .top {
       display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 14px;
-      min-height: 58px;
-    }
-
-    .spinner {
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      border: 3px solid #f1ded5;
-      border-top-color: var(--primary);
-      animation: spin 1s linear infinite;
-      flex: 0 0 auto;
-    }
-
-    .loading-copy {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-weight: 800;
-      color: #6d5247;
-      font-size: 15px;
-      letter-spacing: -.02em;
-    }
-
-    .loading-copy .base {
-      animation: breathe 1.6s ease-in-out infinite;
-    }
-
-    .loading-dots {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      min-width: 24px;
-    }
-
-    .loading-dots span {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--primary);
-      opacity: .3;
-      animation: dotPulse 1.2s ease-in-out infinite;
-    }
-
-    .loading-dots span:nth-child(2) { animation-delay: .18s; }
-    .loading-dots span:nth-child(3) { animation-delay: .36s; }
-
-    .progress-shell {
-      display: grid;
-      gap: 8px;
-    }
-
-    .progress-meta {
-      display: flex;
-      align-items: center;
       justify-content: space-between;
-      font-size: 12px;
-      color: var(--muted);
-      font-weight: 700;
+      gap: 16px;
+      align-items: flex-start;
+      flex-wrap: wrap;
     }
-
-    .progress-track {
-      width: 100%;
-      height: 10px;
-      border-radius: 999px;
-      background: #f2e8df;
-      overflow: hidden;
-      position: relative;
-    }
-
-    .progress-bar {
-      height: 100%;
-      width: 0%;
-      border-radius: inherit;
-      background: linear-gradient(90deg, #e3a694 0%, #cf8f7a 45%, #b97669 100%);
-      transition: width .45s ease;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .progress-bar::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
-      transform: translateX(-100%);
-      animation: shimmer 1.8s linear infinite;
-    }
-
-    .timeline {
-      margin-top: 18px;
-      display: grid;
-      gap: 12px;
-    }
-
-    .timeline-item {
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      background: #fff;
-      padding: 14px 14px;
-      position: relative;
-      overflow: hidden;
-      transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease, background .25s ease;
-    }
-
-    .timeline-item::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(135deg, rgba(207,143,122,.08), rgba(255,255,255,0));
-      opacity: 0;
-      transition: opacity .25s ease;
-      pointer-events: none;
-    }
-
-    .timeline-item strong { display: block; font-size: 14px; margin-bottom: 6px; }
-    .timeline-item span { color: var(--muted); font-size: 13px; line-height: 1.65; display: block; }
-
-    .step-kicker {
+    .badge {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      margin-bottom: 8px;
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: .02em;
-      color: #927160;
-      text-transform: uppercase;
-    }
-
-    .step-kicker i {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #d8c8bc;
-      display: inline-block;
-      flex: 0 0 auto;
-    }
-
-    .timeline-item.active {
-      border-color: #e1b8a9;
-      background: linear-gradient(180deg, #fff8f3 0%, #fff 100%);
-      box-shadow: 0 14px 28px rgba(207, 143, 122, .14);
-      transform: translateY(-1px);
-    }
-
-    .timeline-item.active::after {
-      opacity: 1;
-      animation: stepGlow 1.6s ease-in-out infinite;
-    }
-
-    .timeline-item.active .step-kicker i {
-      background: var(--primary);
-      box-shadow: 0 0 0 6px rgba(207,143,122,.12);
-      animation: pulseDot 1.3s ease-in-out infinite;
-    }
-
-    .timeline-item.done {
-      border-color: #d5e8e1;
-      background: linear-gradient(180deg, #f6fbf9 0%, #fff 100%);
-    }
-
-    .timeline-item.done .step-kicker {
-      color: #538170;
-    }
-
-    .timeline-item.done .step-kicker i {
-      background: var(--good);
-      box-shadow: 0 0 0 6px rgba(125,180,165,.12);
-    }
-
-    .timeline-item.pending .step-kicker i {
-      background: #d8c8bc;
-      box-shadow: none;
-    }
-
-    .detail {
-      margin-top: 16px;
-      padding: 14px;
-      border-radius: 18px;
-      background: #f8f3ee;
-      color: var(--muted);
-      line-height: 1.7;
-      font-size: 13px;
-      white-space: pre-line;
-    }
-
-    [hidden] { display: none !important; }
-
-    .meta-box {
-      margin-top: 14px;
-      padding: 14px;
-      border-radius: 18px;
-      border: 1px solid var(--line);
-      background: #fffaf6;
-      display: grid;
       gap: 8px;
-    }
-
-    .meta-box strong { font-size: 13px; }
-    .meta-box code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      background: rgba(255,255,255,.8);
-      padding: 2px 6px;
-      border-radius: 8px;
-      color: #6d5247;
-    }
-
-    .meta-box .meta-note,
-    .report-meta-card .meta-note {
-      color: #8a6f61;
-      font-size: 12px;
-      line-height: 1.65;
-    }
-
-    .lookup-note {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.6;
-    }
-
-    .actions {
-      margin-top: 22px;
-      display: grid;
-      gap: 10px;
-    }
-
-    .btn {
-      appearance: none;
-      border: 0;
-      border-radius: 18px;
-      min-height: 52px;
-      font-size: 15px;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
       font-weight: 800;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      text-decoration: none;
+      white-space: nowrap;
     }
-
-    .btn-primary {
-      background: linear-gradient(135deg, var(--primary), #e2a38e);
-      color: white;
-      box-shadow: 0 12px 24px rgba(207,143,122,.22);
-    }
-
-    .btn-soft {
-      background: rgba(255,255,255,.86);
-      color: var(--text);
-      border: 1px solid var(--line);
-    }
-
-    .is-final .spinner,
-    .is-final .loading-dots,
-    .is-final .progress-bar::after {
-      animation: none;
-    }
-
-    .is-final .spinner {
-      border-color: #d7ebe4;
-      border-top-color: var(--good);
-    }
-
-    .is-failed .loading-copy,
-    .is-failed .status-badge {
-      color: #9a4b43;
-    }
-
-    .report-view {
+    .badge.ok { background: var(--ok-bg); color: var(--ok); }
+    .badge.warn { background: var(--warn-bg); color: var(--warn); }
+    .badge.err { background: var(--err-bg); color: var(--err); }
+    .badge.neutral { background: var(--accent-soft); color: var(--accent); }
+    .kv {
       display: grid;
-      gap: 14px;
-      margin-top: 20px;
-      padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-    }
-
-    .report-notice {
-      background: #fff7f1;
-      border: 1px solid #f0ddd1;
-      border-radius: 18px;
-      padding: 16px;
-      color: #6f5b50;
-      line-height: 1.7;
+      grid-template-columns: 120px 1fr;
+      gap: 10px 14px;
+      margin-top: 16px;
       font-size: 14px;
     }
-
-    .report-meta-card,
-    .report-card {
-      background: #fffdfa;
-      border: 1px solid #eadfd2;
-      border-radius: 20px;
-      padding: 18px 16px;
-      box-shadow: 0 8px 26px rgba(53, 44, 41, 0.06);
+    .kv dt { color: var(--sub); font-weight: 700; }
+    .kv dd { margin: 0; color: var(--text); word-break: break-all; }
+    .note {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: var(--accent-soft);
+      color: var(--text);
+      line-height: 1.65;
+      font-size: 14px;
     }
-
-    .report-meta-card {
+    .grid {
       display: grid;
-      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
     }
-
-    .report-meta-card h2 {
-      margin: 0;
-      font-size: 18px;
-      line-height: 1.35;
-      color: #352c29;
-    }
-
-    .report-card h2 {
-      margin: 0 0 10px;
-      font-size: 18px;
-      line-height: 1.35;
-      color: #352c29;
-    }
-
-    .report-card p {
-      margin: 0 0 12px;
-      line-height: 1.9;
-      font-size: 15px;
-      color: #4d4340;
-      word-break: keep-all;
-    }
-
-    .report-copy-wrap {
-      position: static;
-      display: grid;
-      gap: 10px;
-      margin-top: 12px;
-      padding-top: 4px;
-      padding-bottom: env(safe-area-inset-bottom, 0px);
-    }
-
-    .copy-feedback {
-      font-size: 13px;
-      color: #6f625b;
-      text-align: center;
-      min-height: 20px;
-    }
-
-    .copy-toast {
-      position: fixed;
-      left: 50%;
-      bottom: 92px;
-      transform: translateX(-50%) translateY(12px);
-      width: min(calc(100% - 32px), 380px);
-      padding: 12px 14px;
-      border-radius: 14px;
-      background: rgba(53, 44, 41, 0.92);
-      color: #fff;
-      font-size: 13px;
-      line-height: 1.6;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity .18s ease, transform .18s ease;
-      box-shadow: 0 16px 32px rgba(53, 44, 41, 0.18);
-      z-index: 30;
-    }
-
-    .copy-toast.show {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0);
-    }
-
-    .copy-toast.error {
-      background: rgba(154, 75, 67, 0.95);
-    }
-
-    .report-copy-btn {
-      width: 100%;
-      padding: 16px 18px;
-      border: 0;
+    .section-item {
+      border: 1px solid var(--line);
       border-radius: 18px;
-      background: linear-gradient(135deg, #cf8f7a, #b87562);
+      padding: 14px;
+      background: #fff;
+    }
+    .section-item strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+    .section-item small {
+      display: block;
+      color: var(--sub);
+      line-height: 1.55;
+    }
+    .section-item.pass { border-color: #cfe7da; background: #fbfffc; }
+    .section-item.recoverable { border-color: #f1dfb4; background: #fffdfa; }
+    .section-item.fatal { border-color: #f0c8c8; background: #fffafa; }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      padding: 0 16px;
+      border-radius: 14px;
+      border: 1px solid var(--text);
+      text-decoration: none;
       color: #fff;
-      font-size: 16px;
-      font-weight: 700;
-      box-shadow: 0 12px 28px rgba(207, 143, 122, 0.28);
+      background: var(--text);
+      font-weight: 800;
     }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+    .btn.secondary {
+      background: #fff;
+      color: var(--text);
+      border-color: var(--line);
     }
-    @keyframes dotPulse {
-      0%, 80%, 100% { transform: translateY(0); opacity: .25; }
-      40% { transform: translateY(-5px); opacity: 1; }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
     }
-    @keyframes breathe {
-      0%, 100% { opacity: .72; }
-      50% { opacity: 1; }
+    .hidden { display: none !important; }
+    .loading {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 2px solid #dbc8b7;
+      border-top-color: var(--accent);
+      animation: spin .9s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 8px;
     }
-    @keyframes shimmer {
-      to { transform: translateX(100%); }
-    }
-    @keyframes pulseDot {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.12); }
-    }
-    @keyframes stepGlow {
-      0%, 100% { opacity: .45; }
-      50% { opacity: .9; }
-    }
-
-    @media (max-width: 420px) {
-      .card {
-        padding: 22px 16px;
-      }
-      h1 { font-size: 24px; }
-      .loading-row {
-        gap: 10px;
-        min-height: 54px;
-      }
-      .loading-copy {
-        font-size: 14px;
-      }
-      .report-card {
-        padding: 16px 14px;
-      }
-      .report-card h2 {
-        font-size: 17px;
-      }
-      .report-card p {
-        font-size: 14px;
-        line-height: 1.85;
-      }
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <main class="card" id="statusCard">
-    <h1>리포트 제작 상태</h1>
-    <p class="sub">리포트 생성 중입니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요. 생성 완료 후 리포트가 현재 화면에 표시됩니다.</p>
-    <div class="status-badge" id="statusBadge">상태 확인 중...</div>
-
-    <section class="meta-box" id="receiptMetaBox" hidden></section>
-
-    <section class="loading-panel" id="loadingPanel" aria-label="리포트 생성 진행 상태">
-      <div class="loading-row">
-        <div class="spinner" aria-hidden="true"></div>
-        <div class="loading-copy" aria-live="polite">
-          <span class="base" id="loadingText">리포트 생성 중</span>
-          <span class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+  <div class="wrap">
+    <section class="card">
+      <div class="top">
+        <div>
+          <h1>프리미엄 리포트 생성 상태</h1>
+          <p id="summaryText">주문 상태를 확인하는 중입니다.</p>
         </div>
+        <div id="statusBadge" class="badge neutral"><span class="loading"></span>불러오는 중</div>
       </div>
-      <div class="progress-shell">
-        <div class="progress-meta">
-          <span id="progressLabel">진행 상태를 확인하고 있습니다.</span>
-          <span id="progressValue">0%</span>
-        </div>
-        <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+      <dl class="kv">
+        <dt>주문번호</dt>
+        <dd id="orderId" class="mono">-</dd>
+        <dt>현재 상태</dt>
+        <dd id="statusText">-</dd>
+        <dt>마지막 안내</dt>
+        <dd id="messageText">-</dd>
+      </dl>
+      <div id="infoBox" class="note">구조 보정이 가능한 섹션은 서버에서 자동 보정 후 완료 처리되며, 실제로 치명적인 실패가 있는 경우에만 실패로 표시됩니다.</div>
+      <div class="actions">
+        <a id="refreshLink" class="btn secondary" href="javascript:void(0)">새로고침</a>
+        <a id="homeLink" class="btn secondary" href="/">메인으로</a>
+        <a id="reportLink" class="btn hidden" href="#">리포트 보기</a>
       </div>
     </section>
 
-    <section class="timeline" id="timelinePanel">
-      <article class="timeline-item pending" id="stepPayment">
-        <div class="step-kicker"><i></i><span>Step 1</span></div>
-        <strong>1. 결제 확인</strong>
-        <span id="paymentStep">결제 승인 여부를 확인하고 있습니다.</span>
-      </article>
-      <article class="timeline-item pending" id="stepGenerating">
-        <div class="step-kicker"><i></i><span>Step 2</span></div>
-        <strong>2. 리포트 생성</strong>
-        <span id="generationStep">사주 원국과 해석을 정리하고 있습니다.</span>
-      </article>
-      <article class="timeline-item pending" id="stepDownload">
-        <div class="step-kicker"><i></i><span>Step 3</span></div>
-        <strong>3. 리포트 화면 표시</strong>
-        <span id="downloadStep">완료 후 모바일 리포트를 현재 화면에서 확인할 수 있습니다.</span>
-      </article>
+    <section class="card">
+      <h2>섹션별 처리 결과</h2>
+      <div id="sectionsGrid" class="grid"></div>
     </section>
 
-    <div class="detail" id="detailBox">주문 정보를 불러오는 중입니다.</div>
-
-    <div class="actions" id="actions">
-      <button class="btn btn-primary" id="refreshButton" type="button">다시 확인하기</button>
-      <a class="btn btn-soft" href="/">메인으로 돌아가기</a>
-    </div>
-
-    <section class="report-view" id="reportView" hidden></section>
-  </main>
+    <section class="card hidden" id="fatalCard">
+      <h2>확인이 필요한 치명적 실패</h2>
+      <p id="fatalText">-</p>
+    </section>
+  </div>
 
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const initialOrderId = params.get('orderId') || params.get('order');
-    let activeOrderId = initialOrderId;
-    const pageTitle = document.querySelector('h1');
-    const statusCard = document.getElementById('statusCard');
-    const statusSub = document.querySelector('.sub');
-    const statusBadge = document.getElementById('statusBadge');
-    const refreshButton = document.getElementById('refreshButton');
-    const paymentStep = document.getElementById('paymentStep');
-    const generationStep = document.getElementById('generationStep');
-    const downloadStep = document.getElementById('downloadStep');
-    const detailBox = document.getElementById('detailBox');
-    const actions = document.getElementById('actions');
-    const progressBar = document.getElementById('progressBar');
-    const progressLabel = document.getElementById('progressLabel');
-    const progressValue = document.getElementById('progressValue');
-    const loadingText = document.getElementById('loadingText');
-    const stepPayment = document.getElementById('stepPayment');
-    const stepGenerating = document.getElementById('stepGenerating');
-    const stepDownload = document.getElementById('stepDownload');
-    const receiptMetaBox = document.getElementById('receiptMetaBox');
-    const loadingPanel = document.getElementById('loadingPanel');
-    const timelinePanel = document.getElementById('timelinePanel');
-    const reportView = document.getElementById('reportView');
-    const REPORT_SECTION_ORDER = ['핵심 요약','사주 원국 해석','대운','세운','월운','운성','신살,귀인','십성','재물운','직업운','애정운','자녀운','건강운','실천 조언','주의할 점','고민에 대한 조언','관계/궁합 해석'];
-    const REPORT_CACHE_PREFIX = 'daon-runtime-report:';
-    let pollTimer = null;
-    let pollingStopped = false;
-    let requestInFlight = false;
-    let completedReportState = null;
-    let renderedCompletedOrderId = null;
+    const qs = new URLSearchParams(location.search);
+    const orderId = qs.get('orderId') || '';
+    const orderIdEl = document.getElementById('orderId');
+    const summaryTextEl = document.getElementById('summaryText');
+    const statusTextEl = document.getElementById('statusText');
+    const messageTextEl = document.getElementById('messageText');
+    const statusBadgeEl = document.getElementById('statusBadge');
+    const sectionsGridEl = document.getElementById('sectionsGrid');
+    const fatalCardEl = document.getElementById('fatalCard');
+    const fatalTextEl = document.getElementById('fatalText');
+    const reportLinkEl = document.getElementById('reportLink');
+    const refreshLinkEl = document.getElementById('refreshLink');
 
-    function cloneJson(value) {
-      return value ? JSON.parse(JSON.stringify(value)) : null;
-    }
-
-    function getReportCacheKey(orderId) {
-      return `${REPORT_CACHE_PREFIX}${orderId || ''}`;
-    }
-
-    function saveCompletedReport(orderId, sections) {
-      if (!orderId || !sections) return null;
-      const cloned = cloneJson(sections);
-      completedReportState = { orderId, sections: cloned };
-      try {
-        sessionStorage.setItem(getReportCacheKey(orderId), JSON.stringify(cloned));
-      } catch (error) {
-      }
-      return cloned;
-    }
-
-    function loadCompletedReport(orderId) {
-      if (!orderId) return null;
-      if (completedReportState?.orderId === orderId && completedReportState.sections) {
-        return cloneJson(completedReportState.sections);
-      }
-      try {
-        const raw = sessionStorage.getItem(getReportCacheKey(orderId));
-        const parsed = raw ? JSON.parse(raw) : null;
-        if (parsed) completedReportState = { orderId, sections: parsed };
-        return parsed;
-      } catch (error) {
-        return null;
-      }
-    }
-
-    function stopPolling() {
-      pollingStopped = true;
-      if (pollTimer) {
-        window.clearTimeout(pollTimer);
-        pollTimer = null;
-      }
-    }
-
-    function schedulePoll(delayMs) {
-      if (pollingStopped) return;
-      if (pollTimer) window.clearTimeout(pollTimer);
-      pollTimer = window.setTimeout(() => {
-        pollTimer = null;
-        poll();
-      }, delayMs);
-    }
-
-    function setStepState(target, state) {
-      if (!target) return;
-      target.classList.remove('pending', 'active', 'done');
-      target.classList.add(state);
-    }
-
-    function applyProgress(percent, label) {
-      const safe = Math.max(0, Math.min(100, Number(percent) || 0));
-      progressBar.style.width = `${safe}%`;
-      progressValue.textContent = `${safe}%`;
-      progressLabel.textContent = label;
-    }
+    orderIdEl.textContent = orderId || 'orderId 없음';
+    refreshLinkEl.addEventListener('click', () => loadStatus(true));
 
     function escapeHtml(value) {
-      return String(value || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
     }
 
-    function buildApplicantMetaMarkup(data) {
-      const applicant = data.applicant || {};
-      const rows = [];
-      if (applicant.name) rows.push(`<div>이름: ${escapeHtml(applicant.name)}</div>`);
-      if (applicant.birthDate) {
-        const calendarLabel = applicant.calendarType ? ` (${escapeHtml(applicant.calendarType)})` : '';
-        rows.push(`<div>생년월일: ${escapeHtml(applicant.birthDate)}${calendarLabel}</div>`);
-      }
-      if (applicant.displayBirthTime) rows.push(`<div>출생시간: ${escapeHtml(applicant.displayBirthTime)}</div>`);
-      return rows.join('');
+    function normalizeArray(value) {
+      return Array.isArray(value) ? value.filter(Boolean) : [];
     }
 
-    function renderReceiptMeta(data) {
-      if (!receiptMetaBox) return;
-      const expected = data.productType === 'compatibility' ? '2인 궁합 리포트는 분석 내용이 많아 몇 분 정도 소요될 수 있습니다.' : '1인 리포트는 보통 약 3~7분 정도 소요됩니다.';
-      receiptMetaBox.hidden = false;
-      receiptMetaBox.innerHTML = [
-        '<strong>리포트 접수 정보</strong>',
-        buildApplicantMetaMarkup(data),
-        data.reportNote ? `<div class="meta-note">${escapeHtml(data.reportNote)}</div>` : '',
-        `<div>예상 안내: ${expected}</div>`
-      ].filter(Boolean).join('');
-    }
-
-    function buildReportText(data) {
-      const sections = data.reportSections || {};
-      const applicant = data.applicant || {};
-      const blocks = [
-        '프리미엄 사주 리포트',
-        applicant.name ? `이름: ${applicant.name}` : '',
-        applicant.birthDate ? `생년월일: ${applicant.birthDate}${applicant.calendarType ? ` (${applicant.calendarType})` : ''}` : '',
-        applicant.displayBirthTime ? `출생시간: ${applicant.displayBirthTime}` : '',
-        data.reportNote || '',
-        ''
-      ].filter((line, index, array) => line || index === array.length - 1);
-      REPORT_SECTION_ORDER.forEach((title) => {
-        const body = String(sections[title] || '').trim();
-        if (!body) return;
-        blocks.push(title, body, '');
+    function deriveUiState(payload) {
+      const runtimeReport = payload && typeof payload.runtimeReport === 'object' ? payload.runtimeReport : {};
+      const sectionStates = runtimeReport && typeof runtimeReport.sectionStates === 'object' ? runtimeReport.sectionStates : {};
+      const rawFailedSections = normalizeArray(payload.failedSections);
+      const recoverableSections = normalizeArray(runtimeReport.recoverableSections);
+      const fatalFailedSections = rawFailedSections.filter((name) => {
+        const state = sectionStates[name];
+        return !state || state.severity === 'FATAL';
       });
-      return blocks.join('\n');
-    }
 
-    async function copyReportText(text) {
-      if (navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(text);
-          return true;
-        } catch (error) {
-        }
+      let status = String(payload.status || 'processing');
+      if (status === 'failed' && fatalFailedSections.length === 0) {
+        status = payload.report || payload.sections || runtimeReport.reportReady ? 'completed' : 'processing';
       }
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.setAttribute('readonly', 'readonly');
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(textarea);
-      if (!ok) throw new Error('copy_failed');
-      return true;
-    }
 
-    let copyToastTimer = null;
-    function showCopyToast(message, isError = false) {
-      let toast = document.getElementById('copyToast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'copyToast';
-        toast.className = 'copy-toast';
-        toast.setAttribute('role', 'status');
-        toast.setAttribute('aria-live', 'polite');
-        document.body.appendChild(toast);
-      }
-      toast.textContent = message;
-      toast.classList.toggle('error', Boolean(isError));
-      toast.classList.add('show');
-      if (copyToastTimer) window.clearTimeout(copyToastTimer);
-      copyToastTimer = window.setTimeout(() => {
-        toast.classList.remove('show');
-      }, 2600);
-    }
-
-    function getReportSectionTitle(title) {
-      return title === '신살,귀인' ? '신살·귀인' : title;
-    }
-
-    function renderHtmlParagraphs(text) {
-      return String(text || '')
-        .split(/\n{2,}/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .map((item) => `<p>${escapeHtml(item).replace(/\n/g, '<br>')}</p>`)
-        .join('');
-    }
-
-    function renderHtmlReport(data) {
-      if (!reportView) return;
-      const currentOrderId = data.orderId || activeOrderId || '';
-      if (renderedCompletedOrderId && renderedCompletedOrderId === currentOrderId && !reportView.hidden) return;
-      const sections = data.reportSections || {};
-      const cards = REPORT_SECTION_ORDER
-        .filter((title) => String(sections[title] || '').trim())
-        .map((title) => {
-          const paragraphs = renderHtmlParagraphs(sections[title] || '');
-          return `<article class="report-card"><h2>${escapeHtml(getReportSectionTitle(title))}</h2>${paragraphs}</article>`;
-        })
-        .join('');
-      reportView.hidden = false;
-      loadingPanel.hidden = true;
-      timelinePanel.hidden = true;
-      actions.hidden = true;
-      detailBox.hidden = true;
-      if (pageTitle) pageTitle.textContent = '프리미엄 사주 리포트';
-      document.title = '프리미엄 사주 리포트 | 다온사주';
-      if (statusSub) {
-        statusSub.textContent = '';
-        statusSub.hidden = true;
-      }
-      const applicantMetaMarkup = buildApplicantMetaMarkup(data);
-      const reportNoteMarkup = data.reportNote ? `<div class="report-notice">${escapeHtml(data.reportNote)}</div>` : '';
-      reportView.innerHTML = `
-        <article class="report-meta-card">
-          <h2>프리미엄 사주 리포트</h2>
-          ${applicantMetaMarkup}
-        </article>
-        ${reportNoteMarkup}
-        ${cards}
-        <div class="report-copy-wrap">
-          <button class="report-copy-btn" id="copyReportButton" type="button">전체 내용 복사하기</button>
-        </div>
-      `;
-      const copyButton = document.getElementById('copyReportButton');
-      const reportText = buildReportText(data);
-      renderedCompletedOrderId = currentOrderId;
-      copyButton?.addEventListener('click', async () => {
-        try {
-          await copyReportText(reportText);
-          showCopyToast('리포트 전체 내용이 복사되었습니다. 필요한 곳에 붙여넣어 보관해 주세요.');
-        } catch (error) {
-          showCopyToast('자동 복사에 실패했습니다. 내용을 직접 선택해 복사해 주세요.', true);
-        }
-      });
-    }
-
-    function renderStatus(data) {
-      const rawStatus = data.status || 'created';
-      const status = rawStatus === 'ready' ? 'completed' : rawStatus;
-      const currentStep = data.currentStep || null;
-      const progress = Number.isFinite(Number(data.progress)) ? Number(data.progress) : null;
-      if (statusSub) statusSub.hidden = false;
-      const currentOrderId = data.orderId || activeOrderId || '';
-      const cachedSections = data.reportSections || loadCompletedReport(currentOrderId);
-      const hasRenderableSections = Boolean(cachedSections && Object.keys(cachedSections).length);
-      const renderData = hasRenderableSections ? { ...data, reportSections: cachedSections } : data;
-      const completedButMissingSections = status === 'completed' && renderData.viewMode === 'html' && !hasRenderableSections;
-      renderReceiptMeta(renderData);
-      const statusMap = {
-        created: '주문 접수',
-        payment_pending: '결제 대기 중',
-        queued: '제작 접수 완료',
-        payment_success: '제작 접수 완료',
-        generating: '리포트 생성 중',
-        ready: '리포트 준비 완료',
-        completed: '리포트 준비 완료',
-        payment_cancelled: '결제 취소',
-        failed: '일시적 지연'
+      return {
+        status,
+        runtimeReport,
+        sectionStates,
+        recoverableSections,
+        fatalFailedSections
       };
-      statusBadge.textContent = statusMap[status] || '상태 확인 중';
-
-      const isCompleted = status === 'completed';
-      const isQueued = status === 'queued' || status === 'payment_success';
-      const isGenerating = isQueued || status === 'generating';
-      statusCard.classList.toggle('is-final', ['completed', 'payment_cancelled', 'failed'].includes(status));
-      statusCard.classList.toggle('is-failed', ['payment_cancelled', 'failed'].includes(status));
-      if (statusSub) {
-        statusSub.textContent = completedButMissingSections
-          ? '리포트 표시 중 문제가 발생했습니다. 페이지를 새로고침하지 말고 고객센터로 문의해 주세요.'
-          : isCompleted
-            ? (hasRenderableSections
-                ? '리포트 생성이 완료되었습니다.'
-                : '리포트 표시 중 문제가 발생했습니다. 고객센터로 문의해 주세요.')
-            : status === 'failed'
-              ? '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.'
-              : isQueued
-                ? '리포트 생성이 접수되었습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.'
-                : status === 'payment_cancelled'
-                  ? '결제가 취소되어 리포트 생성이 진행되지 않았습니다.'
-                  : (renderData.productType === 'compatibility'
-                      ? '리포트 생성 중입니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요. 2인 궁합 리포트는 분석 내용이 많아 몇 분 정도 소요될 수 있습니다.'
-                      : '리포트 생성 중입니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요. 생성 완료 후 리포트가 현재 화면에 표시됩니다.');
-      }
-
-      loadingText.textContent = completedButMissingSections
-        ? '리포트 표시 오류'
-        : isCompleted
-          ? '리포트 준비 완료'
-          : status === 'failed'
-            ? '리포트 생성을 다시 확인하고 있습니다'
-            : status === 'payment_cancelled'
-              ? '결제가 취소되었습니다'
-              : isQueued
-                ? '제작 접수 완료'
-                : isGenerating
-                  ? '리포트 생성 중'
-                  : '리포트 상태 확인 중';
-
-      if (['queued', 'payment_success', 'generating', 'completed'].includes(status)) {
-        paymentStep.textContent = status === 'queued' || status === 'payment_success'
-          ? '결제가 정상 확인되어 리포트 제작이 접수되었습니다.'
-          : '결제 성공이 확인되었습니다.';
-        setStepState(stepPayment, 'done');
-      } else if (status === 'payment_cancelled') {
-        paymentStep.textContent = '결제가 취소되어 리포트 제작이 진행되지 않았습니다.';
-        setStepState(stepPayment, 'pending');
-      } else {
-        paymentStep.textContent = '결제 승인 여부를 확인하고 있습니다.';
-        setStepState(stepPayment, status === 'payment_pending' ? 'active' : 'pending');
-      }
-
-      if (status === 'queued' || status === 'payment_success' || status === 'generating') {
-        generationStep.textContent = '사주 계산과 해석 문장을 정리하고 있습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.';
-        downloadStep.textContent = '완료 후 모바일 리포트를 현재 화면에서 확인할 수 있습니다.';
-        setStepState(stepGenerating, 'active');
-        setStepState(stepDownload, 'pending');
-      } else if (completedButMissingSections) {
-        generationStep.textContent = '리포트 생성은 완료되었지만 화면 표시 중 문제가 발생했습니다.';
-        downloadStep.textContent = '리포트 표시 중 문제가 발생했습니다. 페이지를 새로고침하지 말고 고객센터로 문의해 주세요.';
-        setStepState(stepGenerating, 'done');
-        setStepState(stepDownload, 'pending');
-      } else if (isCompleted) {
-        generationStep.textContent = hasRenderableSections ? '리포트 생성이 완료되었습니다.' : '리포트 생성은 완료되었지만 화면 표시를 다시 확인해 주세요.';
-        downloadStep.textContent = hasRenderableSections ? '전체 내용 복사하기 버튼으로 내용을 보관할 수 있습니다.' : '리포트 표시를 다시 확인해 주세요.';
-        setStepState(stepGenerating, 'done');
-        setStepState(stepDownload, 'done');
-      } else if (status === 'failed') {
-        generationStep.textContent = '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.';
-        downloadStep.textContent = '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.';
-        setStepState(stepGenerating, 'active');
-        setStepState(stepDownload, 'pending');
-      } else if (status === 'payment_cancelled') {
-        generationStep.textContent = '리포트 제작이 시작되지 않았습니다.';
-        downloadStep.textContent = '결제 완료 후에만 모바일 리포트가 준비됩니다.';
-        setStepState(stepGenerating, 'pending');
-        setStepState(stepDownload, 'pending');
-      } else {
-        generationStep.textContent = '리포트 제작을 준비하고 있습니다.';
-        downloadStep.textContent = '완료 후 모바일 리포트를 현재 화면에서 확인할 수 있습니다.';
-        setStepState(stepGenerating, 'pending');
-        setStepState(stepDownload, 'pending');
-      }
-
-      const stepProgressText = {
-        payment_pending: '결제 승인 여부를 확인하고 있습니다.',
-        queued: '리포트 제작이 접수되었습니다.',
-        payment_success: '리포트 제작이 접수되었습니다.',
-        generation: '리포트 제작을 시작하고 있습니다.',
-        mansae: '입력하신 생년월일시를 바탕으로 사주 정보를 계산하고 있습니다.',
-        saju: '사주 원국과 기본 해석 데이터를 정리하고 있습니다.',
-        period: '운의 흐름 데이터를 정리하고 있습니다.',
-        compatibility_api: '관계 참고 데이터를 정리하고 있습니다.',
-        kie_ai: '사주 원국과 운의 흐름을 바탕으로 해석 문장을 작성하고 있습니다.',
-        core: '핵심 요약과 원국 해석을 작성하고 있습니다.',
-        timing: '대운, 세운, 월운 흐름을 작성하고 있습니다.',
-        analysis: '재물, 직업, 성향 해석을 작성하고 있습니다.',
-        life: '생활 전반 조언을 작성하고 있습니다.',
-        concern: '고민에 대한 맞춤 조언을 작성하고 있습니다.',
-        compatibility: '관계 분석 문장을 작성하고 있습니다.',
-        html_render: '완성된 해석 내용을 모바일 리포트 화면으로 정리하고 있습니다.',
-        completed: '리포트가 준비되었습니다.'
-      };
-      const defaultProgress = status === 'payment_pending'
-        ? 5
-        : isQueued
-          ? 10
-          : status === 'generating'
-            ? 60
-            : isCompleted
-              ? 100
-              : status === 'failed'
-                ? 97
-                : status === 'payment_cancelled'
-                  ? 0
-                  : 0;
-      const progressText = completedButMissingSections
-        ? '리포트 표시 중 문제가 발생했습니다. 페이지를 새로고침하지 말고 고객센터로 문의해 주세요.'
-        : isCompleted
-          ? (hasRenderableSections
-              ? '리포트 생성이 완료되었습니다.'
-              : '리포트 표시를 다시 확인해 주세요.')
-          : status === 'failed'
-            ? '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.'
-            : status === 'payment_cancelled'
-              ? '결제가 취소되어 진행이 중단되었습니다.'
-              : (stepProgressText[currentStep || status] || '리포트 제작 상태를 확인하고 있습니다.');
-      applyProgress(progress ?? defaultProgress, progressText);
-
-      const updatedText = renderData.updatedAt ? `\n\n최근 갱신: ${new Date(renderData.updatedAt).toLocaleString('ko-KR')}` : '';
-      detailBox.hidden = false;
-      detailBox.textContent = completedButMissingSections
-        ? `리포트 표시 중 문제가 발생했습니다. 페이지를 새로고침하지 말고 고객센터로 문의해 주세요.${updatedText}`
-        : `${renderData.message || '리포트 상태를 계속 확인하고 있습니다.'}${updatedText}`;
-
-      if (isCompleted && renderData.viewMode === 'html' && hasRenderableSections) {
-        renderHtmlReport(renderData);
-      }
     }
 
-    async function poll() {
-      if (pollingStopped || requestInFlight) return;
-      if (!activeOrderId) {
-        statusBadge.textContent = '리포트 연결 필요';
-        receiptMetaBox.hidden = true;
-        loadingPanel.hidden = true;
-        timelinePanel.hidden = true;
-        refreshButton.hidden = true;
-        detailBox.textContent = '이 화면은 결제 완료 후 자동으로 연결되는 전용 리포트 페이지입니다.';
-        applyProgress(0, '정상적인 주문 연결이 필요합니다.');
+    function badgeSpec(status, fatalCount, recoverableCount) {
+      if (status === 'completed') {
+        return recoverableCount > 0
+          ? { cls: 'warn', text: '보정 후 완료' }
+          : { cls: 'ok', text: '완료' };
+      }
+      if (status === 'failed' && fatalCount > 0) return { cls: 'err', text: '치명적 실패' };
+      if (status === 'paid' || status === 'processing' || status === 'generating' || status === 'queued') return { cls: 'neutral', text: '생성 중' };
+      return { cls: 'neutral', text: status || '확인 중' };
+    }
+
+    function summaryMessage(status, fatalCount, recoverableCount) {
+      if (status === 'completed' && recoverableCount > 0) {
+        return '일부 섹션은 구조를 자동 보정해 정상 완료했습니다. 리포트 열람이 가능합니다.';
+      }
+      if (status === 'completed') return '리포트 생성이 완료되었습니다.';
+      if (status === 'failed' && fatalCount > 0) return '자동 보정으로 해결되지 않는 치명적 오류가 남아 있습니다.';
+      return '현재 리포트를 생성하고 있습니다. 잠시 후 자동으로 다시 확인됩니다.';
+    }
+
+    function buildSectionCards(sectionStates, recoverableSections, fatalFailedSections) {
+      const sectionNames = new Set([
+        ...Object.keys(sectionStates || {}),
+        ...recoverableSections,
+        ...fatalFailedSections,
+        '대운', '세운', '월운', '운성'
+      ]);
+
+      const html = [...sectionNames].map((name) => {
+        const state = sectionStates[name] || {};
+        const severity = state.severity || (fatalFailedSections.includes(name) ? 'FATAL' : recoverableSections.includes(name) ? 'RECOVERABLE' : 'PASS');
+        const cls = severity === 'FATAL' ? 'fatal' : severity === 'RECOVERABLE' ? 'recoverable' : 'pass';
+        const title = severity === 'FATAL'
+          ? '치명적 오류'
+          : severity === 'RECOVERABLE'
+            ? '서버 보정 완료'
+            : '정상 통과';
+        const reasons = normalizeArray(state.issues).join(', ') || (severity === 'PASS' ? '검증 통과' : '세부 사유 없음');
+        return `
+          <article class="section-item ${cls}">
+            <strong>${escapeHtml(name)}</strong>
+            <small>${escapeHtml(title)}</small>
+            <small>${escapeHtml(reasons)}</small>
+          </article>
+        `;
+      }).join('');
+
+      sectionsGridEl.innerHTML = html;
+    }
+
+    async function loadStatus(manual = false) {
+      if (!orderId) {
+        statusBadgeEl.className = 'badge err';
+        statusBadgeEl.textContent = 'orderId 없음';
+        summaryTextEl.textContent = '주문번호가 없어 상태를 불러올 수 없습니다.';
         return;
       }
-      requestInFlight = true;
+
+      if (manual) {
+        statusBadgeEl.className = 'badge neutral';
+        statusBadgeEl.innerHTML = '<span class="loading"></span>새로고침 중';
+      }
+
       try {
-        const res = await fetch(`/api/orders/${encodeURIComponent(activeOrderId)}/status?t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
-        const data = await res.json();
-        if (data.status === 'completed' && data.viewMode === 'html' && data.reportSections && Object.keys(data.reportSections).length) {
-          const persistedSections = saveCompletedReport(activeOrderId, data.reportSections) || data.reportSections;
-          data.reportSections = persistedSections;
-          stopPolling();
-        } else if (['ready', 'completed', 'failed', 'payment_cancelled'].includes(data.status)) {
-          stopPolling();
+        const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}/status`, {
+          cache: 'no-store',
+          headers: { 'cache-control': 'no-cache' }
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        const ui = deriveUiState(payload);
+        const badge = badgeSpec(ui.status, ui.fatalFailedSections.length, ui.recoverableSections.length);
+
+        statusBadgeEl.className = `badge ${badge.cls}`;
+        statusBadgeEl.textContent = badge.text;
+        statusTextEl.textContent = ui.status;
+        messageTextEl.textContent = payload.publicMessage || payload.message || payload.progressMessage || '-';
+        summaryTextEl.textContent = summaryMessage(ui.status, ui.fatalFailedSections.length, ui.recoverableSections.length);
+
+        buildSectionCards(ui.sectionStates, ui.recoverableSections, ui.fatalFailedSections);
+
+        if (ui.fatalFailedSections.length > 0) {
+          fatalCardEl.classList.remove('hidden');
+          fatalTextEl.textContent = `${ui.fatalFailedSections.join(', ')} 섹션에 치명적 오류가 남아 있어 재생성이 필요합니다.`;
+        } else {
+          fatalCardEl.classList.add('hidden');
         }
-        renderStatus(data);
-        if (!pollingStopped && !['ready', 'completed', 'failed', 'payment_cancelled'].includes(data.status)) {
-          schedulePoll(4000);
+
+        const hasReport = Boolean(payload.reportUrl || payload.viewUrl || payload.report || (payload.runtimeReport && payload.runtimeReport.reportReady));
+        if (ui.status === 'completed' && hasReport) {
+          reportLinkEl.classList.remove('hidden');
+          reportLinkEl.href = payload.reportUrl || payload.viewUrl || `/report/view?orderId=${encodeURIComponent(orderId)}`;
+        } else {
+          reportLinkEl.classList.add('hidden');
+          reportLinkEl.removeAttribute('href');
+        }
+
+        if (ui.status !== 'completed' && !(ui.status === 'failed' && ui.fatalFailedSections.length > 0)) {
+          window.setTimeout(() => loadStatus(false), 5000);
         }
       } catch (error) {
-        if (!pollingStopped) {
-          detailBox.hidden = false;
-          detailBox.textContent = '상태를 확인하는 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도합니다.';
-          applyProgress(12, '상태를 다시 확인하고 있습니다.');
-          schedulePoll(5000);
-        }
-      } finally {
-        requestInFlight = false;
+        statusBadgeEl.className = 'badge err';
+        statusBadgeEl.textContent = '불러오기 실패';
+        summaryTextEl.textContent = '상태를 가져오는 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+        messageTextEl.textContent = error && error.message ? error.message : '알 수 없는 오류';
       }
     }
 
-    refreshButton?.addEventListener('click', () => {
-      pollingStopped = false;
-      requestInFlight = false;
-      completedReportState = null;
-      renderedCompletedOrderId = null;
-      if (pollTimer) {
-        window.clearTimeout(pollTimer);
-        pollTimer = null;
-      }
-      window.location.reload();
-    });
-    poll();
+    loadStatus(false);
   </script>
 </body>
 </html>
