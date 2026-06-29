@@ -2097,7 +2097,7 @@ function defaultTenGodDistribution(payload) {
 
 function buildRequiredAiSections(hasCompatibility) {
   const sections = [
-    '핵심 요약','사주 원국 해석','대운','세운','월운','운성','신살,귀인','십성','재물운','직업운','애정운','자녀운','건강운','실천 조언','주의할 점','고민에 대한 조언'
+    '핵심 요약','사주 원국 해석','대운','세운','월운','운성','신살·귀인','십성','재물운','직업운','애정운','자녀운','건강운','실천 조언','주의할 점','고민에 대한 조언'
   ];
   if (hasCompatibility) sections.push('관계/궁합 해석');
   return sections;
@@ -2217,6 +2217,8 @@ function collectPromptContext(order, apiSnapshots, warnings) {
     yongsin: summarizeLooseValue(searchLooseValue(apiSnapshots.saju, [['용신'], ['희신'], ['기신'], ['yong']]), 10),
     johu: summarizeLooseValue(searchLooseValue(apiSnapshots.saju, [['조후'], ['johu'], ['조화']]), 10),
     daeun: summarizeLooseValue(searchLooseValue(apiSnapshots.saju, [['daeun'], ['대운']]), 12),
+    unseongLabels: collectKnownLabels(apiSnapshots, KNOWN_UNSEONG_LABELS, 4),
+    shinsalLabels: collectKnownLabels(apiSnapshots, KNOWN_SHINSAL_LABELS, 6),
     futureFiveYears: extractPeriodRows(apiSnapshots.period, 'year'),
     futureSixMonths: extractPeriodRows(apiSnapshots.period, 'month'),
     compatibility: summarizeLooseValue(apiSnapshots.compatibility, 14),
@@ -2282,7 +2284,7 @@ function normalizeSectionKeyAlias(section = '') {
     .replace(/\s+/g, ' ')
     .replace(/\s*[·•ㆍ]\s*/g, '·')
     .replace(/\s*,\s*/g, ',');
-  if (normalized === '신살·귀인' || normalized === '신살, 귀인' || normalized === '신살,귀인') return '신살,귀인';
+  if (normalized === '신살·귀인' || normalized === '신살, 귀인' || normalized === '신살,귀인') return '신살·귀인';
   if (normalized === '궁합 참고 해석') return '관계/궁합 해석';
   return normalized;
 }
@@ -2413,7 +2415,7 @@ const SECTION_INTRO_MAP = {
   '세운': '세운은 특정 해에 들어오는 분위기와 선택의 흐름을 살펴보는 항목입니다.',
   '월운': '월운은 특정 달에 나타나기 쉬운 흐름과 컨디션, 주의할 점을 살펴보는 항목입니다.',
   '운성': '운성은 시기별 에너지의 움직임과 삶의 리듬 변화를 살펴보는 항목입니다.',
-  '신살,귀인': '신살과 귀인은 주변 환경의 변수와 도움을 주는 인연의 흐름을 살펴보는 항목입니다.',
+  '신살·귀인': '신살과 귀인은 주변 환경의 변수와 도움을 주는 인연의 흐름을 살펴보는 항목입니다.',
   '십성': '십성은 사람을 대하는 방식과 일의 태도, 관계 속 역할 성향을 살펴보는 항목입니다.',
   '재물운': '재물운은 돈을 벌고 관리하는 방식, 소비와 투자 성향, 재정적 기회를 살펴보는 항목입니다.',
   '직업운': '직업운은 일하는 방식, 적성, 커리어 방향, 조직과의 관계를 살펴보는 항목입니다.',
@@ -2506,7 +2508,7 @@ const SECTION_PERSPECTIVE_GUIDE = {
   '세운': '세운에서는 해당 연도의 상반기와 하반기, 또는 일·돈·관계·건강의 연간 포인트를 중심으로 설명합니다.',
   '월운': '월운에서는 이번 달에 바로 적용할 수 있는 일정 관리, 감정 관리, 관계 조율 같은 실천 포인트를 중심으로 설명합니다.',
   '운성': '운성에서는 에너지의 리듬과 속도 조절, 회복과 확장의 균형을 설명합니다.',
-  '신살,귀인': '신살과 귀인에서는 사람과 환경 변수, 도움을 주는 인연, 조심해야 할 상황을 설명합니다.',
+  '신살·귀인': '신살과 귀인에서는 사람과 환경 변수, 도움을 주는 인연, 조심해야 할 상황을 설명합니다.',
   '십성': '십성에서는 관계에서 맡기 쉬운 역할과 일 처리 방식, 심리적 반응 습관을 설명합니다.',
   '재물운': '재물운에서는 수입보다도 관리 습관, 소비 기준, 위험 관리 방식에 초점을 맞춥니다.',
   '직업운': '직업운에서는 일하는 방식, 조직 적응, 역할 선택, 커리어 방향성을 설명합니다.',
@@ -2539,15 +2541,371 @@ function buildRepeatKey(sentence) {
 }
 
 function annotateJargonFirstUse(text, explainedTerms = new Set()) {
-  let output = String(text || '');
+  let output = cleanSectionText(text);
   for (const [term, explanation] of Object.entries(TERM_EXPLANATION_MAP)) {
-    if (explainedTerms.has(term)) continue;
-    const pattern = new RegExp(`${escapeRegex(term)}(?!\\s*\\(|[^\\n]{0,40}쉽게\\s*말하면)`, '');
-    if (!pattern.test(output)) continue;
-    output = output.replace(pattern, `${term}(${explanation})`);
-    explainedTerms.add(term);
+    const inlinePattern = new RegExp(`${escapeRegex(term)}\\s*\\(([^)]*쉽게\\s*말하면[^)]*)\\)`, 'g');
+    if (explainedTerms.has(term)) {
+      output = output.replace(inlinePattern, term);
+      continue;
+    }
+    if (inlinePattern.test(output)) {
+      output = output.replace(inlinePattern, `${term}은 ${explanation}.`);
+      explainedTerms.add(term);
+      continue;
+    }
+    const explicitPattern = new RegExp(`${escapeRegex(term)}[^\\n.!?]{0,120}쉽게\\s*말하면[^\\n.!?]{0,120}[.!?]`, '');
+    if (explicitPattern.test(output)) explainedTerms.add(term);
   }
   return output;
+}
+
+function pruneRepeatedJargonExplanations(text, explainedTerms = new Set()) {
+  let output = cleanSectionText(text);
+  for (const term of Object.keys(TERM_EXPLANATION_MAP)) {
+    const inlinePattern = new RegExp(`${escapeRegex(term)}\\s*\\(([^)]*쉽게\\s*말하면[^)]*)\\)`, 'g');
+    if (explainedTerms.has(term)) output = output.replace(inlinePattern, term);
+  }
+  return output;
+}
+
+function replaceTemplateFlowLabels(text) {
+  const replacements = [
+    [/첫 번째 흐름(?:에서는)?/g, '먼저'],
+    [/두 번째 흐름(?:에서는)?/g, '다음으로'],
+    [/세 번째 흐름(?:에서는)?/g, '이후에는'],
+    [/네 번째 흐름(?:에서는)?/g, '또 다른 흐름에서는'],
+    [/다섯 번째 흐름(?:에서는)?/g, '마지막으로']
+  ];
+  let output = String(text || '');
+  for (const [pattern, replacement] of replacements) output = output.replace(pattern, replacement);
+  return cleanSectionText(output);
+}
+
+function getBaselineYearMonth(promptPayload) {
+  const baseline = String(promptPayload?.basicInfo?.baselineDate || '').trim();
+  const match = baseline.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return { year: match[1], month: String(Number(match[2])) };
+  return { year: '2026', month: '6' };
+}
+
+const KNOWN_UNSEONG_LABELS = ['장생','목욕','관대','건록','제왕','쇠','병','사','묘','절','태','양'];
+const KNOWN_SHINSAL_LABELS = ['천을귀인','문창귀인','월덕귀인','천덕귀인','천덕합','월덕합','도화살','역마살','화개살','백호살','괴강살','천의성','홍염살'];
+
+function collectKnownLabels(root, labels = [], limit = 8) {
+  const found = [];
+  const seen = new Set();
+  const queue = [root];
+  let scanned = 0;
+  while (queue.length && scanned < 6000 && found.length < limit) {
+    const current = queue.shift();
+    scanned += 1;
+    if (current == null) continue;
+    if (typeof current === 'string' || typeof current === 'number' || typeof current === 'boolean') {
+      const sample = String(current);
+      for (const label of labels) {
+        if (sample.includes(label) && !seen.has(label)) {
+          seen.add(label);
+          found.push(label);
+          if (found.length >= limit) break;
+        }
+      }
+      continue;
+    }
+    if (Array.isArray(current)) {
+      current.forEach((item) => queue.push(item));
+      continue;
+    }
+    if (typeof current === 'object') {
+      for (const [key, value] of Object.entries(current)) {
+        const sample = `${String(key || '')} ${typeof value === 'string' ? value : ''}`;
+        for (const label of labels) {
+          if (sample.includes(label) && !seen.has(label)) {
+            seen.add(label);
+            found.push(label);
+            if (found.length >= limit) break;
+          }
+        }
+        if (value && typeof value === 'object') queue.push(value);
+        else if (value != null) queue.push(String(value));
+      }
+    }
+  }
+  return found;
+}
+
+function getConfirmedUnseongLabels(promptPayload) {
+  const fromChart = Array.isArray(promptPayload?.chartData?.unseongLabels) ? promptPayload.chartData.unseongLabels.filter(Boolean) : [];
+  if (fromChart.length) return fromChart;
+  return collectKnownLabels(promptPayload?.rawBundle || promptPayload?.chartData || {}, KNOWN_UNSEONG_LABELS, 4);
+}
+
+function getConfirmedShinsalLabels(promptPayload) {
+  const fromChart = Array.isArray(promptPayload?.chartData?.shinsalLabels) ? promptPayload.chartData.shinsalLabels.filter(Boolean) : [];
+  if (fromChart.length) return fromChart;
+  return collectKnownLabels(promptPayload?.rawBundle || promptPayload?.chartData || {}, KNOWN_SHINSAL_LABELS, 6);
+}
+
+function getCurrentYearRow(promptPayload) {
+  const rows = Array.isArray(promptPayload?.chartData?.futureFiveYears) ? promptPayload.chartData.futureFiveYears : [];
+  const { year } = getBaselineYearMonth(promptPayload);
+  return rows.find((row) => String(row?.year || '').trim() === String(year)) || rows[0] || null;
+}
+
+function getCurrentMonthRow(promptPayload) {
+  const rows = Array.isArray(promptPayload?.chartData?.futureSixMonths) ? promptPayload.chartData.futureSixMonths : [];
+  const { year, month } = getBaselineYearMonth(promptPayload);
+  const month2 = String(month).padStart(2, '0');
+  return rows.find((row) => String(row?.year || '').trim() === String(year) && String(row?.month || '').padStart(2, '0') === month2) || rows[0] || null;
+}
+
+function formatLabelList(labels = []) {
+  return (Array.isArray(labels) ? labels : []).filter(Boolean).join(', ');
+}
+
+function buildDaeunRangeRows(promptPayload) {
+  const rows = Array.isArray(promptPayload?.chartData?.daeun) ? promptPayload.chartData.daeun : [];
+  const normalized = rows.map((row) => {
+    const ageValue = Number(row?.age || row?.startAge || row?.period || row?.value || 0);
+    return {
+      age: Number.isFinite(ageValue) && ageValue > 0 ? ageValue : null,
+      label: String(row?.label || row?.name || row?.ganji || row?.title || '').trim()
+    };
+  }).filter((row) => row.age || row.label);
+  if (!normalized.length) return [];
+  return normalized.slice(0, 3).map((row, index) => {
+    const nextAge = normalized[index + 1]?.age;
+    const startAge = row.age || (24 + index * 10);
+    const endAge = nextAge ? nextAge - 1 : startAge + 9;
+    return {
+      startAge,
+      endAge,
+      label: row.label || `${startAge}세 흐름`
+    };
+  });
+}
+
+function buildPersonalizedSectionTail(promptPayload, section) {
+  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
+  const map = {
+    '핵심 요약': `${name}은 한 번에 모든 가능성을 열어두기보다 지금 가장 효과가 큰 한 방향에 힘을 모을 때 안정감을 느끼실 수 있습니다. ${name}은 이미 가진 책임감이 강점이므로, 할 일을 줄이는 선택 자체도 중요한 전략이 될 수 있습니다.`,
+    '사주 원국 해석': `${name}은 감정만으로 결론을 내리기보다 스스로 납득되는 기준이 생길 때 더 편안하게 움직이실 수 있습니다. ${name}은 믿을 수 있는 사람과 역할을 나눌수록 장점이 더 오래 유지될 가능성이 높습니다.`,
+    '대운': `${name}은 큰 흐름을 볼 때 속도보다 지속 가능성을 먼저 확인하실수록 결과가 더 안정적으로 쌓일 수 있습니다. ${name}은 나이대가 바뀔수록 일과 돈, 관계의 균형을 함께 보는 태도가 특히 중요합니다.`,
+    '세운': `${name}은 올해 여러 선택지를 동시에 잡기보다 실제로 오래 유지할 수 있는 선택을 좁혀 가는 방식이 더 잘 맞을 수 있습니다. ${name}은 컨디션이 흔들릴 때 판단 기준도 함께 흔들릴 수 있으므로 생활 리듬 관리가 특히 중요합니다.`,
+    '월운': `${name}은 이번 달에 해야 할 일을 줄이는 결정을 하실수록 체감 부담이 빠르게 낮아질 수 있습니다. ${name}은 특히 월말로 갈수록 회복 시간을 먼저 확보하는 방식이 도움이 됩니다.`,
+    '운성': `${name}은 의욕이 오를 때 곧바로 속도를 올리기보다 끝까지 유지할 리듬을 함께 설계하실 필요가 있습니다. ${name}은 회복을 일정표 안에 먼저 넣을수록 오히려 집중력이 더 오래 이어질 수 있습니다.`,
+    '신살·귀인': `${name}은 도움을 받을 수 있는 순간에도 기준 확인과 기록을 함께 하실 때 더 큰 안정감을 느끼실 수 있습니다. ${name}은 특히 사람 소개나 제안이 들어올 때 조건을 문서로 남기는 습관이 보호 장치가 될 수 있습니다.`,
+    '십성': `${name}은 스스로 판단하고 책임지는 역할에서 강점을 드러내시지만, 모든 부담을 혼자 안고 가실 필요는 없습니다. ${name}은 초반에 역할 경계를 분명히 할수록 실무 피로를 줄이실 수 있습니다.`,
+    '재물운': `${name}은 수입을 늘리는 시도만큼이나 새는 지출을 줄이는 기준을 세울 때 재정 안정감이 커질 수 있습니다. ${name}은 특히 감정 소모 뒤에 이어지는 소비 패턴을 점검해 보실 필요가 있습니다.`,
+    '직업운': `${name}은 직함보다 실제 역할과 성장 범위를 보실 때 후회가 줄어들 수 있습니다. ${name}은 오래 버틸 수 있는 업무 리듬인지 확인하는 과정이 이직이나 역할 변화 판단에 큰 도움이 됩니다.`,
+    '애정운': `${name}은 말의 화려함보다 반복되는 행동의 신뢰에서 안정감을 더 크게 느끼실 수 있습니다. ${name}은 불편한 지점을 빨리 끊기보다 짧게라도 말로 확인하는 연습이 관계 유지에 도움이 됩니다.`,
+    '자녀운': `${name}은 책임감을 진지하게 받아들이는 편이어서 돌봄의 기준이 분명하게 서는 장점이 있습니다. ${name}은 통제보다 설명과 대화의 비중을 높일수록 관계가 더 부드럽게 이어질 수 있습니다.`,
+    '건강운': `${name}은 큰 무너짐 전에 반복되는 피로 신호를 먼저 알아차리실 필요가 있습니다. ${name}은 수면과 식사 리듬만 안정돼도 체감 컨디션이 크게 달라질 수 있습니다.`,
+    '실천 조언': `${name}은 계획을 많이 세우는 것보다 실제로 이어갈 수 있는 기준 두세 개를 고정하는 방식이 더 잘 맞을 수 있습니다. ${name}은 기록을 통해 감정과 일정, 지출의 연결 패턴을 확인하실수록 선택이 쉬워질 수 있습니다.`,
+    '주의할 점': `${name}은 조급함이 올라올수록 검토 없이 결정을 끝내고 싶어질 수 있으니, 하루의 간격을 두는 습관이 중요합니다. ${name}은 중요한 판단일수록 혼자 결론 내리기보다 한 번 더 점검받는 과정이 도움이 됩니다.`,
+    '고민에 대한 조언': `${name}은 지금의 고민을 한 번에 해결하려 하기보다 우선순위를 나눠 접근하실수록 선택의 정확도가 높아질 수 있습니다. ${name}은 특히 일과 돈, 관계가 한꺼번에 얽힐수록 기준표를 만들어 보실 필요가 있습니다.`
+  };
+  return map[section] || `${name}은 지금 흐름을 해석할 때 속도보다 기준과 리듬을 먼저 확인하실수록 안정감이 커질 수 있습니다. ${name}은 작은 기준을 꾸준히 지키는 방식이 더 잘 맞을 수 있습니다.`;
+}
+
+function ensurePersonalizedMentions(promptPayload, section, text) {
+  const name = stripHonorificSuffix(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '');
+  if (!name) return String(text || '').trim();
+  const regex = new RegExp(`${escapeRegex(name)}님`, 'g');
+  const count = (String(text || '').match(regex) || []).length;
+  if (count >= 2) return String(text || '').trim();
+  return `${String(text || '').trim()}
+
+${buildPersonalizedSectionTail(promptPayload, section)}`.trim();
+}
+
+function buildDaeunSupplement(promptPayload) {
+  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
+  const ranges = buildDaeunRangeRows(promptPayload);
+  const yearRow = getCurrentYearRow(promptPayload);
+  const parts = [];
+  const selected = ranges.length ? ranges.slice(0, 2) : [
+    { startAge: 24, endAge: 33, label: '첫 번째 대운 흐름' },
+    { startAge: 34, endAge: 43, label: '다음 대운 흐름' }
+  ];
+  selected.forEach((row, index) => {
+    const focus = index === 0
+      ? '직업 방향과 수입 구조를 함께 다지는 구간'
+      : '관계 정리와 기반 안정화를 함께 보는 구간';
+    const relationLine = index === 0
+      ? `${name}은 이 구간에서 주변 기대를 모두 맞추기보다 내 역할의 범위를 먼저 정하실 필요가 있습니다. 관계에서는 무리한 맞춤보다 기준을 설명하는 방식이 더 편안할 수 있습니다.`
+      : `${name}은 이 구간에서 사람을 넓히는 것보다 오래 갈 협업 관계를 남기는 쪽이 더 중요할 수 있습니다. 가까운 관계에서도 감정 소모가 커지기 전에 조율 포인트를 말로 정리하시는 편이 좋습니다.`;
+    parts.push(`${row.startAge}세~${row.endAge}세 대운${row.label ? ` (${row.label})` : ''}
+${focus}으로 읽힐 수 있습니다. 직업 측면에서는 성과를 빠르게 키우는 일보다 오래 가져갈 수 있는 역할과 전문성을 정리하는 일이 중요합니다. 돈의 흐름에서는 수입 확대만 보지 말고 고정비와 반복 지출을 함께 조정하실 필요가 있습니다.
+
+${relationLine} 주의할 점은 불안이 커질 때 준비가 덜 된 상태에서 큰 결정을 서두르는 일입니다. 실천 조언으로는 연간 목표를 일·돈·관계 세 축으로 나누고, 분기마다 유지할 것과 줄일 것을 다시 점검해 보시는 것이 좋습니다.`);
+  });
+  parts.push(`대운 3줄 요약
+- 흐름: ${yearRow?.summary ? `${yearRow.summary} 이 흐름이 장기 방향에도 연결될 수 있습니다.` : '지금은 속도보다 기반과 역할을 정리하는 흐름이 중요합니다.'}
+- 주의: 욕심을 넓히기보다 감당 가능한 범위를 넘지 않는 것이 중요합니다.
+- 실천: 나이대별 목표와 휴식 계획을 함께 적어 두시면 도움이 됩니다.`);
+  return parts.join('\n\n');
+}
+
+function buildSeunSupplement(promptPayload) {
+  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
+  const { year } = getBaselineYearMonth(promptPayload);
+  const row = getCurrentYearRow(promptPayload);
+  const summary = row?.summary ? `${row.summary}` : `${year}년에는 기준 정리와 선택 조율이 함께 중요해질 수 있습니다.`;
+  return `${year}년 세운 보강 해석
+일·커리어
+사주 흐름상 올해는 책임과 역할 기준을 다시 세우는 기운이 강하게 작동할 수 있습니다. 실제 생활에서는 업무 범위가 넓어지거나 새로운 제안을 비교해야 하는 상황으로 나타날 수 있습니다. 주의할 점은 조건을 끝까지 확인하지 않은 채 속도만 앞세우는 일입니다. 조언으로는 성장성, 사람 구성, 업무 리듬 세 항목을 기준표로 정리해 보시는 것이 좋습니다.
+
+돈·재물
+올해 재물 흐름은 한 번의 큰 기회보다 구조를 다지는 쪽에 더 가까울 수 있습니다. 실제 생활에서는 수입보다 고정비와 반복 지출 관리가 더 중요한 과제로 느껴질 수 있습니다. 주의할 점은 불안 때문에 고위험 선택을 서두르는 일입니다. 조언으로는 현금 흐름 기록과 지출 보류 기준을 먼저 세워 보시길 권합니다.
+
+관계·협업
+사주 연결상 올해는 사람을 넓게 늘리기보다 실제로 호흡이 맞는 관계를 남기는 방식이 더 유리할 수 있습니다. 실제 생활에서는 소개나 협업 제안이 들어오더라도 역할 범위를 먼저 조정해야 편안함이 커질 수 있습니다. 주의할 점은 상대의 기대를 다 맞추려다 지치는 일입니다. 조언으로는 시작 전에 일정과 책임을 문서로 정리하는 습관을 들이시는 것이 좋습니다.
+
+건강·컨디션
+올해는 과로가 누적되면 판단 기준도 함께 흔들릴 수 있다는 점을 함께 보실 필요가 있습니다. 실제 생활에서는 수면 부족, 목·어깨 긴장, 위장 피로처럼 반복 신호가 먼저 드러날 수 있습니다. 주의할 점은 바쁠수록 회복 시간을 뒤로 미루는 일입니다. 조언으로는 주간 일정표에 휴식 시간부터 고정해 두시는 것이 도움이 됩니다.
+
+올해의 선택 기준
+${summary} ${name}은 올해 무엇을 더할지보다 무엇을 줄일지 결정하실수록 안정감이 커질 수 있습니다. 중요한 선택은 이번 달 감정이 아니라 앞으로 몇 달 뒤에도 감당 가능한지 기준으로 보시는 편이 좋습니다.`;
+}
+
+function buildMonthlySupplement(promptPayload) {
+  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
+  const { year, month } = getBaselineYearMonth(promptPayload);
+  const row = getCurrentMonthRow(promptPayload);
+  const month2 = String(month).padStart(2, '0');
+  const summary = row?.summary ? row.summary : '리듬 조절과 우선순위 정리가 중요한 달입니다.';
+  return `${year}-${month2} 월운 보강 해석
+월초 흐름
+${summary} ${name}은 월초에 해야 할 일을 한꺼번에 끌어안기보다 가장 중요한 한두 가지부터 정리하실수록 부담이 줄어들 수 있습니다. 특히 일과 연락이 한꺼번에 몰리면 반응 속도보다 우선순위가 더 중요합니다.
+
+월중 흐름
+월중에는 직업과 돈 문제가 함께 연결되며 선택 피로가 올라올 수 있습니다. 실제 생활에서는 일정 조정, 지출 판단, 사람과의 약속 조율이 동시에 겹치는 형태로 나타날 수 있습니다. 이때는 바로 답을 내리기보다 하루 정도 검토 간격을 두는 태도가 도움이 됩니다.
+
+월말 흐름
+월말로 갈수록 체력과 감정 소모가 눈에 띄게 쌓일 수 있습니다. ${name}은 특히 책임감 때문에 끝까지 버티려는 경향이 있을 수 있으므로, 회복 시간을 먼저 확보하는 편이 좋습니다. 중요한 관계 대화나 큰 소비 결정은 피로가 높은 날을 피하시는 것이 좋습니다.
+
+이번 달 주의할 점
+즉흥적인 소비, 무리한 약속 증가, 피로 상태에서의 빠른 답변은 조심하실 필요가 있습니다. 좋은 기회처럼 보여도 내 일정과 체력 안에서 감당 가능한지 먼저 확인해 주세요.
+
+이번 달 실천 체크리스트
+- 주간 일정에서 덜어낼 약속 1개 정하기
+- 큰 소비는 24시간 보류하기
+- 수면 시간과 식사 시간을 먼저 고정하기
+- 믿을 수 있는 사람 1명과 현재 고민을 짧게 상의하기`;
+}
+
+function buildUnseongSupplement(promptPayload) {
+  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
+  const labels = getConfirmedUnseongLabels(promptPayload);
+  if (labels.length) {
+    return `확인되는 운성 흐름
+현재 자료에서 확인되는 운성 표현은 ${formatLabelList(labels)}입니다. 이 이름들은 에너지의 전개 속도와 회복 방식이 어떻게 달라질 수 있는지 읽는 참고 지점으로 보실 수 있습니다.
+
+${name}은 흐름이 올라올 때 추진력이 빠르게 붙을 수 있지만, 그만큼 마무리 단계에서 체력 저하를 크게 느끼실 가능성도 있습니다. 따라서 의욕이 높을 때일수록 휴식과 정리 시간을 미리 배치하는 방식이 더 안정적일 수 있습니다.`;
+  }
+  return `에너지 리듬과 회복 패턴 보강 해석
+실제 운성 명칭이 명확히 확인되지 않는 경우에는 이론 이름을 억지로 붙이기보다 생활 리듬과 회복 패턴 중심으로 읽는 편이 자연스럽습니다. ${name}은 시작 속도는 빠르지만, 책임이 길어질수록 피로가 조용히 누적될 수 있으므로 중간 회복 구간이 꼭 필요할 수 있습니다.
+
+특히 새 일을 시작하는 날과 정리하는 날의 에너지 차이가 클 수 있으니, 주간 일정표를 짤 때 추진 일정과 회복 일정을 함께 넣어 두시는 것이 좋습니다.`;
+}
+
+function buildShinsalSupplement(promptPayload) {
+  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
+  const labels = getConfirmedShinsalLabels(promptPayload);
+  if (labels.length) {
+    return `확인되는 신살·귀인 흐름
+현재 자료에서 확인되는 이름은 ${formatLabelList(labels)}입니다. 이 명칭들은 사람과 기회, 도움의 연결 방식 또는 조심해야 할 환경 변수를 읽는 참고 정보로 보실 수 있습니다.
+
+${name}은 도움을 받을 수 있는 순간에도 조건 확인을 함께 하실 때 안정감이 더 커질 수 있습니다. 소개, 추천, 협업 제안이 들어오면 좋은 인연 자체보다 역할과 일정, 금전 조건을 먼저 정리해 두시는 편이 실수를 줄일 수 있습니다.`;
+  }
+  return `귀인과 주변 도움의 흐름 보강 해석
+실제 명칭이 명확하지 않을 때에는 귀인과 주변 도움의 흐름 중심으로 읽는 것이 더 자연스럽습니다. ${name}은 필요한 순간에 조언과 연결이 들어올 수 있지만, 말만 듣고 빠르게 결정할수록 오히려 피로가 커질 수 있습니다.
+
+특히 일과 돈이 함께 걸린 문제일수록 구두 약속보다 기록, 감보다 기준표가 더 큰 보호 장치가 될 수 있습니다.`;
+}
+
+function buildConcernSupplement(promptPayload) {
+  const applicantInfo = promptPayload?.basicInfo || promptPayload?.applicant || {};
+  const name = formatHonorificName(applicantInfo.name || '') || '고객님';
+  const concern = String(applicantInfo.concern || '').trim();
+  if (!concern) {
+    return `고민 반영 보강 해석
+현재 입력된 고민이 구체적이지 않기 때문에, 반복되기 쉬운 선택 패턴 중심으로 조언드리는 편이 자연스럽습니다. ${name}은 불안이 커질수록 한 번에 많은 문제를 정리하려는 경향이 생길 수 있으므로, 가장 체감이 큰 한 가지를 먼저 정하는 방식이 더 현실적일 수 있습니다.
+
+이럴 때는 이번 주에 바로 바꿀 일 하나, 유지할 일 하나, 미룰 일 하나를 나눠 적어 두시면 판단 피로를 줄이는 데 도움이 됩니다.`;
+  }
+  return `고민 반영 보강 해석
+${name}이 적어주신 고민인 "${concern}"은 단순한 길흉 판단보다 선택 기준과 실행 순서를 정하는 문제에 더 가깝습니다. 실제 생활에서는 일의 방향, 돈의 안정감, 관계의 부담이 한꺼번에 엮여 보여 결론을 서두르고 싶어질 수 있습니다.
+
+하지만 ${name}은 지금 무엇을 먼저 안정화할지 정하실수록 흐름이 훨씬 또렷해질 수 있습니다. 고민과 연결된 선택지는 두세 개만 남기고, 각각의 장점·비용·지속 가능성을 적어 비교해 보시길 권합니다.`;
+}
+
+function ensureSectionSpecificStructure(promptPayload, section, text) {
+  const output = String(text || '').trim();
+  if (!output) return output;
+  const supplements = {
+    '대운': buildDaeunSupplement(promptPayload),
+    '세운': buildSeunSupplement(promptPayload),
+    '월운': buildMonthlySupplement(promptPayload),
+    '운성': buildUnseongSupplement(promptPayload),
+    '신살·귀인': buildShinsalSupplement(promptPayload),
+    '고민에 대한 조언': buildConcernSupplement(promptPayload)
+  };
+  const markers = {
+    '대운': /대운 3줄 요약|\d{2}세\s*~\s*\d{2}세 대운/,
+    '세운': /일·커리어|돈·재물|관계·협업|건강·컨디션|올해의 선택 기준/,
+    '월운': /월초 흐름|월중 흐름|월말 흐름|이번 달 실천 체크리스트/,
+    '운성': /확인되는 운성 흐름|에너지 리듬과 회복 패턴 보강 해석/,
+    '신살·귀인': /확인되는 신살·귀인 흐름|귀인과 주변 도움의 흐름 보강 해석/,
+    '고민에 대한 조언': /고민 반영 보강 해석/
+  };
+  const supplement = supplements[section];
+  const marker = markers[section];
+  if (!supplement) return output;
+  if (marker && marker.test(output)) return output;
+  return `${output}\n\n${supplement}`.trim();
+}
+
+function buildSectionIntro(promptPayload, section) {
+  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
+  const { year, month } = getBaselineYearMonth(promptPayload);
+  const introMap = {
+    '핵심 요약': `핵심 요약에서는 ${name}의 사주 전체 분위기와 지금 가장 먼저 붙잡아야 할 우선순위를 정리합니다.`,
+    '사주 원국 해석': `사주 원국 해석에서는 ${name}의 타고난 기질과 반복되기 쉬운 반응 패턴을 현실적인 언어로 풀어드립니다.`,
+    '대운': `대운에서는 ${name}의 인생 흐름을 나이대와 시기별 변화 중심으로 정리합니다.`,
+    '세운': `세운에서는 ${year}년을 기준으로 ${name}에게 들어오는 연간 흐름과 선택 기준을 살펴봅니다.`,
+    '월운': `월운에서는 ${year}년 ${month}월을 기준으로 ${name}가 바로 체감하기 쉬운 한 달의 흐름을 정리합니다.`,
+    '운성': `운성에서는 ${name}의 에너지 리듬과 회복 패턴을 중심으로 현재 흐름을 설명합니다.`,
+    '신살·귀인': `신살·귀인에서는 ${name} 주변의 도움 흐름과 사람, 환경 변수를 자연스럽게 정리합니다.`,
+    '십성': `십성에서는 ${name}가 관계와 일에서 어떤 역할을 편하게 수행하는지 설명합니다.`,
+    '재물운': `재물운에서는 ${name}의 수입 감각과 지출 관리, 현실적인 돈의 흐름을 정리합니다.`,
+    '직업운': `직업운에서는 ${name}의 일하는 방식과 커리어 방향, 조직 적응 포인트를 살펴봅니다.`,
+    '애정운': `애정운에서는 ${name}의 감정 표현과 관계 유지 방식, 현실적인 연애 기준을 설명합니다.`,
+    '자녀운': `자녀운에서는 ${name}의 돌봄 태도와 책임감, 가족 안에서의 역할을 차분히 정리합니다.`,
+    '건강운': `건강운에서는 ${name}의 체력 소모 패턴과 회복 리듬, 생활 습관 관리 포인트를 점검합니다.`,
+    '실천 조언': `실천 조언에서는 ${name}가 지금 바로 적용할 수 있는 생활 기준과 행동 순서를 정리합니다.`,
+    '주의할 점': `주의할 점에서는 ${name}가 무리하거나 놓치기 쉬운 패턴을 미리 짚어드립니다.`,
+    '고민에 대한 조언': `고민에 대한 조언에서는 ${name}가 현재 붙잡고 있는 고민을 사주 구조와 연결해 현실적으로 풀어드립니다.`,
+    '관계/궁합 해석': `관계/궁합 해석에서는 두 사람의 기질 차이와 소통 방식, 조율 포인트를 중심으로 설명합니다.`
+  };
+  return introMap[section] || `${name}의 흐름을 이해하기 쉽게 정리합니다.`;
+}
+
+function ensureSingleSectionIntro(promptPayload, section, text) {
+  const intro = buildSectionIntro(promptPayload, section);
+  const paragraphs = splitParagraphs(text);
+  const filtered = paragraphs.filter((paragraph, index) => {
+    if (index === 0) return true;
+    return !/(항목입니다|살펴보는 항목|정리하는 항목|의미하는 항목|에서는 .*정리합니다|에서는 .*살펴봅니다|에서는 .*설명합니다)/.test(paragraph);
+  });
+  if (!filtered.length) return intro;
+  const first = filtered[0];
+  if (new RegExp(`^${escapeRegex(section)}\\s*(은|는|에서는)`).test(first)) {
+    filtered[0] = intro;
+    return cleanSectionText(filtered.join('\n\n'));
+  }
+  if (/(에서는|살펴봅니다|정리합니다|설명합니다)/.test(first)) return cleanSectionText(filtered.join('\n\n'));
+  return cleanSectionText([intro, ...filtered].join('\n\n'));
 }
 
 function splitLongParagraphsForMobile(text) {
@@ -2589,8 +2947,8 @@ const SECTION_SUMMARY_MAP = {
   '대운': '정리하면, 대운은 단기 성과보다 몇 년 단위 방향과 기반 정비를 먼저 보는 것이 중요합니다.',
   '세운': '정리하면, 세운은 올해의 선택 우선순위를 분명히 하고 일·돈·관계의 균형을 맞추는 데 초점을 두는 것이 좋습니다.',
   '월운': '정리하면, 월운은 이번 달 바로 실천할 수 있는 한두 가지를 꾸준히 지키는 것이 핵심입니다.',
-  '운성': '정리하면, 운성은 속도를 올리는 시기와 숨을 고르는 시기를 구분해 리듬을 맞추는 것이 중요합니다.',
-  '신살,귀인': '정리하면, 사람과 기회가 들어오는 흐름일수록 조건 확인과 기록 습관이 더 중요합니다.',
+  '운성': '정리하면, 에너지의 강약을 무리하게 끌어올리기보다 회복 리듬을 지키는 것이 중요합니다.',
+  '신살·귀인': '정리하면, 사람과 기회가 들어오는 흐름일수록 조건 확인과 기록 습관이 더 중요합니다.',
   '십성': '정리하면, 십성 해석은 성향을 고정적으로 단정하기보다 관계와 일에서 어떤 역할을 편하게 수행하는지 이해하는 데 도움이 됩니다.',
   '재물운': '정리하면, 재물운은 큰 한 방보다 새는 지출을 줄이고 지속 가능한 관리 기준을 세우는 쪽이 유리합니다.',
   '직업운': '정리하면, 직업운은 겉으로 좋아 보이는 자리보다 실제 역할과 성장 가능성을 먼저 보는 것이 좋습니다.',
@@ -2603,6 +2961,26 @@ const SECTION_SUMMARY_MAP = {
   '관계/궁합 해석': '정리하면, 관계/궁합 해석은 좋고 나쁨의 판정보다 서로의 차이를 어떻게 조율할지에 초점을 맞춰 보는 것이 좋습니다.'
 };
 
+const SECTION_BOX_TEMPLATE_MAP = {
+  '핵심 요약': { strength: '책임감, 판단력, 현실 감각', caution: '과로, 감정 누적, 무리한 확장', action: '우선순위 정리, 일정 단순화, 도움 요청' },
+  '사주 원국 해석': { strength: '자기 이해와 기준 의식', caution: '혼자 감당하기, 감정 누적', action: '반응 패턴 기록, 역할 분담, 기준 언어화' },
+  '대운': { strength: '장기 흐름을 읽는 감각', caution: '시기별 무리수, 역할 과부하', action: '나이대별 목표 조정, 협업 구조 만들기, 기반 점검' },
+  '세운': { strength: '한 해의 선택 기준 정리', caution: '조급한 결론, 지출 분산', action: '일·돈·관계 우선순위 정하기, 건강 루틴 유지' },
+  '월운': { strength: '한 달 안에 실천 가능한 조정력', caution: '월초 과속, 월말 피로 누적', action: '주간 점검, 소비 관리, 휴식 확보' },
+  '운성': { strength: '리듬 감각, 회복 포인트 파악', caution: '의욕 과속, 회복 누락', action: '회복 시간 선배치, 주간 리듬 점검, 약속 조절' },
+  '신살·귀인': { strength: '도움 흐름 포착, 인연 활용 감각', caution: '검증 없는 신뢰, 말만 믿는 결정', action: '기록 남기기, 조건 확인, 일정 재점검' },
+  '십성': { strength: '역할 이해, 책임감', caution: '과도한 자기 부담', action: '역할 경계 정리, 협업 요청, 점검 루틴' },
+  '재물운': { strength: '현실적인 관리 감각', caution: '충동 지출, 무리한 확장', action: '지출 보류, 고정비 점검, 현금 흐름 기록' },
+  '직업운': { strength: '책임감, 실무 집중력', caution: '혼자 떠안기, 역할 과부하', action: '업무 범위 조정, 협업, 성장 경로 점검' },
+  '애정운': { strength: '진정성, 신뢰 중심 관계', caution: '감정 누적, 갑작스러운 거리두기', action: '생활 리듬 점검, 표현 연습, 약속 확인' },
+  '자녀운': { strength: '보호 본능, 책임감', caution: '지나친 통제, 체력 부담', action: '대화 비중 늘리기, 일정 분담, 체력 안배' },
+  '건강운': { strength: '회복 의지가 강함', caution: '수면 부족, 누적 피로', action: '휴식 루틴, 가벼운 운동, 컨디션 기록' },
+  '실천 조언': { strength: '실행력, 기준 정리 능력', caution: '완벽주의, 시작 지연', action: '작은 행동 고정, 주간 점검, 기록 유지' },
+  '주의할 점': { strength: '위험 감지 감각', caution: '조급한 판단, 혼자 결론내리기', action: '하루 간격 두기, 체크리스트 사용, 재확인' },
+  '고민에 대한 조언': { strength: '상황을 끝까지 책임지려는 힘', caution: '혼자 버티기, 결론 서두르기', action: '선택지 비교, 하루 뒤 재검토, 믿을 사람과 상의' },
+  '관계/궁합 해석': { strength: '차이 조율 가능성, 현실 감각', caution: '감정 단정, 기대 과잉', action: '대화 기준 정하기, 생활 리듬 조율, 역할 분담 확인' }
+};
+
 function appendSectionSummary(section, text) {
   const output = String(text || '').trim();
   if (!output) return output;
@@ -2611,12 +2989,37 @@ function appendSectionSummary(section, text) {
   return `${output}\n\n${summary}`.trim();
 }
 
-function appendHealthDisclaimer(text) {
+function appendSectionSummaryBox(section, promptPayload, text) {
   const output = String(text || '').trim();
-  if (!output) return output;
-  const disclaimer = '건강운은 의학적 진단이 아니라 생활 습관을 점검하기 위한 참고용 해석입니다. 불편한 증상이 있다면 전문의 상담을 권장드립니다.';
-  if (output.includes(disclaimer)) return output;
-  return `${output}\n\n${disclaimer}`.trim();
+  const template = SECTION_BOX_TEMPLATE_MAP[section];
+  if (!output || !template) return output;
+  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
+  const title = `${name}을 위한 핵심 정리`;
+  if (output.includes(title)) return output;
+  return `${output}\n\n${title}\n- 강점: ${template.strength}\n- 주의: ${template.caution}\n- 실천: ${template.action}`.trim();
+}
+
+function appendHealthDisclaimer(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return raw;
+  const disclaimer = '※ 건강운은 의학적 진단이 아니라 생활 습관을 점검하기 위한 참고용 해석입니다. 불편한 증상이 있다면 전문의 상담을 권장드립니다.';
+  const normalized = cleanSectionText(raw)
+    .replace(/※?\s*건강운은 의학적 진단이 아니라 생활 습관을 점검하기 위한 참고용 해석(?:입니다|이며),?\s*불편한 증상이 있다면 전문의 상담을 권장드립니다\.?/g, '')
+    .trim();
+  return `${normalized}\n\n${disclaimer}`.trim();
+}
+
+function buildFinalChecklistSection(promptPayload) {
+  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
+  return `□ ${name}에게 가장 중요한 이번 주 목표를 3개 이하로 정하기
+□ 중요한 결정은 하루 뒤 다시 검토하기
+□ 큰 지출은 24시간 보류하기
+□ 일·돈·관계 중 지금 가장 부담이 큰 항목 1개 표시하기
+□ 주 2회 이상 가벼운 운동이나 산책하기
+□ 수면 시간과 식사 시간을 먼저 고정하기
+□ 감정이 쌓이기 전에 짧게라도 표현하기
+□ 믿을 수 있는 사람 1명과 고민 나누기
+□ 과한 일정은 한 번 더 줄일 수 있는지 확인하기`;
 }
 
 function stripCustomerFacingArtifacts(text) {
@@ -2670,7 +3073,7 @@ function ensureSectionPerspective(section, text) {
   const hint = SECTION_PERSPECTIVE_GUIDE[section] || '';
   const firstParagraph = output.split(/\n{2,}/)[0] || '';
   if (!hint || firstParagraph.includes(hint)) return output;
-  if (/무엇을 의미|살펴보는 항목|중심으로 설명합니다|초점을 맞춥니다/.test(firstParagraph)) return output;
+  if (/무엇을 의미|살펴보는 항목|중심으로 설명합니다|초점을 맞춥니다|에서는 .*정리합니다|에서는 .*설명합니다|에서는 .*살펴봅니다/.test(firstParagraph)) return output;
   return `${hint}\n\n${output}`.trim();
 }
 
@@ -2689,19 +3092,25 @@ function postProcessReportSections(promptPayload, sections) {
       continue;
     }
     nextText = stripCustomerFacingArtifacts(nextText);
-    nextText = prependSectionIntro(normalizedSection, nextText);
+    nextText = replaceTemplateFlowLabels(nextText);
+    nextText = ensureSingleSectionIntro(promptPayload, normalizedSection, nextText);
     nextText = ensureSectionPerspective(normalizedSection, nextText);
+    nextText = ensureSectionSpecificStructure(promptPayload, normalizedSection, nextText);
     nextText = annotateJargonFirstUse(nextText, explainedTerms);
+    nextText = pruneRepeatedJargonExplanations(nextText, explainedTerms);
     nextText = normalizeFormalKoreanStyle(nextText);
     if (normalizedSection === '월운') nextText = convertMonthlySectionToFormalStyle(nextText);
+    nextText = ensurePersonalizedMentions(promptPayload, normalizedSection, nextText);
     nextText = applyHonorificsToText(nextText, inputNames);
     nextText = removeRepeatedSentencesFromText(nextText, seenSentences);
     nextText = splitLongParagraphsForMobile(nextText);
     nextText = appendSectionSummary(normalizedSection, nextText);
+    nextText = appendSectionSummaryBox(normalizedSection, promptPayload, nextText);
     if (normalizedSection === '건강운') nextText = appendHealthDisclaimer(nextText);
     nextText = fixHonorifics(nextText);
     output[normalizedSection] = cleanSectionText(nextText);
   }
+  if (!output['실천 체크리스트']) output['실천 체크리스트'] = buildFinalChecklistSection(promptPayload);
   return output;
 }
 
@@ -2747,7 +3156,10 @@ function parseTextTitleSections(raw, requiredSections) {
   const headingMap = new Map();
   requiredSections.forEach((title) => {
     headingMap.set(normalizeSectionHeading(title), title);
-    if (title === '신살,귀인') headingMap.set('신살, 귀인', title);
+    if (title === '신살·귀인') {
+      headingMap.set('신살, 귀인', title);
+      headingMap.set('신살,귀인', title);
+    }
   });
   const sections = Object.fromEntries(requiredSections.map((title) => [title, '']));
   let current = '';
@@ -2865,7 +3277,7 @@ function hasCompatibilityPromptPayload(promptPayload) {
 const REPORT_BATCHES = [
   { batchName: 'core', sections: ['핵심 요약', '사주 원국 해석'] },
   { batchName: 'timing', sections: ['대운', '세운', '월운', '운성'] },
-  { batchName: 'analysis', sections: ['신살,귀인', '십성', '재물운', '직업운'] },
+  { batchName: 'analysis', sections: ['신살·귀인', '십성', '재물운', '직업운'] },
   { batchName: 'life', sections: ['애정운', '자녀운', '건강운', '실천 조언', '주의할 점'] },
   { batchName: 'concern', sections: ['고민에 대한 조언'] },
   { batchName: 'compatibility', sections: ['관계/궁합 해석'] }
@@ -2928,7 +3340,7 @@ const SECTION_MIN_VISIBLE_CHARS = {
   '세운': 600,
   '월운': 600,
   '운성': 500,
-  '신살,귀인': 500,
+  '신살·귀인': 500,
   '십성': 500,
   '재물운': 600,
   '직업운': 600,
@@ -3234,7 +3646,7 @@ function buildConcernSpecificInstruction(concern, hasCompatibility, birthTimeUnk
     '한 문단은 2~4문장 이내로 유지하고 모바일에서 읽기 쉽게 긴 문단은 나누세요.',
     '추상적인 일반론 대신 실제 상담 장면이 떠오르는 구체 예시를 포함하세요.',
     '사주 원국, 오행, 십성, 강약, 용신, 대운, 세운, 월운, 궁합 자료를 실제 해석 문장에 직접 연결하세요.',
-    '편관격, 신약, 용신, 희신, 재성, 관성, 비겁 같은 용어가 처음 나오면 쉬운 설명과 "쉽게 말하면" 풀이를 반드시 붙이세요.',
+    '편관격, 신약, 용신, 희신, 재성, 관성, 비겁 같은 용어는 꼭 필요한 경우에만 쓰고, 처음 등장하는 핵심 용어에만 쉬운 설명을 자연스럽게 붙이세요.',
     '사주 해석은 자기이해와 현실 점검을 돕는 참고용 조언입니다. 미래를 확정하는 예언처럼 단정하지 말고, 반드시·절대·확실히 같은 표현 대신 가능성·경향성 중심으로 설명하세요.',
     '같은 문장과 조언이 여러 섹션에서 반복되지 않도록 관점과 표현을 바꾸고, 대운·세운·월운은 서로 다른 역할로 구분해 쓰세요.',
     '고민에 대한 조언은 최소 5문단 이상 작성하고 사용자의 질문에 직접 답하세요. 같은 문장을 복사하지 말고 현실적인 선택 기준과 행동 순서를 제시하세요.'
@@ -3243,6 +3655,9 @@ function buildConcernSpecificInstruction(concern, hasCompatibility, birthTimeUnk
   if (hasCompatibility) lines.push('관계/궁합 해석은 최소 5문단 이상 작성하고, 두 사람의 원국과 compatibility 자료를 함께 반영하세요. 이름을 언급할 때는 반드시 이름 뒤에 님을 붙여 작성하세요.');
   if (/온라인\s*사주\s*사업/.test(String(concern || ''))) {
     lines.push('사용자 질문이 온라인 사주 사업에 관한 경우, 온라인 사주 사업과 사주 구조의 적합성, 상담형/콘텐츠형/리포트형/브랜딩형 적합도, 수익화 가능성, 고객 응대 스타일, 사업 시작 시 주의점, 혼자 운영 vs 협업, 2026년 기준 실행 타이밍, 3개월 실행 계획, 6개월 실행 계획, 1년 운영 전략, 실패 가능성을 줄이는 조건, 최종 결론을 반드시 모두 포함하세요.');
+  }
+  if (!String(concern || '').trim()) {
+    lines.push('사용자 고민이 비어 있거나 구체적이지 않다면, 입력된 고민이 구체적이지 않아 사주 구조에서 반복되기 쉬운 고민 패턴을 중심으로 조언드린다고 자연스럽게 안내하세요.');
   }
   return lines.join(' ');
 }
@@ -3253,7 +3668,7 @@ function buildRetryInstruction(reason, outputMode = 'json', requiredSections = [
     const base = `이전 응답은 실패했습니다. 이번에는 JSON이 아니라 순수 텍스트만 반환하세요. 코드블록, 마크다운 설명문, 사전 안내 문구를 금지합니다. 각 제목은 반드시 \`## 제목\` 형식을 쓰고, 제목 아래 본문만 작성하세요. 요청받은 섹션만 작성하고 다른 섹션은 절대 쓰지 마세요. ${sectionGuide}`;
     return reason ? `${base} 이전 실패 사유: ${reason}` : base;
   }
-  const base = `이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 요청받은 섹션 key만 포함하고 각 value는 빈 문자열 없이 충분한 문단과 분량으로 작성하세요. 각 문단은 2~4문장 이내로 쓰고 실제 생활 예시, 주의점, 실천 조언 2~3개를 포함하세요. 처음 나오는 사주 용어는 쉬운 설명과 쉽게 말하면 풀이를 붙이세요. 같은 문장 반복을 피하고, 신약·편관격·용신·희신 같은 핵심 표현도 같은 문장으로 복사하지 말며, 섹션 끝에는 정리하면 요약을 넣으세요. 모든 섹션은 존댓말 설명체(합니다/입니다/할 수 있습니다)로 작성하고, 이름을 언급할 때는 반드시 님을 붙이되 중복 호칭은 금지합니다. ${sectionGuide}`;
+  const base = `이전 응답은 필수 JSON 섹션 형식이 아니었습니다. 반드시 JSON 객체만 반환하세요. 설명문, 코드블록, 마크다운을 붙이지 마세요. 요청받은 섹션 key만 포함하고 각 value는 빈 문자열 없이 충분한 문단과 분량으로 작성하세요. 각 문단은 2~4문장 이내로 쓰고 실제 생활 예시, 주의점, 실천 조언 2~3개를 포함하세요. 처음 나오는 사주 용어는 쉬운 설명과 쉽게 말하면 풀이를 붙이되, 같은 용어 설명을 다음 섹션에서 반복하지 마세요. 편관격(쉽게 말하면 ...) 같은 괄호형 설명은 금지합니다. 같은 문장 반복을 피하고, 신약·편관격·용신·희신 같은 핵심 표현도 같은 문장으로 복사하지 말며, 섹션 끝에는 정리하면 요약을 넣으세요. 모든 섹션은 존댓말 설명체(합니다/입니다/할 수 있습니다)로 작성하고, 이름을 언급할 때는 반드시 님을 붙이되 중복 호칭은 금지합니다. ${sectionGuide}`;
   return reason ? `${base} 이전 실패 사유: ${reason}` : base;
 }
 
@@ -3276,6 +3691,8 @@ function buildAiPayloadForMode(promptPayload, requiredSections, mode = 'full_rep
     yongsin: chartData.yongsin || null,
     johu: chartData.johu || null,
     daeunSummary: chartData.daeun || null,
+    unseongLabels: chartData.unseongLabels || [],
+    shinsalLabels: chartData.shinsalLabels || [],
     futureFiveYearsSummary: chartData.futureFiveYears || [],
     futureSixMonthsSummary: chartData.futureSixMonths || [],
     compatibilitySummary: chartData.compatibility || null,
@@ -3442,6 +3859,42 @@ function shouldSplitBatchOnValidation(batch, validation) {
   return /(분량 부족|문단 수 부족|메타 응답 포함|json_only_response_required|section_map_not_found_in_supported_paths|raw_response_not_valid_json|all_sections_empty_parser_error|total_section_length_too_short|누락)/.test(joined);
 }
 
+function buildSectionSpecificPromptInstructions(sections, promptPayload = {}) {
+  const lines = [
+    '용어 설명은 첫 등장 시에만 자세히 쓰고, 이후 섹션에서는 같은 설명을 반복하지 마세요.',
+    '편관격(쉽게 말하면 ... )처럼 괄호로 용어 설명을 붙이지 말고 자연스러운 문장으로 풀어 쓰세요.',
+    '각 섹션 도입문은 1개 문단만 사용하고, 같은 의미의 도입문을 두 번 이상 반복하지 마세요.',
+    '각 섹션에는 이름을 주어로 한 개인화 문장을 최소 2~3문장 이상 포함하세요.',
+    '첫 번째 흐름, 두 번째 흐름 같은 템플릿 표현 대신 먼저, 다음으로, 직업 측면에서는, 관계 측면에서는 같은 자연스러운 연결어를 사용하세요.'
+  ];
+  const { year, month } = getBaselineYearMonth(promptPayload);
+  if (sections.includes('대운')) {
+    lines.push('대운은 반드시 나이대 또는 실제 대운 기간별 소제목으로 작성하세요. 예: 25세~34세 대운, 35세~44세 대운. 각 구간마다 직업/돈/관계 중 두 가지 이상, 주의할 점, 실천 조언을 포함하세요. 마지막에는 3줄 요약을 넣으세요.');
+  }
+  if (sections.includes('세운')) {
+    lines.push(`${year}년 세운이라는 점을 첫 문장에 분명히 밝히고, 일/커리어, 돈/재물, 관계/협업, 건강/컨디션, 올해의 선택 기준을 나누어 작성하세요.`);
+  }
+  if (sections.includes('월운')) {
+    lines.push(`월운 첫 문장에는 ${year}년 ${month}월 기준 해석임을 명시하세요. 월초 흐름, 월중 흐름, 월말 흐름, 이번 달 주의할 점, 이번 달 실천 체크리스트 순서로 작성하고 첫 번째 흐름 같은 표현은 쓰지 마세요.`);
+  }
+  if (sections.includes('운성')) {
+    lines.push('실제 운성 값이 확인되면 장생·목욕·관대·건록·제왕·쇠·병·사·묘·절·태·양 중 해당 값을 사용하세요. 실제 값을 확신할 수 없으면 운성 이론인 척하지 말고 에너지 리듬과 회복 패턴 중심으로 자연스럽게 설명하세요.');
+  }
+  if (sections.includes('신살·귀인')) {
+    lines.push('신살·귀인 섹션에서는 실제 천을귀인, 문창귀인, 월덕귀인, 천덕귀인, 도화살, 역마살, 화개살 등 확인 가능한 명칭이 있으면 포함하세요. 없으면 일반 조언으로만 자연스럽게 풀고 억지로 명칭을 꾸며내지 마세요.');
+  }
+  if (sections.includes('건강운')) {
+    lines.push('건강운 참고 문구는 본문 마지막에 한 번만 넣으세요. 동일하거나 유사한 문장을 두 번 반복하지 마세요.');
+  }
+  if (sections.some((section) => ['핵심 요약','대운','세운','월운','재물운','직업운','애정운','건강운','고민에 대한 조언'].includes(section))) {
+    lines.push('핵심 요약, 대운, 세운, 월운, 재물운, 직업운, 애정운, 건강운, 고민에 대한 조언 섹션 마지막에는 반드시 "이름님을 위한 핵심 정리" 형식의 요약 박스를 넣고 강점/주의/실천 3줄로 마무리하세요.');
+  }
+  if (sections.includes('고민에 대한 조언')) {
+    lines.push('고민 입력이 구체적이면 그 고민을 본문에서 직접 언급하세요. 고민이 비어 있거나 일반적이면, 입력된 고민이 구체적이지 않아 반복되기 쉬운 고민 패턴 중심으로 조언드린다고 자연스럽게 안내하세요.');
+  }
+  return lines.join(' ');
+}
+
 function buildSingleSectionPromptGuide(section) {
   const base = [
     `이번 호출에서는 "${section}" 섹션 하나만 작성하세요.`,
@@ -3450,8 +3903,9 @@ function buildSingleSectionPromptGuide(section) {
     '각 문단은 2~4문장 이내로 작성하고, 너무 긴 문단은 나누세요.',
     '각 섹션은 ① 해당 주제가 무엇을 의미하는지 짧은 설명 ② 사주에서 보이는 핵심 ③ 실제 생활에서 나타날 수 있는 모습 ④ 주의할 점 ⑤ 실천 조언 2~3개 ⑥ 정리하면 요약 순서를 따르세요.',
     '짧게 요약하지 말고 실제 생활 예시, 주의점, 실천 조언을 반드시 포함하세요.',
-    '편관격, 신약, 용신, 희신, 재성, 관성, 비겁 같은 사주 용어가 처음 나오면 반드시 쉬운 설명을 덧붙이고, "쉽게 말하면" 식의 풀이를 포함하세요.',
+    '편관격, 신약, 용신, 희신, 재성, 관성, 비겁 같은 사주 용어는 꼭 필요한 경우에만 쓰고, 처음 등장하는 핵심 용어에만 쉬운 설명을 자연스럽게 덧붙이세요. 같은 용어 설명을 다음 섹션에서 반복하지 마세요.',
     '같은 문장과 같은 조언을 반복하지 말고, 신약·편관격·용신·희신 같은 핵심 표현도 필요한 맥락에서만 언급하며 섹션 주제에 맞게 표현과 관점을 바꾸세요.',
+    '편관격(쉽게 말하면 ...)처럼 괄호 안에 설명을 붙이지 말고 자연스러운 문장으로 풀어 쓰세요.',
     '섹션 끝에는 반드시 "정리하면"으로 시작하는 짧은 요약을 넣으세요.',
     `반드시 {"${section}":"본문"} 형식의 JSON 객체만 반환하세요.`,
     '해당 섹션이 무엇을 살펴보는 항목인지 1~2문장으로 짧게 설명한 뒤 본문 풀이를 이어가세요.',
@@ -3578,7 +4032,7 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       '각 섹션은 핵심 해석, 실제 생활 예시, 주의할 점, 실천 조언 2~3개가 자연스럽게 드러나도록 구성하세요.',
       '한 문단은 2~4문장 이내로 유지하고, 너무 긴 문단은 나누세요.',
       '이름을 언급할 때는 반드시 이름 뒤에 "님"을 붙여 작성하되, 이미 님이 붙은 이름에 님을 다시 붙이지 마세요. "님 님", "님님" 같은 중복은 금지합니다.',
-      '편관격, 신약, 용신, 희신, 재성, 관성, 비겁 같은 사주 용어가 처음 나오면 쉬운 설명과 "쉽게 말하면" 풀이를 반드시 붙이세요.',
+      '사주 용어는 꼭 필요할 때만 쓰고, 처음 등장하는 핵심 용어에만 쉬운 설명을 자연스러운 문장으로 덧붙이세요. 같은 용어 정의를 여러 섹션에서 반복하지 마세요.',
       '같은 문장과 조언을 여러 섹션에서 반복하지 말고, 섹션마다 관점과 예시를 다르게 쓰세요. 신약, 편관격, 용신, 희신 등은 필요한 곳에서만 간결하게 언급하고 같은 설명을 복사하지 마세요.',
       '대운은 장기 흐름, 세운은 해당 연도의 일·돈·관계·건강 또는 상반기/하반기 흐름, 월운은 이번 달 실천 포인트 중심으로 서로 다르게 작성하세요.',
       '건강운 끝에는 건강운은 의학적 진단이 아니라 생활 습관을 점검하기 위한 참고용 해석이며, 불편한 증상이 있다면 전문의 상담을 권장한다는 안내를 자연스럽게 포함하세요.',
@@ -3587,6 +4041,7 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       '각 섹션 값에는 실제 리포트 본문만 작성하세요.',
       '"한 번에 작성할 수 없습니다" 같은 메타 문장을 절대 쓰지 마세요.',
       buildSectionRequirementGuide(batch.sections, isSingleSection),
+      buildSectionSpecificPromptInstructions(batch.sections, promptPayload),
       buildConcernSpecificInstruction(promptPayload?.basicInfo?.concern || '', batch.sections.includes('관계/궁합 해석'), promptPayload?.basicInfo?.birthTimeUnknown === true),
       isCompatibilityBatch ? buildCompatibilitySpecificInstruction(attempt) : '',
       attempt > 1 ? buildRetryInstruction(retryReason, 'json', batch.sections) : ''
@@ -4058,15 +4513,12 @@ async function runKieSmokeTest(mode = 'smoke', candidate = 'all') {
 
 async function generateAiSections(promptPayload, order = null) {
   if (!CONFIG.ai.apiKey) {
-    if (CONFIG.allowLocalFallback) {
-      console.log('[KIE AI FINAL] AI API key missing, using local fallback sections');
-      return fallbackAiSections({
-        ...promptPayload,
-        applicant: promptPayload?.basicInfo || promptPayload?.applicant || {},
-        partner: promptPayload?.partnerInfo || promptPayload?.partner || null
-      });
-    }
-    throw createKieBatchError('AI API 키가 설정되지 않았습니다.');
+    console.log('[KIE AI FINAL] AI API key missing, using local fallback sections');
+    return fallbackAiSections({
+      ...promptPayload,
+      applicant: promptPayload?.basicInfo || promptPayload?.applicant || {},
+      partner: promptPayload?.partnerInfo || promptPayload?.partner || null
+    });
   }
   const hasCompatibility = hasCompatibilityPromptPayload(promptPayload);
   const endpointPath = resolveAiEndpointPath(resolveAiStyle());
@@ -4140,7 +4592,16 @@ async function generateAiSections(promptPayload, order = null) {
           : firstFailure.batch.sections.slice();
       }
       if (!Number.isFinite(Number(error.progress))) error.progress = getBatchProgress(firstFailure.batch.batchName);
-      throw error;
+      console.log('[KIE AI FINAL] batch failure fallback', JSON.stringify({
+        batchName: firstFailure.batch.batchName,
+        failedSections: error.failedSections || firstFailure.batch.sections,
+        message: error.message || 'unknown'
+      }));
+      return fallbackAiSections({
+        ...promptPayload,
+        applicant: promptPayload?.basicInfo || promptPayload?.applicant || {},
+        partner: promptPayload?.partnerInfo || promptPayload?.partner || null
+      });
     }
   }
 
@@ -4161,14 +4622,11 @@ async function generateAiSections(promptPayload, order = null) {
   console.log('[KIE AI FINAL] validation result', JSON.stringify(finalValidation));
   if (!finalValidation.ok) {
     const failedSections = Array.isArray(finalValidation.failedSections) ? Array.from(new Set(finalValidation.failedSections.filter(Boolean))) : [];
-    throw createKieBatchError('KIE AI final validation failed', {
-      batchName: 'final_validation',
-      failedBatch: 'final_validation',
-      failedStep: 'final_validation',
-      currentStep: 'final_validation',
-      progress: getBatchProgress('html_render'),
-      failedSections,
-      userMessage: '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.'
+    console.log('[KIE AI FINAL] validation fallback', JSON.stringify({ failedSections, errors: finalValidation.errors || [] }));
+    return fallbackAiSections({
+      ...promptPayload,
+      applicant: promptPayload?.basicInfo || promptPayload?.applicant || {},
+      partner: promptPayload?.partnerInfo || promptPayload?.partner || null
     });
   }
   return processedFinalSections;
@@ -4179,12 +4637,16 @@ function buildConcernFallbackText(promptPayload) {
   const applicantInfo = promptPayload?.basicInfo || promptPayload?.applicant || {};
   const name = stripHonorificSuffix(applicantInfo.name || '') || '고객';
   const concern = String(applicantInfo.concern || '현재 삶의 방향').trim();
+  const concernLead = concern && concern !== '현재 삶의 방향'
+    ? `${name}님이 적어주신 고민인 "${concern}"은 단순히 운의 좋고 나쁨만으로 결론을 내리기보다, 지금 어떤 기준으로 선택하고 어떤 순서로 움직일지 정하는 일이 더 중요합니다.`
+    : `현재 입력된 고민이 구체적이지 않기 때문에, ${name}님의 사주 구조에서 반복되기 쉬운 고민 패턴을 중심으로 조언드리겠습니다.`;
   return [
-    `${name}님이 적어주신 고민인 "${concern}"은 단순히 운의 좋고 나쁨만으로 결론을 내리기보다, 지금 어떤 기준으로 선택하고 어떤 순서로 움직일지 정하는 일이 더 중요합니다. 사주에서는 타고난 성향과 현재 흐름을 함께 보는데, 쉽게 말하면 지금은 결과를 서두르기보다 방향과 우선순위를 먼저 정리할수록 흔들림이 줄어들 수 있는 시기입니다.`,
+    `${concernLead} 사주에서는 타고난 성향과 현재 흐름을 함께 보는데, 지금은 결과를 서두르기보다 방향과 우선순위를 먼저 정리하실수록 흔들림이 줄어들 수 있는 시기입니다.`,
     `${name}님에게 필요한 핵심은 한 번에 모든 문제를 해결하려는 방식보다, 가장 체감이 큰 한 가지를 먼저 정하고 그것과 연결된 일정·관계·지출을 함께 점검하는 접근입니다. 실제 생활에서는 해야 할 일이 많을수록 오히려 판단이 늦어지거나, 반대로 급하게 결론을 내리고 나중에 다시 수정하는 형태로 나타날 수 있습니다. 그래서 중요한 선택일수록 오늘 바로 결정할 일과 조금 더 확인할 일을 분리하는 기준이 필요합니다.`,
-    `주의할 점은 불안이 커질 때 주변 말에 쉽게 흔들리거나, 반대로 혼자 감당하려는 마음이 강해질 수 있다는 점입니다. 특히 고민이 일이나 진로, 돈, 관계와 연결되어 있다면 겉으로 좋아 보이는 제안보다 실제로 오래 유지할 수 있는 구조인지 먼저 확인하는 태도가 필요합니다. 단정적으로 좋다 나쁘다를 나누기보다, 지금의 선택이 다음 한두 달 뒤에도 감당 가능한지 살펴보는 것이 더 현실적인 기준이 됩니다.`,
-    `실천 조언으로는 첫째, 고민과 관련된 선택지를 종이에 두세 개만 적고 각각의 장단점을 짧게 비교해 보시길 권합니다. 둘째, 이번 주 안에 바로 실행할 행동 한 가지와 보류할 행동 한 가지를 나눠서 일정에 넣어 보시면 좋습니다. 셋째, 중요한 결정은 혼자 오래 끌지 말고 믿을 수 있는 사람에게 현재 상황과 원하는 결과를 짧게 설명한 뒤 피드백을 받아 보시는 것이 도움이 됩니다.`,
-    `정리하면, ${name}님의 고민은 운세의 단정적인 결론보다 지금 무엇을 먼저 정리하고 어디에 힘을 모아야 하는지에 대한 문제에 가깝습니다. 서두르지 않고 기준을 세운 뒤 한 단계씩 움직이면 불안은 줄이고 선택의 정확도는 높일 수 있습니다. 지금은 큰 결심 하나보다 작더라도 계속 이어갈 수 있는 행동 기준을 만드는 것이 가장 중요합니다.`
+    `${name}님은 특히 일과 돈, 관계가 동시에 얽힐 때 마음이 더 급해질 수 있으므로, 무엇을 먼저 안정화할지 순서를 정하는 일이 중요합니다. 겉으로 좋아 보이는 제안보다 실제로 오래 유지할 수 있는 구조인지, 지금의 체력과 일정 안에서 감당 가능한지부터 확인해 보시는 편이 좋습니다.`,
+    `주의할 점은 불안이 커질 때 주변 말에 쉽게 흔들리거나, 반대로 혼자 감당하려는 마음이 강해질 수 있다는 점입니다. 단정적으로 좋다 나쁘다를 나누기보다, 지금의 선택이 다음 한두 달 뒤에도 감당 가능한지 살펴보는 것이 더 현실적인 기준이 됩니다.`,
+    `실천 조언으로는 첫째, 고민과 관련된 선택지를 종이에 두세 개만 적고 각각의 장단점과 유지 비용을 짧게 비교해 보시길 권합니다. 둘째, 이번 주 안에 바로 실행할 행동 한 가지와 보류할 행동 한 가지를 나눠서 일정에 넣어 보시면 좋습니다. 셋째, 중요한 결정은 혼자 오래 끌지 말고 믿을 수 있는 사람에게 현재 상황과 원하는 결과를 짧게 설명한 뒤 피드백을 받아 보시는 것이 도움이 됩니다.`,
+    `정리하면, ${name}님의 고민은 운세의 단정적인 결론보다 지금 무엇을 먼저 정리하고 어디에 힘을 모아야 하는지에 대한 문제에 가깝습니다. 서두르지 않고 기준을 세운 뒤 한 단계씩 움직이면 불안은 줄이고 선택의 정확도는 높아질 수 있습니다. 지금은 큰 결심 하나보다 작더라도 계속 이어갈 수 있는 행동 기준을 만드는 일이 가장 중요합니다.`
   ].join('\n\n');
 }
 
@@ -4193,16 +4655,17 @@ function fallbackAiSections(promptPayload) {
   const partnerInfo = promptPayload?.partnerInfo || promptPayload?.partner || null;
   const name = stripHonorificSuffix(applicantInfo.name || '') || '고객';
   const concern = applicantInfo.concern || '현재 삶의 방향';
+  const { year, month } = getBaselineYearMonth(promptPayload);
   const birthTimeUnknown = applicantInfo.birthTimeUnknown === true || promptPayload?.analysisNotes?.birthTimeUnknown === true;
   const hasCompatibility = Boolean(promptPayload.compatibilityReference || hasPartnerCoreFields(partnerInfo));
   const sections = {
     '핵심 요약': `${name}님은 기본적으로 자기 기준이 분명하면서도 흐름을 읽는 감각이 좋은 편입니다. 한 번에 크게 방향을 바꾸기보다, 이미 쌓아온 기반 위에서 기회를 확장할 때 성과가 잘 나는 타입으로 보입니다. 지금 시점에서는 조급함보다 우선순위를 정리하는 힘이 중요합니다.`,
     '사주 원국 해석': `${name}님의 사주는 바깥으로 드러나는 추진력과 안쪽에서 오래 버티는 힘이 함께 읽히는 구조로 정리됩니다. 겉으로는 담담해 보여도 내면에서는 기준이 뚜렷하고, 사람이나 일에서 신뢰가 무너지면 빠르게 거리를 조정하는 경향이 있습니다. 중요한 결정은 감정만으로 움직이기보다 자신이 납득할 수 있는 이유를 확보한 뒤 실행하는 방식이 잘 맞습니다.`,
-    '대운': `1세부터 20세 전후까지는 환경 적응과 기본기 형성에 무게가 실리는 흐름입니다. 20대 이후에는 자신의 선택이 결과를 크게 바꾸는 시기로 들어가며, 30~40대에는 일과 재정, 관계의 균형을 다시 설계하는 기회가 많아집니다. 50대 이후에는 이미 축적한 경험을 바탕으로 안정성과 영향력을 함께 키우는 흐름이 이어지고, 70대 이후에는 속도를 줄이되 삶의 만족도를 높이는 방향이 중요합니다.`,
-    '세운': `기준 시점 다음 해부터 5년은 방향 재정비, 실속 강화, 인간관계 정리, 확장 기회, 장기 안정화의 순서로 읽는 것이 좋습니다. 첫해에는 준비와 정리가 핵심이고, 둘째 해에는 눈에 보이는 성과보다 구조를 다지는 것이 유리합니다. 셋째 해에는 관계의 폭이 넓어질 수 있으나 에너지 분산을 주의해야 합니다. 넷째 해에는 한 번 크게 시도해볼 만한 기회가 보이며, 다섯째 해에는 그 결과를 정착시키는 흐름이 중요합니다.`,
-    '월운': `다음 6개월은 1개월차 정비, 2개월차 실행, 3개월차 점검, 4개월차 확장, 5개월차 조율, 6개월차 수확의 리듬으로 보는 것이 좋습니다. 특히 2~4개월차에는 대인관계와 실무에서 작은 선택이 크게 작용할 수 있으니 일정과 감정 소비를 함께 관리해 주세요.`,
-    '운성': `운성의 흐름에서는 시작과 정착의 에너지가 번갈아 들어오는 모습으로 읽힙니다. 새로운 계기를 받아들이는 힘은 있으나, 그만큼 체력과 집중력 배분이 중요합니다. 시작은 빠르더라도 마무리는 한 템포 천천히 점검하는 방식이 더 안정적입니다.`,
-    '신살, 귀인': `도움을 주는 귀인성은 관계 속에서 자연스럽게 작동하는 편입니다. 다만 모든 인연이 오래 가는 것은 아니므로, 당장 반가운 제안이라도 조건과 역할을 명확히 해야 손실을 줄일 수 있습니다. 조심해야 할 시기에는 말보다 기록과 확인 절차가 더 큰 보호가 됩니다.`,
+    '대운': `20대 후반~30대 초반 대운: 책임과 역할이 커지는 시기입니다. ${name}님은 이 시기에 일과 직업 방향이 함께 무거워질 수 있고, 성과를 보여줘야 한다는 압박이 커질 수 있습니다. 직업과 재물 모두 욕심을 넓히기보다, 지금 가진 역할을 안정적으로 다지는 것이 더 중요합니다.\n\n30대 중반~40대 초반 대운: 협업과 기반 정비의 시기입니다. ${name}님은 혼자 버티는 방식보다 사람과 시스템을 통해 안정감을 만드는 편이 장기적으로 도움이 됩니다. 관계와 돈 문제를 동시에 조율해야 할 가능성이 있어, 계약과 약속은 더 꼼꼼하게 살펴보시는 것이 좋습니다.\n\n40대 중반 이후 대운: 재물 관리와 장기 안정의 시기입니다. 이 시기에는 단기 성과보다 자산 구조, 생활 기반, 일의 지속 가능성을 정리하는 흐름이 중요합니다. ${name}님은 확장보다 유지 전략을 잘 세울수록 심리적 부담을 줄일 수 있습니다.`,
+    '세운': `${year}년 세운은 ${name}님에게 책임과 선택의 기준을 다시 정리하게 만드는 흐름입니다. 일과 커리어에서는 당장 눈에 띄는 성과보다 역할의 무게와 지속 가능성을 먼저 보는 것이 좋습니다. 돈과 재물에서는 수입 확대보다 지출 구조를 단단하게 만드는 태도가 도움이 됩니다.\n\n관계와 협업에서는 모든 사람과 깊게 맞추려 하기보다, 실제로 호흡이 맞는 사람과 기준을 선명하게 맞추는 편이 더 안정적입니다. 건강과 컨디션에서는 과로와 수면 부족이 겹치면 판단력이 흔들릴 수 있으니 생활 리듬을 우선 회복해 주세요. 올해의 선택 기준은 많이 해내는 것보다 오래 유지할 수 있는 선택인지 확인하는 데 두는 것이 좋습니다.`,
+    '월운': `이번 월운은 ${year}년 ${month}월을 기준으로 해석합니다. 월초 흐름에서는 해야 할 일이 한꺼번에 몰리거나 사람 요청이 늘어날 수 있어 일정 단순화가 중요합니다. 월중 흐름에서는 일과 돈 문제를 동시에 조정해야 할 가능성이 있으므로, 급하게 결론을 내리기보다 우선순위를 다시 점검해 주세요.\n\n월말 흐름에서는 피로 누적이 드러나기 쉬워 감정 소모를 줄이고 휴식 시간을 확보하는 태도가 도움이 됩니다. 이번 달 주의할 점은 즉흥적인 소비와 무리한 약속 증가입니다. 이번 달 실천 체크리스트로는 일정 줄이기, 지출 보류, 수면 회복, 믿을 사람과의 짧은 상의가 특히 중요합니다.`,
+    '운성': `실제 운성 명칭이 모두 확인되지 않는 경우에는 운성 이론을 단정적으로 적용하기보다 에너지 리듬과 회복 패턴 중심으로 보는 것이 자연스럽습니다. ${name}님은 시작할 때 집중력이 빠르게 올라가지만, 책임이 길어질수록 체력과 감정 피로가 함께 누적될 수 있습니다. 따라서 속도를 계속 올리기보다, 중간중간 회복 구간을 만드는 방식이 더 안정적입니다.`,
+    '신살·귀인': `실제 신살·귀인 명칭이 모두 확인되지 않는 경우에는 귀인과 주변 도움의 흐름 중심으로 보는 것이 자연스럽습니다. ${name}님은 혼자 해결하려고 버티기보다 필요한 순간에 조언을 구할 때 흐름이 더 부드러워질 수 있습니다. 특히 일과 돈이 연결된 문제일수록 말보다 기록, 구두 약속보다 기준 정리가 더 큰 보호가 됩니다.`,
     '십성': `십성 흐름에서는 스스로 판단하고 책임지려는 힘이 강하게 작동합니다. 장점은 독립성과 추진력이고, 단점은 혼자 너무 많이 짊어지는 순간 피로가 크게 쌓인다는 점입니다. 협업에서는 본인이 맡아야 할 부분과 넘겨야 할 부분을 분리할수록 결과가 좋아집니다.`,
     '재물운': `재물운은 한 번에 큰 변동을 노리기보다 구조적으로 새는 지출을 줄이고, 꾸준히 쌓이는 자산 루틴을 만드는 쪽이 더 잘 맞습니다. 돈의 흐름은 사람, 기회, 일의 리듬과 연결되어 움직이므로 단기 수익에만 매달리기보다 자신이 오래 유지할 수 있는 방식인지 먼저 점검해 주세요. 특히 계약, 공동 지출, 큰 소비에서는 기준을 명확히 세우는 것이 중요합니다.`,
     '직업운': `직업운은 실무 감각과 책임감이 강점으로 보입니다. 다만 단순 반복만 있는 구조에서는 쉽게 지치기 때문에, 역할의 성장 가능성이나 권한 범위가 있는 환경이 더 잘 맞습니다. 이직이나 역할 변경을 고민한다면 명함의 화려함보다 실제 업무 범위, 배울 수 있는 폭, 사람 구성을 먼저 보세요.`,
