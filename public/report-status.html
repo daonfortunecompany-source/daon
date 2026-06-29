@@ -899,7 +899,7 @@
                 ? '리포트 생성이 완료되었습니다.'
                 : '리포트 표시 중 문제가 발생했습니다. 고객센터로 문의해 주세요.')
             : showDelayNotice
-              ? '리포트 생성 상태를 확인하고 있습니다. 잠시 후 다시 확인해 주세요.'
+              ? '리포트 정보를 확인하고 있습니다. 잠시 후 다시 확인해 주세요. 문제가 계속되면 고객센터로 문의해 주세요.'
               : isQueued
                 ? '리포트 생성이 접수되었습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.'
                 : status === 'payment_cancelled'
@@ -914,7 +914,7 @@
         : isCompleted
           ? '리포트 준비 완료'
           : showDelayNotice
-            ? '리포트 확인이 지연되고 있습니다'
+            ? '리포트 정보를 확인하고 있습니다'
             : status === 'payment_cancelled'
               ? '결제가 취소되었습니다'
               : isQueued
@@ -937,7 +937,7 @@
       }
 
       if (showDelayNotice) {
-        generationStep.textContent = '리포트 생성 상태를 확인하고 있습니다. 잠시 후 다시 확인해 주세요.';
+        generationStep.textContent = '리포트 정보를 확인하고 있습니다. 잠시 후 다시 확인해 주세요.';
         downloadStep.textContent = '문제가 계속되면 고객센터로 문의해 주세요.';
         setStepState(stepGenerating, 'active');
         setStepState(stepDownload, 'pending');
@@ -957,8 +957,8 @@
         setStepState(stepGenerating, 'done');
         setStepState(stepDownload, 'done');
       } else if (status === 'failed') {
-        generationStep.textContent = '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.';
-        downloadStep.textContent = '리포트 해석 생성 단계에서 일시적인 문제가 발생했습니다. 잠시 후 다시 확인해 주세요.';
+        generationStep.textContent = '리포트 정보를 확인하고 있습니다. 잠시 후 다시 확인해 주세요.';
+        downloadStep.textContent = '문제가 계속되면 고객센터로 문의해 주세요.';
         setStepState(stepGenerating, 'active');
         setStepState(stepDownload, 'pending');
       } else if (status === 'payment_cancelled') {
@@ -1012,7 +1012,7 @@
               ? '리포트 생성이 완료되었습니다.'
               : '리포트 표시를 다시 확인해 주세요.')
           : showDelayNotice
-            ? '리포트 확인이 지연되고 있습니다. 잠시 후 다시 확인해 주세요.'
+            ? '리포트 정보를 확인하고 있습니다. 잠시 후 다시 확인해 주세요. 문제가 계속되면 고객센터로 문의해 주세요.'
             : status === 'payment_cancelled'
               ? '결제가 취소되어 진행이 중단되었습니다.'
               : (stepProgressText[currentStep || status] || '리포트 제작 상태를 확인하고 있습니다.');
@@ -1060,7 +1060,7 @@
       } catch (error) {
         if (!pollingStopped) {
           detailBox.hidden = false;
-          detailBox.textContent = '상태를 확인하는 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도합니다.';
+          detailBox.textContent = '리포트 정보를 확인하고 있습니다. 잠시 후 다시 확인해 주세요. 문제가 계속되면 고객센터로 문의해 주세요.';
           applyProgress(12, '상태를 다시 확인하고 있습니다.');
           schedulePoll(5000);
         }

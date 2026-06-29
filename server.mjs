@@ -171,6 +171,9 @@ app.post('/api/saju/summary', async (req, res) => {
     console.log('[FREE SUMMARY] request received');
     const payload = normalizeApplicant(rawBody);
     const luckyPayload = toLuckyFlatPayload(payload);
+    if (!payload.gender) {
+      return res.status(400).json({ ok: false, error: '성별을 선택해 주세요.', message: '성별을 선택해 주세요.' });
+    }
     parsedBirthInput = {
       year: payload.birthYear,
       month: payload.birthMonth,
@@ -179,7 +182,10 @@ app.post('/api/saju/summary', async (req, res) => {
       minute: payload.birthTimeUnknown ? payload.birthMinute : (payload.birthTime ? String(payload.birthTime).split(':')[1] || '' : ''),
       calendar: payload.calendarType,
       calendarType: payload.calendarType,
+      rawGender: payload.rawGender || '',
       gender: payload.gender,
+      genderCode: payload.genderCode || payload.gender,
+      genderLabel: payload.genderLabel || formatGenderLabel(payload.gender),
       isLeapMonth: payload.isLeapMonth === true,
       birthTimeUnknown: payload.birthTimeUnknown,
       displayBirthTime: payload.birthTimeUnknown ? UNKNOWN_BIRTH_TIME_DISPLAY : (payload.birthTime || '')
@@ -197,11 +203,14 @@ app.post('/api/saju/summary', async (req, res) => {
       birthMinute: luckyPayload.birthMinute,
       calendarType: luckyPayload.calendarType,
       calendar: luckyPayload.calendar,
+      rawGender: luckyPayload.rawGender,
       gender: luckyPayload.gender,
+      genderCode: luckyPayload.genderCode,
+      genderLabel: luckyPayload.genderLabel,
       isLeapMonth: luckyPayload.isLeapMonth
     };
-    console.log('[FREE SUMMARY] parsed birth input:', JSON.stringify(parsedBirthInput));
-    console.log('[MANSAE API] request payload:', JSON.stringify(mansaeRequestPayload));
+    console.log('[INPUT NORMALIZED]', JSON.stringify({ scope: 'free_summary', ...parsedBirthInput }));
+    console.log('[LUCKY API PAYLOAD] mansae', JSON.stringify(mansaeRequestPayload));
     let mansaeData = null;
     let sajuData = null;
     let source = 'lucky';
@@ -333,6 +342,24 @@ app.post('/api/orders/create', async (req, res) => {
   try {
     const input = normalizeOrderInput(req.body || {});
     validateOrderInput(input);
+    console.log('[INPUT NORMALIZED]', JSON.stringify({
+      scope: 'order_create',
+      productType: input.productType || req.body?.productType || 'single',
+      applicant: {
+        rawGender: input.applicant?.rawGender || '',
+        gender: input.applicant?.gender || '',
+        genderCode: input.applicant?.genderCode || '',
+        genderLabel: input.applicant?.genderLabel || '',
+        birthTimeUnknown: input.applicant?.birthTimeUnknown === true,
+        calendarType: input.applicant?.calendarType || ''
+      },
+      partner: input.partner ? {
+        rawGender: input.partner?.rawGender || '',
+        gender: input.partner?.gender || '',
+        genderCode: input.partner?.genderCode || '',
+        genderLabel: input.partner?.genderLabel || ''
+      } : null
+    }));
     const product = determineProduct(input);
     const orderId = `ord_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const order = {
@@ -360,6 +387,22 @@ app.post('/api/orders/create', async (req, res) => {
       logs: []
     };
     await saveOrder(order);
+    console.log('[ORDER PAYLOAD SAVED]', JSON.stringify({
+      orderId: order.id,
+      productType: order.product?.type || 'single',
+      applicant: {
+        rawGender: order.applicant?.rawGender || '',
+        gender: order.applicant?.gender || '',
+        genderCode: order.applicant?.genderCode || '',
+        genderLabel: order.applicant?.genderLabel || ''
+      },
+      partner: order.partner ? {
+        rawGender: order.partner?.rawGender || '',
+        gender: order.partner?.gender || '',
+        genderCode: order.partner?.genderCode || '',
+        genderLabel: order.partner?.genderLabel || ''
+      } : null
+    }));
     const payment = await createPaymentRequest(order, { publicBaseUrl: order.publicBaseUrl });
     order.payment = { ...order.payment, ...payment };
     updateOrderProgress(order, { status: 'payment_pending', currentStep: 'payment_pending', progress: getDefaultProgressForStep('payment_pending'), failedStep: null, failedBatch: null, failedSections: [], statusMessage: '결제 완료를 기다리고 있습니다.' });
@@ -485,6 +528,11 @@ async function applyPayappPaymentResult(incoming, { source = 'callback' } = {}) 
 
 app.all([CONFIG.payapp.feedbackPath, '/api/payapp/feedback', '/api/payapp/callback'], async (req, res) => {
   const incoming = { ...req.query, ...req.body };
+  console.log('[PAYAPP CALLBACK RECEIVED]', JSON.stringify({
+    source: 'callback',
+    orderId: String(incoming.var1 || incoming.orderId || '').trim(),
+    payState: incoming.pay_state || incoming.payState || incoming.paystate || null
+  }));
   try {
     const order = await applyPayappPaymentResult(incoming, { source: 'callback' });
     await appendLog('payapp_callback_received', { orderId: order.id, payState: order.payment?.payState || null, mode: CONFIG.payapp.mode });
@@ -498,6 +546,11 @@ app.all([CONFIG.payapp.feedbackPath, '/api/payapp/feedback', '/api/payapp/callba
 app.all(CONFIG.payapp.returnPath, async (req, res) => {
   const incoming = { ...req.query, ...req.body };
   const fallbackOrderId = String(incoming.var1 || incoming.orderId || '').trim();
+  console.log('[PAYAPP CALLBACK RECEIVED]', JSON.stringify({
+    source: 'return',
+    orderId: fallbackOrderId,
+    payState: incoming.pay_state || incoming.payState || incoming.paystate || null
+  }));
   try {
     const order = await applyPayappPaymentResult(incoming, { source: 'return' });
     await appendLog('payapp_return_received', { orderId: order.id, payState: order.payment?.payState || null, mode: CONFIG.payapp.mode });
@@ -644,16 +697,36 @@ async function generatePremiumReport(orderId) {
     const applicantPayload = toLuckyFlatPayload(order.applicant);
     const hasPerson1 = Boolean(order.applicant?.name && order.applicant?.birthYear && order.applicant?.birthMonth && order.applicant?.birthDay);
     const hasPerson2 = Boolean(order.partner?.name && order.partner?.birthYear && order.partner?.birthMonth && order.partner?.birthDay && order.partner?.gender);
-    console.log('[ORDER] generation payload loaded', JSON.stringify({
+    console.log('[ORDER PAYLOAD LOADED]', JSON.stringify({
       orderId: order.id,
       productType: order.product?.type || 'single',
       compatibilityRequested: Boolean(order.compatibilityRequested),
       hasPerson1,
-      hasPerson2
+      hasPerson2,
+      applicant: {
+        rawGender: order.applicant?.rawGender || '',
+        gender: order.applicant?.gender || '',
+        genderCode: order.applicant?.genderCode || '',
+        genderLabel: order.applicant?.genderLabel || ''
+      },
+      partner: order.partner ? {
+        rawGender: order.partner?.rawGender || '',
+        gender: order.partner?.gender || '',
+        genderCode: order.partner?.genderCode || '',
+        genderLabel: order.partner?.genderLabel || ''
+      } : null
     }));
 
     updateOrderProgress(order, { progress: getDefaultProgressForStep('mansae'), currentStep: 'mansae', failedStep: null, statusMessage: buildGeneratingMessage('mansae') });
     await saveOrder(order);
+    console.log('[LUCKY API PAYLOAD] mansae', JSON.stringify({
+      orderId: order.id,
+      rawGender: applicantPayload.rawGender || order.applicant?.rawGender || '',
+      gender: applicantPayload.gender || '',
+      genderCode: applicantPayload.genderCode || '',
+      genderLabel: applicantPayload.genderLabel || '',
+      payload: sanitizeLuckyPayloadForLog(applicantPayload)
+    }));
     const mansaeResult = await optionalApiCall('mansae', CONFIG.lucky.mansaeUrl, [applicantPayload], warnings, false);
     if (mansaeResult.data) {
       apiSnapshots.mansae = mansaeResult.data;
@@ -663,6 +736,14 @@ async function generatePremiumReport(orderId) {
     updateOrderProgress(order, { progress: getDefaultProgressForStep('saju'), currentStep: 'saju', failedStep: null, statusMessage: buildGeneratingMessage('saju') });
     await saveOrder(order);
     const sajuCandidates = [{ ...applicantPayload }];
+    console.log('[LUCKY API PAYLOAD] saju', JSON.stringify({
+      orderId: order.id,
+      rawGender: applicantPayload.rawGender || order.applicant?.rawGender || '',
+      gender: applicantPayload.gender || '',
+      genderCode: applicantPayload.genderCode || '',
+      genderLabel: applicantPayload.genderLabel || '',
+      payload: sanitizeLuckyPayloadForLog(sajuCandidates[0])
+    }));
     const sajuResult = await optionalApiCall('saju', CONFIG.lucky.sajuUrl, sajuCandidates, warnings, true);
     if (sajuResult.data) {
       apiSnapshots.saju = sajuResult.data;
@@ -672,6 +753,14 @@ async function generatePremiumReport(orderId) {
     updateOrderProgress(order, { progress: getDefaultProgressForStep('period'), currentStep: 'period', failedStep: null, statusMessage: buildGeneratingMessage('period') });
     await saveOrder(order);
     const periodCandidates = buildPeriodPayloadCandidates(applicantPayload);
+    console.log('[LUCKY API PAYLOAD] period', JSON.stringify({
+      orderId: order.id,
+      rawGender: applicantPayload.rawGender || order.applicant?.rawGender || '',
+      gender: applicantPayload.gender || '',
+      genderCode: applicantPayload.genderCode || '',
+      genderLabel: applicantPayload.genderLabel || '',
+      payload: sanitizeLuckyPayloadForLog(periodCandidates[0] || applicantPayload)
+    }));
     const periodResult = await optionalApiCall('period', CONFIG.lucky.periodUrl, periodCandidates, warnings, true);
     if (periodResult.data) apiSnapshots.period = periodResult.data;
 
@@ -679,6 +768,22 @@ async function generatePremiumReport(orderId) {
       updateOrderProgress(order, { progress: getDefaultProgressForStep('compatibility_api'), currentStep: 'compatibility_api', failedStep: null, statusMessage: buildGeneratingMessage('compatibility_api') });
       await saveOrder(order);
       const compatibilityPayload = buildCompatibilityPayload(order.applicant, order.partner, order.partner?.memo || '');
+      console.log('[LUCKY API PAYLOAD] compatibility', JSON.stringify({
+        orderId: order.id,
+        person1: {
+          rawGender: order.applicant?.rawGender || '',
+          gender: compatibilityPayload.person1?.gender || '',
+          genderCode: order.applicant?.genderCode || '',
+          genderLabel: order.applicant?.genderLabel || ''
+        },
+        person2: {
+          rawGender: order.partner?.rawGender || '',
+          gender: compatibilityPayload.person2?.gender || '',
+          genderCode: order.partner?.genderCode || '',
+          genderLabel: order.partner?.genderLabel || ''
+        },
+        payload: sanitizeLuckyPayloadForLog(compatibilityPayload)
+      }));
       console.log('[COMPATIBILITY API] request start');
       console.log('[COMPATIBILITY API] payload check:', JSON.stringify({
         hasPerson1: Boolean(compatibilityPayload.person1),
@@ -746,7 +851,16 @@ async function generatePremiumReport(orderId) {
     await saveOrder(order);
     console.log('[REPORT HTML] render completed', JSON.stringify({ orderId: order.id, sectionCount: Object.keys(aiSections || {}).length }));
     console.log('[REPORT HTML] copy button ready', JSON.stringify({ orderId: order.id }));
-    console.log('[ORDER] status completed', JSON.stringify({ orderId: order.id, status: order.status, viewMode: 'html' }));
+    console.log('[ORDER COMPLETED]', JSON.stringify({
+      orderId: order.id,
+      status: order.status,
+      progress: order.progress,
+      failedStep: order.failedStep || null,
+      failedSections: order.failedSections || [],
+      recoverableSections: order.recoverableSections || [],
+      fatalSections: order.fatalSections || [],
+      viewMode: 'html'
+    }));
   } catch (error) {
     const order = await readOrder(orderId);
     if (order) {
@@ -830,7 +944,7 @@ async function generatePremiumReport(orderId) {
         });
         order.logs.push(logLine('generation_failed', { failedStep, currentStep, failedBatch, failedSections: recoveryState.unrecoveredFailedSections, recoverableSections, fatalSections, message: error.message }));
         await saveOrder(order);
-        console.log('[ORDER] status failed', JSON.stringify({ orderId: order.id, failedStep, currentStep, failedBatch, failedSections: recoveryState.unrecoveredFailedSections, recoverableSections, fatalSections, progress }));
+        console.log('[ORDER FAILED]', JSON.stringify({ orderId: order.id, failedStep, currentStep, failedBatch, failedSections: recoveryState.unrecoveredFailedSections, recoverableSections, fatalSections, progress }));
       }
       if (downgradedToRecoverable) {
         await appendLog('generation_recovered', { orderId, failedStep: error.failedStep || 'generation', recoverableSections, fatalSections, message: error.message });
@@ -881,7 +995,7 @@ async function callLuckyApi(url, payloadCandidates, label) {
 
   for (let payloadIndex = 0; payloadIndex < candidates.length; payloadIndex += 1) {
     const payload = candidates[payloadIndex];
-    console.log(`[LUCKY API] final request payload (${label}): ${JSON.stringify(sanitizeLuckyPayloadForLog(payload))}`);
+    console.log(`[LUCKY API PAYLOAD] ${label}`, JSON.stringify(sanitizeLuckyPayloadForLog(payload)));
     if (label === 'period') {
       console.log('[PERIOD API] payload check:', JSON.stringify({
         fieldNames: Object.keys(payload || {}).filter((key) => !key.startsWith('__')),
@@ -893,8 +1007,9 @@ async function callLuckyApi(url, payloadCandidates, label) {
       }));
     }
     const requestPayload = payload && typeof payload === 'object'
-      ? Object.fromEntries(Object.entries(payload).filter(([key]) => !key.startsWith('__')))
+      ? Object.fromEntries(Object.entries(buildLuckyApiRequestPayload(payload)).filter(([key]) => !key.startsWith('__')))
       : payload;
+    validateLuckyPayloadGender(label, requestPayload);
     for (const authVariant of authVariants) {
       try {
         const headers = {
@@ -964,35 +1079,107 @@ function sanitizeLuckyUrlForLog(url) {
   }
 }
 
+function normalizeGender(value) {
+  const raw = String(value ?? '').trim();
+  const normalized = raw.toLowerCase();
+  if (['male', 'm', 'man', 'boy', '남', '남자', '남성', '1'].includes(normalized)) {
+    return { raw, code: 'male', label: '남성' };
+  }
+  if (['female', 'f', 'woman', 'girl', '여', '여자', '여성', '2'].includes(normalized)) {
+    return { raw, code: 'female', label: '여성' };
+  }
+  return { raw, code: '', label: '' };
+}
+
+function resolveGenderMetadata(source) {
+  const candidates = [];
+  if (source && typeof source === 'object' && !Array.isArray(source)) {
+    candidates.push(
+      source.rawGender,
+      source.genderLabel,
+      source.genderCode,
+      source.gender,
+      source.sex,
+      source.value
+    );
+  } else {
+    candidates.push(source);
+  }
+  let fallbackRaw = '';
+  for (const candidate of candidates) {
+    const normalized = normalizeGender(candidate);
+    if (!fallbackRaw && normalized.raw) fallbackRaw = normalized.raw;
+    if (normalized.code) return normalized;
+  }
+  return { raw: fallbackRaw, code: '', label: '' };
+}
+
 function normalizeGenderValue(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) return '';
-  if (['male', 'm', 'man', 'boy', '남', '남자', '남성'].includes(normalized)) return 'male';
-  if (['female', 'f', 'woman', 'girl', '여', '여자', '여성'].includes(normalized)) return 'female';
-  return '';
+  return resolveGenderMetadata(value).code;
+}
+
+function formatGenderLabel(value) {
+  return resolveGenderMetadata(value).label;
 }
 
 function formatGenderForLucky(value) {
-  const normalized = normalizeGenderValue(value);
-  if (normalized === 'male') return '남자';
-  if (normalized === 'female') return '여자';
-  return '';
+  return normalizeGenderValue(value);
+}
+
+function buildLuckyApiRequestPayload(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const cloned = JSON.parse(JSON.stringify(payload));
+  const stripMetadata = (target) => {
+    if (!target || typeof target !== 'object') return target;
+    delete target.rawGender;
+    delete target.genderCode;
+    delete target.genderLabel;
+    delete target.displayBirthTime;
+    return target;
+  };
+  if (cloned.person1 || cloned.person2) {
+    stripMetadata(cloned.person1);
+    stripMetadata(cloned.person2);
+  }
+  return stripMetadata(cloned);
+}
+
+function validateLuckyPayloadGender(label, payload) {
+  const isValidGender = (value) => value === 'male' || value === 'female';
+  if (label === 'compatibility') {
+    const people = [payload?.person1, payload?.person2].filter(Boolean);
+    for (const [index, person] of people.entries()) {
+      if (!isValidGender(person?.gender)) {
+        const error = new Error(`compatibility API gender invalid for person${index + 1}: ${String(person?.gender || '') || '[empty]'}`);
+        error.failedStep = label;
+        error.progress = getDefaultProgressForStep(label);
+        throw error;
+      }
+    }
+    return;
+  }
+  if (!isValidGender(payload?.gender)) {
+    const error = new Error(`${label} API gender invalid: ${String(payload?.gender || '') || '[empty]'}`);
+    error.failedStep = label;
+    error.progress = getDefaultProgressForStep(label);
+    throw error;
+  }
 }
 
 function alignLoggedBirthInfoGender(value, requestedGender = '') {
-  const luckyGender = formatGenderForLucky(requestedGender);
-  if (!luckyGender) return summarizeLooseValue(value, 6);
+  const normalizedGender = resolveGenderMetadata(requestedGender);
+  if (!normalizedGender.code) return summarizeLooseValue(value, 6);
   const rewrite = (input, depth = 0) => {
     if (input == null || depth > 4) return input;
     if (Array.isArray(input)) return input.map((item) => rewrite(item, depth + 1));
     if (typeof input === 'object') {
       const output = {};
       for (const [key, nested] of Object.entries(input)) {
-        output[key] = /gender|sex|성별/i.test(String(key || '')) ? luckyGender : rewrite(nested, depth + 1);
+        output[key] = /gender|sex|성별/i.test(String(key || '')) ? normalizedGender.code : rewrite(nested, depth + 1);
       }
       return output;
     }
-    if (typeof input === 'string' && /^(male|female|남자|여자|남성|여성)$/i.test(input.trim())) return luckyGender;
+    if (typeof input === 'string' && /^(male|female|남자|여자|남성|여성)$/i.test(input.trim())) return normalizedGender.code;
     return input;
   };
   return summarizeLooseValue(rewrite(value), 6);
@@ -1351,9 +1538,13 @@ function normalizeApplicant(raw, isPartner = false) {
   const displayBirthTime = birthTimeUnknown
     ? UNKNOWN_BIRTH_TIME_DISPLAY
     : (normalizedBirthTime || combinedBirthTime || '');
+  const normalizedGender = resolveGenderMetadata(raw);
   return {
     name: String(raw.name || '').trim(),
-    gender: normalizeGenderValue(raw.gender),
+    rawGender: normalizedGender.raw,
+    gender: normalizedGender.code,
+    genderCode: normalizedGender.code,
+    genderLabel: normalizedGender.label,
     birthYear,
     birthMonth,
     birthDay,
@@ -1411,6 +1602,7 @@ function toLuckyFlatPayload(person) {
     : (normalizedBirthTime || (hour && minute ? `${hour}:${minute}` : ''));
   const calendar = person.calendarType === 'lunar' ? 'lunar' : 'solar';
   const calendarLabel = formatCalendarTypeForLucky(calendar);
+  const normalizedGender = resolveGenderMetadata(person);
   return {
     name: String(person.name || '').trim(),
     year,
@@ -1430,8 +1622,10 @@ function toLuckyFlatPayload(person) {
     calendarType: calendarLabel,
     calendar,
     calendarLabel,
-    gender: formatGenderForLucky(person.gender),
-    genderCode: normalizeGenderValue(person.gender),
+    rawGender: normalizedGender.raw,
+    gender: normalizedGender.code,
+    genderCode: normalizedGender.code,
+    genderLabel: normalizedGender.label,
     isLeapMonth: person.isLeapMonth === true,
     leapMonth: person.isLeapMonth === true,
     useYajasiRule: true
@@ -2313,10 +2507,14 @@ function collectPromptContext(order, apiSnapshots, warnings) {
   const fiveElements = extractDistribution(apiBase, ['오행', 'five', 'element']) || {};
   const tenGods = extractDistribution(apiBase, ['십성', 'tenGod', 'ten']) || {};
   const hasCompatibility = Boolean(apiSnapshots.compatibility && order.partner?.name);
+  const applicantGender = resolveGenderMetadata(order.applicant || {});
+  const partnerGender = resolveGenderMetadata(order.partner || {});
   return {
     basicInfo: {
       name: order.applicant?.name || '',
-      gender: order.applicant?.gender || '',
+      gender: applicantGender.code,
+      genderCode: applicantGender.code,
+      genderLabel: applicantGender.label,
       birthYear: order.applicant?.birthYear || '',
       birthMonth: order.applicant?.birthMonth || '',
       birthDay: order.applicant?.birthDay || '',
@@ -2330,7 +2528,9 @@ function collectPromptContext(order, apiSnapshots, warnings) {
     },
     partnerInfo: order.partner ? {
       name: stripHonorificSuffix(order.partner?.name || ''),
-      gender: order.partner?.gender || '',
+      gender: partnerGender.code,
+      genderCode: partnerGender.code,
+      genderLabel: partnerGender.label,
       birthYear: order.partner?.birthYear || '',
       birthMonth: order.partner?.birthMonth || '',
       birthDay: order.partner?.birthDay || '',
@@ -5466,6 +5666,8 @@ function buildSmokePromptPayload() {
     basicInfo: {
       name: '테스트 사용자',
       gender: 'male',
+      genderCode: 'male',
+      genderLabel: '남성',
       birthYear: '1996',
       birthMonth: '07',
       birthDay: '03',
@@ -5477,6 +5679,8 @@ function buildSmokePromptPayload() {
     partnerInfo: {
       name: '테스트 상대',
       gender: 'female',
+      genderCode: 'female',
+      genderLabel: '여성',
       birthYear: '1995',
       birthMonth: '05',
       birthDay: '14',
