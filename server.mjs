@@ -516,23 +516,27 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
   applyNoCacheHeaders(res);
   if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' });
 
-  const normalizedOrder = normalizeOrderFailureState(order);
-  const publicStatus = getPublicOrderStatus(normalizedOrder.status);
-  const canDeliverHtml = publicStatus === 'completed' && normalizedOrder.runtimeReport && !normalizedOrder.runtimeReport.deliveredAt;
-  const deliveredSections = canDeliverHtml ? cloneRuntimeOrder(normalizedOrder.runtimeReport.sections || {}) : null;
+  const publicStatus = getPublicOrderStatus(order.status);
+  const normalizedFailedSections = Array.isArray(order.failedSections) ? Array.from(new Set(order.failedSections.filter(Boolean))) : [];
+  const hasRuntimeSections = Boolean(order.runtimeReport?.sections && Object.keys(order.runtimeReport.sections || {}).length);
+  const hasRecoverablePartialSections = Boolean(order.artifacts?.partialAiSections && Object.keys(order.artifacts.partialAiSections || {}).length);
+  const normalizedPublicStatus = publicStatus === 'failed' && normalizedFailedSections.length === 0
+    ? (hasRuntimeSections ? 'completed' : 'generating')
+    : publicStatus;
+  const canDeliverHtml = normalizedPublicStatus === 'completed' && hasRuntimeSections;
+  const deliveredSections = canDeliverHtml ? cloneRuntimeOrder(order.runtimeReport.sections || {}) : null;
   const payload = {
-    orderId: normalizedOrder.id,
-    status: publicStatus,
-    progress: getOrderProgress(normalizedOrder),
-    currentStep: normalizedOrder.currentStep || null,
-    failedStep: normalizedOrder.failedStep || null,
-    failedBatch: normalizedOrder.failedBatch || null,
-    failedSections: Array.isArray(normalizedOrder.failedSections) ? normalizedOrder.failedSections : [],
-    message: buildStatusMessage(normalizedOrder),
-    viewMode: publicStatus === 'completed' ? 'html' : null,
+    orderId: order.id,
+    status: normalizedPublicStatus,
+    progress: getOrderProgress(order),
+    currentStep: order.currentStep || null,
+    failedStep: normalizedPublicStatus === 'failed' ? (order.failedStep || null) : null,
+    failedBatch: normalizedPublicStatus === 'failed' ? (order.failedBatch || null) : null,
+    failedSections: normalizedPublicStatus === 'failed' ? normalizedFailedSections : [],
+    message: normalizedPublicStatus === 'failed' ? buildStatusMessage(order) : buildGeneratingMessage(hasRuntimeSections ? 'completed' : (order.currentStep || 'generation')),
+    viewMode: normalizedPublicStatus === 'completed' ? 'html' : null,
     reportSections: deliveredSections,
-    reportExpired: publicStatus === 'completed' && !canDeliverHtml,
-    debugVisible: CONFIG.env !== 'production',
+    reportExpired: normalizedPublicStatus === 'completed' && !canDeliverHtml,
     applicant: {
       name: order.applicant?.name || '',
       birthDate: [order.applicant?.birthYear, order.applicant?.birthMonth, order.applicant?.birthDay].filter(Boolean).join('-'),
@@ -540,21 +544,16 @@ app.get('/api/orders/:orderId/status', async (req, res) => {
       displayBirthTime: order.applicant?.birthTimeUnknown === true ? UNKNOWN_BIRTH_TIME_REPORT_DISPLAY : (order.applicant?.birthTime || ''),
       calendarType: formatCalendarTypeForLucky(order.applicant?.calendarType || 'solar')
     },
-    reportNote: normalizedOrder.applicant?.birthTimeUnknown === true
+    reportNote: order.applicant?.birthTimeUnknown === true
       ? '출생시간이 확인되지 않아 시주를 기준으로 한 일부 세부 해석은 제한적으로 참고하는 것이 좋습니다.'
       : '',
-    statusUrl: buildOrderStatusPageUrl(normalizedOrder.id, normalizedOrder.publicBaseUrl),
-    productName: normalizedOrder.product.name,
-    productType: normalizedOrder.product?.type || 'single',
-    expectedDurationText: normalizedOrder.product?.type === 'compatibility' ? '약 5~10분' : '약 3~7분',
-    createdAt: normalizedOrder.createdAt,
-    updatedAt: normalizedOrder.updatedAt
+    statusUrl: buildOrderStatusPageUrl(order.id, order.publicBaseUrl),
+    productName: order.product.name,
+    productType: order.product?.type || 'single',
+    expectedDurationText: order.product?.type === 'compatibility' ? '약 5~10분' : '약 3~7분',
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt
   };
-  if (canDeliverHtml) {
-    order.runtimeReport.deliveredAt = new Date().toISOString();
-    order.runtimeReport.sections = null;
-    await saveOrder(order);
-  }
   res.json(payload);
 });
 
@@ -742,22 +741,50 @@ async function generatePremiumReport(orderId) {
       const progress = Number.isFinite(Number(error.progress)) ? Number(error.progress) : getDefaultProgressForStep(currentStep);
       const failedBatch = error.failedBatch || (failedStep === 'kie_ai' ? currentStep : null);
       const failedSections = Array.isArray(error.failedSections) ? Array.from(new Set(error.failedSections.filter(Boolean))) : [];
-      const nextStatus = failedSections.length ? 'failed' : (order.runtimeReport?.sections ? 'completed' : 'generating');
-      const nextMessage = failedSections.length
-        ? (error.userMessage || buildFailureMessage(failedStep))
-        : '리포트 생성 중입니다. 자동 보정 가능한 항목을 다시 확인하고 있습니다. 이 페이지를 닫지 말고 잠시만 기다려 주세요.';
-      updateOrderProgress(order, {
-        status: nextStatus,
-        progress,
-        currentStep,
-        failedStep: failedSections.length ? failedStep : null,
-        failedBatch: failedSections.length ? failedBatch : null,
-        failedSections,
-        statusMessage: nextMessage
-      });
-      order.logs.push(logLine('generation_failed', { failedStep, currentStep, failedBatch, failedSections, message: error.message }));
-      await saveOrder(order);
-      console.log('[ORDER] status failed', JSON.stringify({ orderId: order.id, failedStep, currentStep, failedBatch, failedSections, progress }));
+      const partialSections = error.partialSections && typeof error.partialSections === 'object'
+        ? error.partialSections
+        : (order.artifacts?.partialAiSections && typeof order.artifacts.partialAiSections === 'object' ? order.artifacts.partialAiSections : {});
+      const recoveryState = failedStep === 'kie_ai'
+        ? collectFailedSectionRecoveryState(failedSections, partialSections)
+        : { failedSections, usableRecoveredSections: [], unrecoveredFailedSections: failedSections };
+      const hasRecoverablePartialSections = Boolean(partialSections && Object.keys(partialSections).length);
+      if (failedStep === 'kie_ai' && hasRecoverablePartialSections && recoveryState.unrecoveredFailedSections.length === 0) {
+        order.artifacts = order.artifacts || {};
+        order.artifacts.partialAiSections = { ...partialSections };
+        updateOrderProgress(order, {
+          status: order.runtimeReport?.sections ? 'completed' : 'generating',
+          progress: order.runtimeReport?.sections ? 100 : Math.max(progress, getDefaultProgressForStep(currentStep)),
+          currentStep: order.runtimeReport?.sections ? 'completed' : currentStep,
+          failedStep: null,
+          failedBatch: null,
+          failedSections: [],
+          statusMessage: order.runtimeReport?.sections ? buildGeneratingMessage('completed') : buildGeneratingMessage(currentStep)
+        });
+        order.logs.push(logLine('generation_failure_downgraded', {
+          failedStep,
+          currentStep,
+          failedBatch,
+          failedSections,
+          usableRecoveredSections: recoveryState.usableRecoveredSections,
+          unrecoveredFailedSections: [],
+          message: error.message
+        }));
+        await saveOrder(order);
+        console.log('[ORDER] failure downgraded to recoverable', JSON.stringify({ orderId: order.id, currentStep, usableRecoveredSections: recoveryState.usableRecoveredSections }));
+      } else {
+        updateOrderProgress(order, {
+          status: 'failed',
+          progress,
+          currentStep,
+          failedStep,
+          failedBatch,
+          failedSections: recoveryState.unrecoveredFailedSections,
+          statusMessage: error.userMessage || buildFailureMessage(failedStep)
+        });
+        order.logs.push(logLine('generation_failed', { failedStep, currentStep, failedBatch, failedSections: recoveryState.unrecoveredFailedSections, message: error.message }));
+        await saveOrder(order);
+        console.log('[ORDER] status failed', JSON.stringify({ orderId: order.id, failedStep, currentStep, failedBatch, failedSections: recoveryState.unrecoveredFailedSections, progress }));
+      }
     }
     await appendLog('generation_failed', { orderId, failedStep: error.failedStep || 'generation', message: error.message });
   } finally {
@@ -1037,243 +1064,6 @@ function buildInputWarnings(input) {
   if (input.applicant.calendarType === 'lunar' && input.applicant.isLeapMonth === 'unknown') warnings.push('음력 생일이며 윤달 여부가 불확실해 확인 메모를 포함합니다.');
   if (input.partner?.memo && !hasPartnerCoreFields(input.partner)) warnings.push('상대 정보가 일부만 입력되어 궁합 API 대신 관계 관련 참고 조언 중심으로 정리합니다.');
   return warnings;
-}
-
-const VALIDATION_SEVERITY = Object.freeze({
-  PASS: 'PASS',
-  RECOVERABLE: 'RECOVERABLE',
-  FATAL: 'FATAL'
-});
-
-function uniqValidationList(values = []) {
-  return Array.from(new Set((Array.isArray(values) ? values : [values])
-    .map((item) => String(item || '').trim())
-    .filter(Boolean)));
-}
-
-function matchesDaeunPeriodExpression(text = '') {
-  const value = String(text || '');
-  return /(\d{1,2}세\s*[~\-]\s*\d{1,2}세|\d{1,2}세부터\s*\d{1,2}세|\d{1,2}세\s*~\s*\d{1,2}세)/.test(value);
-}
-
-function hasMinimumUsableSectionContent(section, text = '') {
-  const cleaned = cleanSectionText(text || '');
-  if (!cleaned) return false;
-  if (detectMetaResponseText(cleaned).detected) return false;
-  const length = countVisibleChars(cleaned);
-  const paragraphs = countMeaningfulParagraphs(cleaned);
-  if (section === '대운') {
-    return length >= 600 && paragraphs >= 4 && (matchesDaeunPeriodExpression(cleaned) || /대운/.test(cleaned));
-  }
-  if (section === '운성') {
-    return length >= 500 && paragraphs >= 4;
-  }
-  const minLength = getSectionMinVisibleChars(section);
-  const minParagraphs = getSectionMinParagraphs(section);
-  if (length >= minLength && paragraphs >= minParagraphs) return true;
-  return canAcceptSectionLengthShortfall(section, length, minLength, paragraphs, length, minLength);
-}
-
-function buildRecoverableSupplementParagraph(section, promptPayload = {}) {
-  const applicantInfo = promptPayload?.basicInfo || promptPayload?.applicant || {};
-  const name = stripHonorificSuffix(applicantInfo.name || '') || '고객';
-  switch (section) {
-    case '대운':
-      return `${name}님의 대운 흐름은 시기별 변화를 단정적으로 확정하기보다, 각 구간에서 무엇을 안정화하고 어떤 선택 기준을 세우면 좋은지 살펴보는 참고 자료로 보시면 좋습니다. 흐름이 바뀌는 시기에는 일·돈·관계의 우선순위를 다시 정리해 두는 것이 도움이 될 수 있습니다.`;
-    case '운성':
-      return '운성은 사주에서 기운이 어떤 상태로 움직이는지를 비유적으로 살펴보는 요소입니다. 이는 좋고 나쁨을 단정하기보다 현재 성향과 흐름의 강약을 이해하는 참고 자료로 보는 것이 좋습니다.';
-    case '세운':
-      return `${name}님은 한 해의 흐름을 무리하게 단정하기보다, 올해 반복되기 쉬운 선택 패턴과 생활 리듬을 현실적으로 점검해 보시면 좋습니다.`;
-    case '월운':
-      return `${name}님은 이번 달의 변화를 결과로 단정하기보다, 일정과 지출, 감정 사용량을 함께 점검하는 방식으로 참고하시면 도움이 될 수 있습니다.`;
-    case '재물운':
-    case '직업운':
-    case '애정운':
-    case '자녀운':
-    case '건강운':
-      return `${name}님은 이 영역을 좋고 나쁨으로 단정하기보다, 현재 반복되는 패턴과 생활 속 조정 포인트를 현실적으로 점검해 보시면 좋습니다.`;
-    default:
-      return '';
-  }
-}
-
-function normalizeBatchFailureState({ batchName = '', failedSections = [], finalSections = {}, promptPayload = null, fallbackSections = {} } = {}) {
-  const uniqueFailedSections = Array.from(new Set((Array.isArray(failedSections) ? failedSections : []).filter(Boolean)));
-  const repairedSections = {};
-  const recoverableSections = [];
-  const usableRecoveredSections = [];
-  const serverSupplementedSections = [];
-  const unrecoveredFailedSections = [];
-  const qualityStatus = {};
-
-  for (const section of uniqueFailedSections) {
-    const originalText = cleanSectionText(finalSections?.[section] || fallbackSections?.[section] || '');
-    let nextText = originalText;
-    let fatal = true;
-    let action = 'fatal';
-    const warnings = [];
-
-    if (hasMinimumUsableSectionContent(section, originalText)) {
-      fatal = false;
-      action = 'server_supplement';
-      recoverableSections.push(section);
-      usableRecoveredSections.push(section);
-      warnings.push(section === '대운'
-        ? '대운 구조 기준 일부 불일치 - 서버 보정 후 사용'
-        : `${section} 섹션 일부 형식 부족 - 서버 보정 후 사용`);
-      if (promptPayload) {
-        const repaired = applyRecoverableValidationRepairs(promptPayload, { [section]: originalText }, { recoverableSections: [section] });
-        nextText = cleanSectionText(repaired?.[section] || originalText);
-        if (nextText && nextText !== originalText) serverSupplementedSections.push(section);
-      }
-    } else {
-      unrecoveredFailedSections.push(section);
-    }
-
-    if (nextText) repairedSections[section] = nextText;
-    qualityStatus[section] = { section, qualityStatus: fatal ? 'fatal' : 'recoverable', action, warnings, fatal };
-  }
-
-  return {
-    batchName: getBatchRootName(batchName || getPrimaryFailedBatchName(uniqueFailedSections, 'kie_ai')) || 'kie_ai',
-    failedSections: uniqueFailedSections,
-    repairedSections,
-    recoverableSections: uniqValidationList(recoverableSections),
-    usableRecoveredSections: uniqValidationList(usableRecoveredSections),
-    serverSupplementedSections: uniqValidationList(serverSupplementedSections),
-    unrecoveredFailedSections: uniqValidationList(unrecoveredFailedSections),
-    fatalSections: uniqValidationList(unrecoveredFailedSections),
-    qualityStatus
-  };
-}
-
-function isRecoverableValidationIssue(section, issue = '') {
-  const label = String(issue || '').trim();
-  if (!label) return false;
-  if (section === '대운' && /대운 구조 기준 불일치/.test(label)) return true;
-  return /(문단 수 부족|분량 부족|건강운 도입문 중복|건강운 참고 문구 중복|고민 후반 중복 문단|운성 의미 설명 부족|신살·귀인 내용 부족|신살·귀인 표기 미통일|조사 문법 오류|재물운 핵심 항목 부족|직업운 핵심 항목 부족|애정운 핵심 항목 부족|자녀운 핵심 항목 부족|세운 .*누락|월운 .*누락|소제목.*누락|세부 항목.*누락|같은 문장 반복 과다)/.test(label);
-}
-
-function isFatalValidationIssue(section, issue = '') {
-  const label = String(issue || '').trim();
-  if (!label) return false;
-  if (/누락|개발용 문구 포함|메타 응답 포함|거절 응답 포함|단정적 표현 포함/.test(label)) return true;
-  if (section === '대운' && /대운 구조 기준 불일치/.test(label)) return false;
-  return !isRecoverableValidationIssue(section, label);
-}
-
-function enrichValidationResult(baseValidation, sections, promptPayload, options = {}) {
-  const requiredSections = options.requiredSections || Object.keys(baseValidation?.sectionErrors || {});
-  const rawSectionErrors = baseValidation?.sectionErrors || {};
-  const rawErrors = Array.isArray(baseValidation?.errors) ? baseValidation.errors.slice() : [];
-  const fatalSectionErrors = Object.fromEntries(requiredSections.map((key) => [key, []]));
-  const recoverableSectionErrors = Object.fromEntries(requiredSections.map((key) => [key, []]));
-  const sectionStates = {};
-  const fatalSections = [];
-  const recoverableSections = [];
-  const passedSections = [];
-
-  for (const key of requiredSections) {
-    const text = cleanSectionText(sections?.[key] || '');
-    const rawIssues = uniqValidationList(rawSectionErrors[key] || []);
-    const fatalIssues = [];
-    const recoverableIssues = [];
-    for (const issue of rawIssues) {
-      if (!text || isFatalValidationIssue(key, issue)) fatalIssues.push(issue);
-      else if (isRecoverableValidationIssue(key, issue)) recoverableIssues.push(issue);
-      else fatalIssues.push(issue);
-    }
-    const severity = fatalIssues.length
-      ? VALIDATION_SEVERITY.FATAL
-      : recoverableIssues.length
-        ? VALIDATION_SEVERITY.RECOVERABLE
-        : VALIDATION_SEVERITY.PASS;
-    fatalSectionErrors[key] = uniqValidationList(fatalIssues);
-    recoverableSectionErrors[key] = uniqValidationList(recoverableIssues);
-    sectionStates[key] = {
-      severity,
-      fatalIssues: fatalSectionErrors[key],
-      recoverableIssues: recoverableSectionErrors[key],
-      issues: severity === VALIDATION_SEVERITY.FATAL ? fatalSectionErrors[key] : recoverableSectionErrors[key]
-    };
-    if (severity === VALIDATION_SEVERITY.FATAL) fatalSections.push(key);
-    else if (severity === VALIDATION_SEVERITY.RECOVERABLE) recoverableSections.push(key);
-    else passedSections.push(key);
-  }
-
-  const fatalErrors = [];
-  const recoverableErrors = [];
-  for (const issue of uniqValidationList(rawErrors)) {
-    if (/json_only_response_required|raw_response_too_short_or_parse_failed|all_sections_empty_parser_error|section_map_not_found_in_supported_paths|raw_response_not_valid_json/.test(issue)) fatalErrors.push(issue);
-    else if (/total_section_length_too_short|같은 문장 반복 과다/.test(issue)) recoverableErrors.push(issue);
-    else if (!requiredSections.some((section) => rawSectionErrors[section]?.some((item) => item === issue || `${section} ${item}` === issue))) fatalErrors.push(issue);
-  }
-
-  return {
-    ...baseValidation,
-    ok: fatalSections.length === 0 && fatalErrors.length === 0,
-    errors: uniqValidationList(fatalErrors),
-    recoverableErrors: uniqValidationList(recoverableErrors),
-    rawErrors: uniqValidationList(rawErrors),
-    sectionErrors: fatalSectionErrors,
-    rawSectionErrors,
-    recoverableSectionErrors,
-    passedSections,
-    failedSections: fatalSections,
-    fatalSections,
-    recoverableSections,
-    sectionStates
-  };
-}
-
-function applyRecoverableValidationRepairs(promptPayload, sections, validation) {
-  const output = { ...(sections || {}) };
-  const recoverableSections = Array.isArray(validation?.recoverableSections) ? validation.recoverableSections : [];
-  for (const section of recoverableSections) {
-    let nextText = cleanSectionText(output[section] || '');
-    if (!nextText) continue;
-    nextText = ensureSectionSpecificStructure(promptPayload, section, nextText);
-    const supplement = buildRecoverableSupplementParagraph(section, promptPayload);
-    const needsSupplement = !hasMinimumUsableSectionContent(section, nextText)
-      || (section === '대운' && !matchesDaeunPeriodExpression(nextText))
-      || (section === '운성' && !/(운성은|장생|목욕|관대|건록|제왕|쇠|병|사|묘|절|태|양)/.test(nextText));
-    if (supplement && needsSupplement && !nextText.includes(supplement.slice(0, 24))) {
-      nextText = `${nextText}
-
-${supplement}`.trim();
-    }
-    if (countMeaningfulParagraphs(nextText) < getSectionMinParagraphs(section) || countVisibleChars(nextText) < getSectionMinVisibleChars(section)) {
-      const fallbackText = buildMissingSectionFallback(promptPayload, section);
-      if (fallbackText && !nextText.includes(String(fallbackText).slice(0, 24))) {
-        nextText = `${nextText}
-
-${fallbackText}`.trim();
-      }
-    }
-    nextText = ensureSingleSectionIntro(promptPayload, section, nextText);
-    nextText = ensureSectionPerspective(section, nextText);
-    nextText = ensurePersonalizedMentions(promptPayload, section, nextText);
-    nextText = splitLongParagraphsForMobile(nextText);
-    nextText = appendSectionSummary(section, nextText);
-    nextText = appendSectionSummaryBox(section, promptPayload, nextText);
-    if (section === '건강운') nextText = appendHealthDisclaimer(removeDuplicateHealthIntroAndDisclaimer(nextText));
-    output[section] = cleanSectionText(nextText);
-  }
-  return output;
-}
-
-function normalizeOrderFailureState(order) {
-  const failedSections = Array.isArray(order?.failedSections) ? Array.from(new Set(order.failedSections.filter(Boolean))) : [];
-  const runtimeReport = order?.runtimeReport && typeof order.runtimeReport === 'object' ? order.runtimeReport : null;
-  const hasReportSections = Boolean(runtimeReport?.sections && Object.keys(runtimeReport.sections).length);
-  const normalizedStatus = order?.status === 'failed' && failedSections.length === 0
-    ? (hasReportSections ? 'completed' : 'generating')
-    : (order?.status || 'created');
-  return {
-    ...(order || {}),
-    status: normalizedStatus,
-    failedSections
-  };
 }
 
 function getPublicOrderStatus(status) {
@@ -2527,6 +2317,77 @@ function cleanSectionText(text) {
     .trim();
 }
 
+const SECTION_KEY_ALIASES = new Map([
+  ['핵심요약', '핵심 요약'],
+  ['요약', '핵심 요약'],
+  ['summary', '핵심 요약'],
+  ['executivesummary', '핵심 요약'],
+  ['coresummary', '핵심 요약'],
+  ['summarytext', '핵심 요약'],
+  ['사주원국해석', '사주 원국 해석'],
+  ['원국해석', '사주 원국 해석'],
+  ['사주해석', '사주 원국 해석'],
+  ['interpretation', '사주 원국 해석'],
+  ['originalchartinterpretation', '사주 원국 해석'],
+  ['sajuinterpretation', '사주 원국 해석'],
+  ['personality', '십성'],
+  ['sipseong', '십성'],
+  ['tengod', '십성'],
+  ['tengods', '십성'],
+  ['daeun', '대운'],
+  ['bigfortune', '대운'],
+  ['majorfortune', '대운'],
+  ['saeun', '세운'],
+  ['yearfortune', '세운'],
+  ['yearlyfortune', '세운'],
+  ['annualfortune', '세운'],
+  ['monthly', '월운'],
+  ['monthlyfortune', '월운'],
+  ['monthfortune', '월운'],
+  ['unseong', '운성'],
+  ['신살귀인', '신살·귀인'],
+  ['shinsal', '신살·귀인'],
+  ['gwiyin', '신살·귀인'],
+  ['specialstars', '신살·귀인'],
+  ['guidingstars', '신살·귀인'],
+  ['wealth', '재물운'],
+  ['money', '재물운'],
+  ['finance', '재물운'],
+  ['career', '직업운'],
+  ['job', '직업운'],
+  ['work', '직업운'],
+  ['relationship', '애정운'],
+  ['love', '애정운'],
+  ['romance', '애정운'],
+  ['family', '자녀운'],
+  ['child', '자녀운'],
+  ['children', '자녀운'],
+  ['health', '건강운'],
+  ['advice', '실천 조언'],
+  ['practicaladvice', '실천 조언'],
+  ['actionadvice', '실천 조언'],
+  ['caution', '주의할 점'],
+  ['warning', '주의할 점'],
+  ['closing', '주의할 점'],
+  ['finalnote', '주의할 점'],
+  ['concern', '고민에 대한 조언'],
+  ['question', '고민에 대한 조언'],
+  ['concernadvice', '고민에 대한 조언'],
+  ['compatibility', '관계/궁합 해석'],
+  ['relationshipcompatibility', '관계/궁합 해석'],
+  ['궁합', '관계/궁합 해석'],
+  ['궁합참고해석', '관계/궁합 해석']
+]);
+
+function normalizeSectionKeyToken(section = '') {
+  return String(section || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[·•ㆍ]/g, '')
+    .replace(/[\/_-]+/g, '')
+    .replace(/[\s,.:()\[\]{}]+/g, '');
+}
+
 function normalizeSectionKeyAlias(section = '') {
   const normalized = String(section || '')
     .trim()
@@ -2535,11 +2396,37 @@ function normalizeSectionKeyAlias(section = '') {
     .replace(/\s*,\s*/g, ',');
   if (normalized === '신살·귀인' || normalized === '신살, 귀인' || normalized === '신살,귀인') return '신살·귀인';
   if (normalized === '궁합 참고 해석') return '관계/궁합 해석';
-  return normalized;
+  const alias = SECTION_KEY_ALIASES.get(normalizeSectionKeyToken(normalized));
+  return alias || normalized;
+}
+
+function restoreParagraphBreaks(text) {
+  const cleaned = cleanSectionText(text);
+  if (!cleaned) return '';
+  const chunks = cleaned.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  const rebuilt = [];
+  for (const chunk of chunks) {
+    const compact = chunk.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!compact) continue;
+    const visibleChars = compact.replace(/\s+/g, '').length;
+    const sentences = compact
+      .split(/(?<=[.!?]|다\.|요\.)\s+/)
+      .map((item) => item.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    if (sentences.length >= 4 && (visibleChars >= 420 || sentences.length >= 6)) {
+      const chunkSize = visibleChars >= 1000 ? 2 : 3;
+      for (let index = 0; index < sentences.length; index += chunkSize) {
+        rebuilt.push(sentences.slice(index, index + chunkSize).join(' ').trim());
+      }
+      continue;
+    }
+    rebuilt.push(compact);
+  }
+  return rebuilt.join('\n\n').trim();
 }
 
 function splitParagraphs(text) {
-  return cleanSectionText(text).split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  return restoreParagraphBreaks(text).split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
 }
 
 function countMeaningfulParagraphs(text) {
@@ -2655,6 +2542,62 @@ function normalizeAiSections(rawSections, requiredSections) {
     output[key] = typeof normalized[normalizedKey] === 'string' ? cleanSectionText(normalized[normalizedKey]) : '';
   });
   return output;
+}
+
+
+function chooseBetterSectionText(section, currentValue = '', nextValue = '') {
+  const currentText = cleanSectionText(currentValue);
+  const nextText = cleanSectionText(nextValue);
+  if (!nextText) return currentText;
+  if (!currentText) return nextText;
+  const currentUsability = inspectSectionUsability(section, currentText);
+  const nextUsability = inspectSectionUsability(section, nextText);
+  if (nextUsability.usable && !currentUsability.usable) return nextText;
+  if (currentUsability.usable && !nextUsability.usable) return currentText;
+  const currentLength = countVisibleChars(currentText);
+  const nextLength = countVisibleChars(nextText);
+  if (nextUsability.usable && currentUsability.usable && nextLength >= Math.floor(currentLength * 0.85)) return nextText;
+  if (nextLength > currentLength + 80) return nextText;
+  return currentText;
+}
+
+function mergeSectionMaps(baseSections = {}, incomingSections = {}, options = {}) {
+  const requiredSet = new Set(Array.isArray(options.requiredSections) ? options.requiredSections : []);
+  const merged = { ...(baseSections || {}) };
+  const beforeKeys = Object.keys(merged).filter((key) => String(merged[key] || '').trim());
+  const mergedKeys = [];
+  const skippedKeys = [];
+  for (const [rawKey, rawValue] of Object.entries(incomingSections || {})) {
+    const normalizedKey = normalizeSectionKeyAlias(rawKey);
+    if (requiredSet.size && !requiredSet.has(normalizedKey)) {
+      skippedKeys.push(normalizedKey || String(rawKey || ''));
+      continue;
+    }
+    const chosenText = chooseBetterSectionText(normalizedKey, merged[normalizedKey] || '', rawValue);
+    const currentText = cleanSectionText(merged[normalizedKey] || '');
+    if (chosenText && chosenText !== currentText) {
+      merged[normalizedKey] = chosenText;
+      mergedKeys.push(normalizedKey);
+    } else if (!currentText) {
+      const incomingText = cleanSectionText(rawValue);
+      if (incomingText) {
+        merged[normalizedKey] = incomingText;
+        mergedKeys.push(normalizedKey);
+      }
+    }
+  }
+  const afterKeys = Object.keys(merged).filter((key) => String(merged[key] || '').trim());
+  if (options.label) {
+    console.log('[KIE AI MERGE]', JSON.stringify({
+      label: options.label,
+      beforeKeys,
+      incomingKeys: Object.keys(incomingSections || {}).map((key) => normalizeSectionKeyAlias(key)),
+      mergedKeys,
+      skippedKeys,
+      afterKeys
+    }));
+  }
+  return merged;
 }
 
 const SECTION_INTRO_MAP = {
@@ -2779,10 +2722,26 @@ const REPEAT_NORMALIZATION_PATTERNS = [
   [/무리한\s*투자\s*주의[^.!?]*[.!?]?/g, '무리한 투자 주의']
 ];
 
+const REPEAT_GENERIC_PREFIX_PATTERNS = [
+  /^(추가로|또한|그리고|다만|특히)\s*[,，:]?\s*/,
+  /^([가-힣A-Za-z0-9_]+님은)\s*/,
+  /^(정리하면)\s*[,，:]?\s*/,
+  /^(도움이 될 수 있습니다)\s*[,，:]?\s*/
+];
+
+function normalizeRepeatedSentenceCore(sentence = '') {
+  let normalized = String(sentence || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  for (const pattern of REPEAT_GENERIC_PREFIX_PATTERNS) {
+    normalized = normalized.replace(pattern, '').trim();
+  }
+  return normalized;
+}
+
 function buildRepeatKey(sentence) {
   const normalized = String(sentence || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
-  let key = normalized;
+  let key = normalizeRepeatedSentenceCore(normalized) || normalized;
   for (const [pattern, replacement] of REPEAT_NORMALIZATION_PATTERNS) {
     key = key.replace(pattern, replacement);
   }
@@ -2958,6 +2917,32 @@ function buildDaeunRangeRows(promptPayload) {
   });
 }
 
+function getCurrentDaeunRange(promptPayload) {
+  const rows = buildDaeunRangeRows(promptPayload);
+  return rows[0] || { startAge: 24, endAge: 33, label: '현재 대운 흐름' };
+}
+
+function buildCurrentDaeunPeriodLabel(promptPayload) {
+  const row = getCurrentDaeunRange(promptPayload);
+  return `${row.startAge}세~${row.endAge}세`;
+}
+
+function hasDaeunPeriodExpression(text, promptPayload = null) {
+  const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return false;
+  const exactCurrentPeriod = promptPayload ? buildCurrentDaeunPeriodLabel(promptPayload).replace(/\s+/g, '') : '';
+  const compact = cleaned.replace(/\s+/g, '');
+  if (exactCurrentPeriod && compact.includes(exactCurrentPeriod)) return true;
+  const patterns = [
+    /\d{1,2}세\s*[~\-–—]\s*\d{1,2}세/,
+    /\d{1,2}세부터\s*\d{1,2}세(?:까지)?/,
+    /현재\s*\d{1,2}세\s*[~\-–—]\s*\d{1,2}세\s*(?:구간|대운|시기)?/,
+    /현재\s*대운(?:에서는|은|의)?/,
+    /현재\s*\d{1,2}세부터\s*\d{1,2}세(?:까지)?\s*(?:이어지는\s*)?(?:흐름|대운|시기)?/
+  ];
+  return patterns.some((pattern) => pattern.test(cleaned));
+}
+
 function buildPersonalizedSectionTail(promptPayload, section) {
   const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
   const map = {
@@ -2997,22 +2982,24 @@ function buildDaeunSupplement(promptPayload) {
   const ranges = buildDaeunRangeRows(promptPayload);
   const yearRow = getCurrentYearRow(promptPayload);
   const parts = [];
-  const selected = ranges.length ? ranges.slice(0, 3) : [
+  const selected = ranges.length ? ranges.slice(0, 2) : [
     { startAge: 24, endAge: 33, label: '첫 번째 대운 흐름' },
-    { startAge: 34, endAge: 43, label: '두 번째 대운 흐름' },
-    { startAge: 44, endAge: 53, label: '세 번째 대운 흐름' }
+    { startAge: 34, endAge: 43, label: '다음 대운 흐름' }
   ];
   selected.forEach((row, index) => {
     const focus = index === 0
-      ? '직업 방향과 수입 구조를 함께 다지는 구간'
-      : '관계 정리와 기반 안정화를 함께 보는 구간';
+      ? '현재 대운의 전체 분위기와 직업·재물 기반을 함께 다지는 구간'
+      : '다음 대운에서 관계 정리와 기반 안정화를 함께 보는 구간';
     const relationLine = index === 0
-      ? `${name}은 이 구간에서 주변 기대를 모두 맞추기보다 내 역할의 범위를 먼저 정하실 필요가 있습니다. 관계에서는 무리한 맞춤보다 기준을 설명하는 방식이 더 편안할 수 있습니다.`
-      : `${name}은 이 구간에서 사람을 넓히는 것보다 오래 갈 협업 관계를 남기는 쪽이 더 중요할 수 있습니다. 가까운 관계에서도 감정 소모가 커지기 전에 조율 포인트를 말로 정리하시는 편이 좋습니다.`;
-    parts.push(`${row.startAge}세~${row.endAge}세 대운${row.label ? ` (${row.label})` : ''}
-${focus}으로 읽힐 수 있습니다. 직업 측면에서는 성과를 빠르게 키우는 일보다 오래 가져갈 수 있는 역할과 전문성을 정리하는 일이 중요합니다. 돈의 흐름에서는 수입 확대만 보지 말고 고정비와 반복 지출을 함께 조정하실 필요가 있습니다.
+      ? `${name}은 이 구간에서 주변 기대를 모두 맞추기보다 내 역할의 범위를 먼저 정하실 필요가 있습니다. 관계와 협업에서는 무리한 맞춤보다 기준을 설명하는 방식이 더 편안할 수 있습니다. 건강과 심리 측면에서는 책임을 혼자 떠안는 흐름이 길어지면 피로가 누적될 수 있으니, 일정과 회복 시간을 함께 조정하시는 편이 도움이 됩니다.`
+      : `${name}은 이 구간에서 사람을 넓히는 것보다 오래 갈 협업 관계를 남기는 쪽이 더 중요할 수 있습니다. 가까운 관계에서도 감정 소모가 커지기 전에 조율 포인트를 말로 정리하시는 편이 좋고, 건강과 심리 부담도 미리 줄여 두실수록 다음 단계의 안정감이 커질 수 있습니다.`;
+    const intro = index === 0
+      ? `현재 ${name}은 ${row.startAge}세~${row.endAge}세 대운 구간${row.label ? ` (${row.label})` : ''}에 해당합니다.`
+      : `${row.startAge}세~${row.endAge}세 대운${row.label ? ` (${row.label})` : ''}에서는`;
+    parts.push(`${intro}
+${focus}으로 읽힐 수 있습니다. 직업과 역할 변화 측면에서는 성과를 빠르게 키우는 일보다 오래 가져갈 수 있는 역할과 전문성을 정리하는 일이 중요합니다. 재물 흐름에서는 수입 확대만 보지 말고 고정비와 반복 지출을 함께 조정하실 필요가 있습니다.
 
-${relationLine} 주의할 점은 불안이 커질 때 준비가 덜 된 상태에서 큰 결정을 서두르는 일입니다. 실천 조언으로는 연간 목표를 일·돈·관계 세 축으로 나누고, 분기마다 유지할 것과 줄일 것을 다시 점검해 보시는 것이 좋습니다.`);
+${relationLine} 주의할 점은 불안이 커질 때 준비가 덜 된 상태에서 큰 결정을 서두르는 일입니다. 현실적인 실천 조언으로는 연간 목표를 일·돈·관계 세 축으로 나누고, 분기마다 유지할 것과 줄일 것을 다시 점검해 보시는 것이 좋습니다. 이 리포트는 자기이해와 엔터테인먼트 목적의 참고 자료이며 실제 직업, 재무, 의료, 법률 판단을 대신하지는 않습니다.`);
   });
   parts.push(`대운 3줄 요약
 - 흐름: ${yearRow?.summary ? `${yearRow.summary} 이 흐름이 장기 방향에도 연결될 수 있습니다.` : '지금은 속도보다 기반과 역할을 정리하는 흐름이 중요합니다.'}
@@ -3198,7 +3185,8 @@ function splitLongParagraphsForMobile(text) {
   return rebuilt.join('\n\n').trim();
 }
 
-function removeRepeatedSentencesFromText(text, seenSentences = new Map()) {
+function removeRepeatedSentencesFromText(text, seenSentences = new Map(), options = {}) {
+  const threshold = Number.isFinite(Number(options.threshold)) ? Math.max(2, Number(options.threshold)) : 2;
   const paragraphs = String(text || '').split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
   const rebuilt = [];
   for (const paragraph of paragraphs) {
@@ -3206,9 +3194,11 @@ function removeRepeatedSentencesFromText(text, seenSentences = new Map()) {
     for (const sentence of splitReportSentences(paragraph)) {
       const normalized = sentence.replace(/\s+/g, ' ').trim();
       const repeatKey = buildRepeatKey(normalized);
-      if ((normalized.length >= 25 || repeatKey) && repeatKey && (seenSentences.get(repeatKey) || 0) >= 1) continue;
+      const shouldTrack = repeatKey && !isIgnorableRepeatedSentence(normalized);
+      const currentCount = shouldTrack ? (seenSentences.get(repeatKey) || 0) : 0;
+      if ((normalized.length >= 25 || repeatKey) && shouldTrack && currentCount >= (threshold - 1)) continue;
       kept.push(sentence);
-      if (repeatKey) seenSentences.set(repeatKey, (seenSentences.get(repeatKey) || 0) + 1);
+      if (shouldTrack) seenSentences.set(repeatKey, currentCount + 1);
     }
     if (kept.length) rebuilt.push(kept.join(' ').trim());
   }
@@ -3514,7 +3504,6 @@ function postProcessReportSections(promptPayload, sections) {
   const recognizedRequiredCount = normalizedInputKeys.filter((key) => requiredSections.includes(key)).length;
   const isNearFinalReport = recognizedRequiredCount >= Math.max(10, requiredSections.length - 1);
   const sourceSections = isNearFinalReport ? ensureRequiredSectionsPresent(promptPayload, sections) : (sections || {});
-  const normalizedSourceKeys = Object.keys(sourceSections || {}).map((key) => normalizeSectionKeyAlias(key));
   for (const [section, rawText] of Object.entries(sourceSections || {})) {
     const normalizedSection = normalizeSectionKeyAlias(section);
     let nextText = cleanSectionText(rawText);
@@ -3535,7 +3524,8 @@ function postProcessReportSections(promptPayload, sections) {
     nextText = ensurePersonalizedMentions(promptPayload, normalizedSection, nextText);
     nextText = applyHonorificsToText(nextText, inputNames);
     nextText = ensureSectionQuality(promptPayload, normalizedSection, nextText);
-    nextText = removeRepeatedSentencesFromText(nextText, seenSentences);
+    nextText = removeRepeatedSentencesFromText(nextText, new Map(), { threshold: 2 });
+    nextText = removeRepeatedSentencesFromText(nextText, seenSentences, { threshold: 3 });
     nextText = splitLongParagraphsForMobile(nextText);
     nextText = appendSectionSummary(normalizedSection, nextText);
     nextText = appendSectionSummaryBox(normalizedSection, promptPayload, nextText);
@@ -3544,6 +3534,34 @@ function postProcessReportSections(promptPayload, sections) {
     output[normalizedSection] = cleanSectionText(nextText);
   }
   return orderReportSections(promptPayload, output);
+}
+
+function buildSectionRepairFallback(promptPayload, section, currentText = '', reason = '') {
+  const cleaned = cleanSectionText(currentText);
+  const fallbackBase = buildMissingSectionFallback(promptPayload, section);
+  const qualitySupplement = buildSectionQualitySupplement(promptPayload, section);
+  let candidate = cleaned ? removeRepeatedSentencesFromText(cleaned, new Map(), { threshold: 2 }) : '';
+  candidate = cleanSectionText(candidate);
+  if (!candidate) candidate = cleanSectionText([fallbackBase, qualitySupplement].filter(Boolean).join('\n\n')) || fallbackBase;
+  if (candidate && countVisibleChars(candidate) < getSectionMinVisibleChars(section)) {
+    const extraParts = [];
+    if (fallbackBase && fallbackBase !== candidate) extraParts.push(fallbackBase);
+    if (qualitySupplement && !candidate.includes(qualitySupplement)) extraParts.push(qualitySupplement);
+    candidate = cleanSectionText([candidate, ...extraParts].filter(Boolean).join('\n\n'));
+  }
+  const processed = postProcessReportSections(promptPayload, { [section]: candidate || fallbackBase });
+  const nextText = processed?.[section] || cleanSectionText(candidate || fallbackBase);
+  if (reason) console.log('[KIE AI REPEAT/SECTION REPAIR]', JSON.stringify({ section, reason, length: countVisibleChars(nextText) }));
+  return nextText;
+}
+
+function repairSectionsWithFallback(promptPayload, sections, targetSections = [], reason = '') {
+  const merged = { ...(sections || {}) };
+  const uniqueSections = Array.from(new Set((Array.isArray(targetSections) ? targetSections : []).filter(Boolean)));
+  for (const section of uniqueSections) {
+    merged[section] = buildSectionRepairFallback(promptPayload, section, merged[section] || '', reason);
+  }
+  return merged;
 }
 
 function collectSectionObjectCandidates(parsed, requiredSections) {
@@ -3683,18 +3701,43 @@ function parseKieSectionMap(raw, requiredSections) {
   return result;
 }
 
-function detectRepeatedSentences(sections) {
+function isIgnorableRepeatedSentence(sentence = '') {
+  const normalized = String(sentence || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return true;
+  const core = normalizeRepeatedSentenceCore(normalized);
+  if (normalized.length < 28 || core.length < 22) return true;
+  if (/^(수연님은|[가-힣A-Za-z0-9_]+님은|정리하면|도움이 될 수 있습니다|좋습니다|중요합니다|필요합니다|할 수 있습니다|보실 수 있습니다|권장드립니다)/.test(normalized)) return true;
+  if (/^(이 흐름은|현재 흐름은|이번 흐름은|생활에서 바로 적용할 수 있는 선택 기준|기록[, ]확인[, ]일정 조절 같은 기본 습관)/.test(core)) return true;
+  return /(도움이 될 수 있습니다|정리하면|할 수 있습니다|좋습니다|중요합니다|권장드립니다|필요합니다)$/.test(normalized);
+}
+
+function inspectRepeatedSentences(sections, options = {}) {
+  const warningThreshold = Number.isFinite(Number(options.warningThreshold)) ? Math.max(2, Number(options.warningThreshold)) : 2;
+  const strictThreshold = Number.isFinite(Number(options.strictThreshold)) ? Math.max(warningThreshold, Number(options.strictThreshold)) : 3;
   const map = new Map();
-  for (const value of Object.values(sections || {})) {
+  for (const [section, value] of Object.entries(sections || {})) {
     const sentences = splitReportSentences(String(value || ''))
       .map((item) => item.replace(/\s+/g, ' ').trim())
-      .filter((item) => item.length >= 25 || buildRepeatKey(item));
+      .filter(Boolean);
     for (const sentence of sentences) {
       const key = buildRepeatKey(sentence) || sentence;
-      map.set(key, { sentence, count: (map.get(key)?.count || 0) + 1 });
+      if (!key || isIgnorableRepeatedSentence(sentence)) continue;
+      const current = map.get(key) || { sentence, count: 0, sections: new Set() };
+      current.count += 1;
+      current.sections.add(section);
+      if (!current.sentence || String(sentence || '').length > String(current.sentence || '').length) current.sentence = sentence;
+      map.set(key, current);
     }
   }
-  return Array.from(map.values()).filter((item) => item.count >= 2);
+  const all = Array.from(map.values()).map((item) => ({ sentence: item.sentence, count: item.count, sections: Array.from(item.sections) }));
+  return {
+    warnings: all.filter((item) => item.count >= warningThreshold),
+    critical: all.filter((item) => item.count >= strictThreshold)
+  };
+}
+
+function detectRepeatedSentences(sections, options = {}) {
+  return inspectRepeatedSentences(sections, options).critical;
 }
 
 function hasCompatibilityPromptPayload(promptPayload) {
@@ -3793,7 +3836,11 @@ const META_RESPONSE_PHRASES = [
   '제공된 지시에는',
   '다음과 같이 나누어',
   '죄송합니다',
-  '작성할 수 없습니다'
+  '작성할 수 없습니다',
+  '제공된 정보가 부족합니다',
+  '요청하신 형식의 내용을 그대로 작성해 드릴 수는 없습니다',
+  '근거 없이 단정',
+  '죄송하지만'
 ];
 
 const KIE_POLICY_REFUSAL_PHRASES = [
@@ -3805,6 +3852,9 @@ const KIE_POLICY_REFUSAL_PHRASES = [
   '성공 가능성',
   '예측할 수 없습니다',
   '제공된 정보만으로',
+  '제공된 정보가 부족합니다',
+  '요청하신 형식의 내용을 그대로 작성해 드릴 수는 없습니다',
+  '근거 없이 단정',
   '운세나 사업 성공',
   '상세한 사주 해석',
   '미래를 예측',
@@ -3922,6 +3972,91 @@ function detectMetaResponseText(text) {
   };
 }
 
+function inspectSectionUsability(section, text) {
+  const cleaned = restoreParagraphBreaks(text);
+  const length = countVisibleChars(cleaned);
+  const paragraphs = countMeaningfulParagraphs(cleaned);
+  const metaResponse = detectMetaResponseText(cleaned);
+  const policyRefusal = detectKiePolicyRefusal(cleaned);
+  const minLength = ['직업운', '대운'].includes(section) ? 600 : getSectionMinVisibleChars(section);
+  const minParagraphs = ['직업운', '대운'].includes(section) ? 4 : getSectionMinParagraphs(section);
+  const hasRequiredDaeunContext = section !== '대운'
+    || hasDaeunPeriodExpression(cleaned)
+    || [/(대운)/, /(흐름|시기|전환점)/, /(조언|주의|실천)/].filter((regex) => regex.test(cleaned)).length >= 3;
+  return {
+    usable: Boolean(cleaned) && length >= minLength && paragraphs >= minParagraphs && hasRequiredDaeunContext && !metaResponse.detected && !policyRefusal.detected,
+    text: cleaned,
+    length,
+    paragraphs,
+    minLength,
+    minParagraphs,
+    hasRequiredDaeunPeriod: hasRequiredDaeunContext,
+    metaResponse,
+    policyRefusal
+  };
+}
+
+function hasUsableSectionContent(section, text) {
+  return inspectSectionUsability(section, text).usable;
+}
+
+function isSectionReadyForDelivery(section, text) {
+  const cleaned = restoreParagraphBreaks(text);
+  if (!cleaned) return false;
+  const usability = inspectSectionUsability(section, cleaned);
+  if (usability.usable) return true;
+  if (usability.metaResponse.detected || usability.policyRefusal.detected) return false;
+  if (/(api|json|system|model|data structure|raw|debug|missingfields|requiredfields|계산 확인 메모|fallback|prompt|engine|content-type|status\s*500|error|downloadurl|pdfpath|pdf|orderid|stack trace)/i.test(cleaned)) return false;
+  const minLength = ['직업운', '대운'].includes(section) ? 600 : getSectionMinVisibleChars(section);
+  const minParagraphs = ['직업운', '대운'].includes(section) ? 4 : getSectionMinParagraphs(section);
+  const paragraphFloor = Math.max(2, minParagraphs - 1);
+  const lengthFloor = Math.max(Math.floor(minLength * 0.88), minLength - 80);
+  const paragraphs = Math.max(usability.paragraphs, countMeaningfulParagraphs(cleaned));
+  const hasDaeunContext = section !== '대운'
+    || usability.hasRequiredDaeunPeriod
+    || [/(대운)/, /(흐름|시기|전환점)/, /(조언|주의|실천)/].filter((regex) => regex.test(cleaned)).length >= 3;
+  return usability.length >= lengthFloor && paragraphs >= paragraphFloor && hasDaeunContext;
+}
+
+function recalculateFailedSections(requiredSections = [], finalSections = {}, validation = {}) {
+  const severities = validation?.sectionSeverities || {};
+  return requiredSections.filter((section) => {
+    const text = cleanSectionText(finalSections?.[section] || '');
+    if (!text) return true;
+    if (severities[section] === VALIDATION_SEVERITY.FATAL) return true;
+    return !isSectionReadyForDelivery(section, text);
+  });
+}
+
+function pruneFailedSectionsWithAvailableContent(failedSections = [], finalSections = {}, usableRecoveredSections = [], fallbackSections = {}) {
+  const usableSet = new Set((Array.isArray(usableRecoveredSections) ? usableRecoveredSections : []).filter(Boolean));
+  return Array.from(new Set((Array.isArray(failedSections) ? failedSections : []).filter(Boolean))).filter((section) => {
+    if (usableSet.has(section)) return false;
+    if (String(finalSections?.[section] || '').trim()) return false;
+    if (String(fallbackSections?.[section] || '').trim()) return false;
+    return true;
+  });
+}
+
+function collectFailedSectionRecoveryState(failedSections = [], finalSections = {}, fallbackSections = {}) {
+  const normalizedFailedSections = Array.from(new Set((Array.isArray(failedSections) ? failedSections : []).filter(Boolean)));
+  const usableRecoveredSections = normalizedFailedSections.filter((section) => {
+    const candidateText = String(finalSections?.[section] || fallbackSections?.[section] || '');
+    return hasUsableSectionContent(section, candidateText);
+  });
+  const unrecoveredFailedSections = pruneFailedSectionsWithAvailableContent(normalizedFailedSections, finalSections, usableRecoveredSections, fallbackSections);
+  return {
+    failedSections: normalizedFailedSections,
+    usableRecoveredSections,
+    unrecoveredFailedSections
+  };
+}
+
+function isRecoverableLifeSectionValidationError(section, label = '') {
+  if (!['재물운', '직업운', '애정운', '자녀운', '건강운'].includes(String(section || ''))) return false;
+  return /(핵심 항목 부족|도입문 중복|참고 문구 중복)/.test(String(label || ''));
+}
+
 function isAcceptedJsonDetectedFormat(format = '') {
   return format === 'json' || format === 'json_wrapper';
 }
@@ -3932,6 +4067,76 @@ function summarizeSectionLengths(sections, requiredSections) {
 
 function validateSectionMap(sectionMap, promptPayload, meta = {}, options = {}) {
   return validateAiSections(sectionMap, promptPayload, meta, options);
+}
+
+
+const VALIDATION_SEVERITY = Object.freeze({ PASS: 'PASS', RECOVERABLE: 'RECOVERABLE', FATAL: 'FATAL' });
+
+function getValidationIssueSeverity(section, label = '') {
+  const normalized = String(label || '').trim();
+  if (!normalized) return VALIDATION_SEVERITY.PASS;
+  if (/^(누락|메타 응답 포함|거절문 포함|개발용 문구 포함)$/.test(normalized)) return VALIDATION_SEVERITY.FATAL;
+  if (section === '대운' && /대운 기간 표현 부족|대운 구조 기준/.test(normalized)) return VALIDATION_SEVERITY.RECOVERABLE;
+  return VALIDATION_SEVERITY.RECOVERABLE;
+}
+
+function getGlobalValidationSeverity(label = '') {
+  const normalized = String(label || '').trim();
+  if (!normalized) return VALIDATION_SEVERITY.PASS;
+  if (/raw_response_too_short_or_parse_failed|all_sections_empty_parser_error|json_only_response_required/.test(normalized)) return VALIDATION_SEVERITY.FATAL;
+  return VALIDATION_SEVERITY.RECOVERABLE;
+}
+
+function buildValidationOutcome({ requiredSections, errors, sectionErrors, paragraphCounts, sectionLengths, totalLength, minimumTotal, meta, repeatInspection, warnings }) {
+  const fatalErrors = [];
+  const recoverableErrors = [];
+  for (const error of errors || []) {
+    if (getGlobalValidationSeverity(error) === VALIDATION_SEVERITY.FATAL) fatalErrors.push(error);
+    else recoverableErrors.push(error);
+  }
+  const sectionSeverities = {};
+  const passedSections = [];
+  const recoverableSections = [];
+  const fatalSections = [];
+  for (const key of requiredSections) {
+    const labels = Array.isArray(sectionErrors[key]) ? sectionErrors[key] : [];
+    const severities = labels.map((label) => getValidationIssueSeverity(key, label));
+    const severity = severities.includes(VALIDATION_SEVERITY.FATAL)
+      ? VALIDATION_SEVERITY.FATAL
+      : severities.includes(VALIDATION_SEVERITY.RECOVERABLE)
+        ? VALIDATION_SEVERITY.RECOVERABLE
+        : VALIDATION_SEVERITY.PASS;
+    sectionSeverities[key] = severity;
+    if (severity === VALIDATION_SEVERITY.FATAL) fatalSections.push(key);
+    else if (severity === VALIDATION_SEVERITY.RECOVERABLE) recoverableSections.push(key);
+    else passedSections.push(key);
+  }
+  const ok = fatalErrors.length === 0 && fatalSections.length === 0;
+  return {
+    ok,
+    reason: ok ? 'ok' : (fatalErrors.includes('raw_response_too_short_or_parse_failed') ? 'raw_response_too_short_or_parse_failed' : 'section_validation_failed'),
+    errors: [...fatalErrors, ...recoverableErrors],
+    fatalErrors,
+    recoverableErrors,
+    sectionErrors,
+    sectionSeverities,
+    passedSections,
+    recoverableSections,
+    fatalSections,
+    failedSections: fatalSections,
+    paragraphCounts,
+    sectionLengths,
+    totalSectionLength: totalLength,
+    minimumTotalLength: minimumTotal,
+    rawLength: Number(meta.rawLength || 0),
+    detectedFormat: meta.detectedFormat || 'unknown',
+    sourcePath: meta.sourcePath || '',
+    parseFailureReason: meta.parseFailureReason || '',
+    foundSectionKeys: meta.foundSectionKeys || [],
+    repeated: (repeatInspection?.critical || []).slice(0, 6),
+    repeatedWarnings: (repeatInspection?.warnings || []).slice(0, 10),
+    warnings
+  };
 }
 
 function validateAiSectionsLegacy(sections, promptPayload, meta = {}, options = {}) {
@@ -4047,31 +4252,24 @@ function validateAiSectionsLegacy(sections, promptPayload, meta = {}, options = 
       errors.push('관계/궁합 해석 단정적 표현 포함');
     }
   }
-  const repeated = detectRepeatedSentences(sections);
-  if (repeated.length) errors.push('같은 문장 반복 과다');
-  const passedSections = requiredSections.filter((key) => sectionErrors[key].length === 0);
-  const failedSections = requiredSections.filter((key) => sectionErrors[key].length > 0);
-  const baseValidation = {
-    ok: errors.length === 0,
-    reason: errors.length ? (errors.includes('raw_response_too_short_or_parse_failed') || errors.includes('all_sections_empty_parser_error') ? 'raw_response_too_short_or_parse_failed' : 'section_validation_failed') : 'ok',
+  const repeatInspection = inspectRepeatedSentences(sections, { warningThreshold: 2, strictThreshold: 3 });
+  const repeated = repeatInspection.critical;
+  const warnings = [];
+  if (repeatInspection.warnings.length) warnings.push('같은 문장 반복 감지');
+  if (repeatInspection.critical.length) warnings.push('동일 문장 과다 반복 섹션 후처리 필요');
+  return buildValidationOutcome({
+    requiredSections,
     errors,
     sectionErrors,
-    passedSections,
-    failedSections,
     paragraphCounts,
     sectionLengths,
-    totalSectionLength: totalLength,
-    minimumTotalLength: minimumTotal,
-    rawLength: Number(meta.rawLength || 0),
-    detectedFormat: meta.detectedFormat || 'unknown',
-    sourcePath: meta.sourcePath || '',
-    parseFailureReason: meta.parseFailureReason || '',
-    foundSectionKeys: meta.foundSectionKeys || [],
-    repeated: repeated.slice(0, 6)
-  };
-  return enrichValidationResult(baseValidation, sections, promptPayload, { requiredSections });
+    totalLength,
+    minimumTotal,
+    meta,
+    repeatInspection,
+    warnings
+  });
 }
-
 
 function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
   const requiredSections = options.requiredSections || buildRequiredAiSections(hasCompatibilityPromptPayload(promptPayload));
@@ -4079,6 +4277,7 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
   const requireRawLength = options.requireRawLength === true;
   const requireJsonOnly = options.requireJsonOnly === true;
   const errors = [];
+  const warnings = [];
   const sectionErrors = Object.fromEntries(requiredSections.map((key) => [key, []]));
   if (requireJsonOnly && !isAcceptedJsonDetectedFormat(meta.detectedFormat || '')) errors.push('json_only_response_required');
   const paragraphCounts = {};
@@ -4131,11 +4330,10 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
       }
     }
     if (key === '직업운') {
-      const checks = [/(환경|업무)/, /(피해야|맞지 않는)/, /(강점)/, /(이직|전환)/, /(기획|운영|관리|데이터 정리|교육|상담|행정|품질관리|프로젝트 매니징)/];
-      if (checks.filter((regex) => regex.test(text)).length < 5) {
-        sectionErrors[key].push('직업운 핵심 항목 부족');
-        errors.push('직업운 핵심 항목 부족');
-      }
+      const checks = [/(직업적 성향|일하는 방식|역할이 분명한 조직|기준이 명확한 환경)/, /(업무 환경|환경|협업 구조|조직)/, /(강점|성장 가능성|전문성을 꾸준히 쌓는 방식)/, /(주의|피해야|맞지 않는|책임을 혼자 떠안지 않는 것이 중요)/, /(협업|도움|함께 일|커리어 조언|이직|전환)/];
+      const matched = checks.filter((regex) => regex.test(text)).length;
+      const careerUsable = length >= 600 && paragraphs >= 4;
+      if (matched < 4 && careerUsable) warnings.push('직업운 핵심 항목 일부 부족 - 생성 본문 사용');
     }
     if (key === '애정운') {
       const checks = [/(기준)/, /(상대|유형)/, /(조심|피로)/, /(감정 표현|표현)/, /(연애|결혼|현실)/];
@@ -4168,17 +4366,45 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
       errors.push('고민 후반 중복 문단');
     }
     if (key === '대운') {
-      const ageBandMatches = text.match(/\d{1,2}세\s*~\s*\d{1,2}세/g) || [];
+      const ageBandMatches = text.match(/\d{1,2}세\s*[~\-–—]\s*\d{1,2}세/g) || [];
       const hasMixedBands = /(20대 후반~30대 초반|30대 중반~40대 초반|40대 중반 이후)/.test(text);
-      if (ageBandMatches.length < 3 || hasMixedBands || !/대운 3줄 요약/.test(text)) {
-        sectionErrors[key].push('대운 구조 기준 불일치');
-        errors.push('대운 구조 기준 불일치');
+      const hasCurrentPeriod = hasDaeunPeriodExpression(text, promptPayload);
+      const daeunMetaResponse = detectMetaResponseText(text);
+      const daeunPolicyRefusal = detectKiePolicyRefusal(text);
+      const daeunUsable = Boolean(text.trim())
+        && length >= 600
+        && paragraphs >= 4
+        && hasCurrentPeriod
+        && !daeunMetaResponse.detected
+        && !daeunPolicyRefusal.detected;
+      if (!hasCurrentPeriod) {
+        sectionErrors[key].push('대운 기간 표현 부족');
+        errors.push('대운 기간 표현 부족');
       }
+      const structureMismatch = ageBandMatches.length < 3 || hasMixedBands || !/대운 3줄 요약/.test(text);
+      if (structureMismatch && Boolean(text.trim()) && !daeunMetaResponse.detected && !daeunPolicyRefusal.detected) {
+        warnings.push('대운 구조 기준 일부 불일치 - 생성 본문 사용');
+      }
+      const recommendedChecks = [
+        /(직업|일|커리어|역할)/,
+        /(재물|돈|수입|지출)/,
+        /(관계|협업|사람)/,
+        /(건강|심리|피로|컨디션)/,
+        /(주의|조심)/,
+        /(실천|조언|도움이 될 수 있습니다|참고하시면 좋습니다)/
+      ];
+      const recommendedMatched = recommendedChecks.filter((regex) => regex.test(text)).length;
+      if (daeunUsable && recommendedMatched < 4) warnings.push('대운 권장 관점 일부 부족 - 생성 본문 사용');
     }
     const metaResponse = detectMetaResponseText(text);
     if (metaResponse.detected) {
       sectionErrors[key].push('메타 응답 포함');
       errors.push(`${key} 메타 응답 포함`);
+    }
+    const policyRefusal = detectKiePolicyRefusal(text);
+    if (policyRefusal.detected) {
+      sectionErrors[key].push('거절문 포함');
+      errors.push(`${key} 거절문 포함`);
     }
     if (/(님\s+님|님님)/.test(text)) {
       sectionErrors[key].push('중복 호칭 포함');
@@ -4198,31 +4424,48 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
     const errorIndex = errors.indexOf(errorLabel);
     if (errorIndex >= 0) errors.splice(errorIndex, 1);
   }
+  for (const key of requiredSections) {
+    if (!sectionErrors[key]?.length) continue;
+    const usability = inspectSectionUsability(key, sections?.[key] || '');
+    if (!usability.usable) continue;
+    const recoverable = sectionErrors[key].filter((label) => isRecoverableLifeSectionValidationError(key, label));
+    if (!recoverable.length) continue;
+    sectionErrors[key] = sectionErrors[key].filter((label) => !recoverable.includes(label));
+    for (const label of recoverable) {
+      const variants = [label, `${key} ${label}`];
+      for (const variant of variants) {
+        let index = errors.indexOf(variant);
+        while (index >= 0) {
+          errors.splice(index, 1);
+          index = errors.indexOf(variant);
+        }
+      }
+    }
+    if (recoverable.some((label) => /핵심 항목 부족/.test(label))) {
+      warnings.push(`${key} 핵심 항목 일부 부족 - 생성 본문 사용`);
+    } else {
+      warnings.push(`${key} 경미한 검증 이슈 - 생성 본문 사용`);
+    }
+  }
   if (requireRawLength && Number(meta.rawLength || 0) < 500) errors.push('raw_response_too_short_or_parse_failed');
   if (enforceTotalLength && totalLength < minimumTotal) errors.push('total_section_length_too_short');
   if (Object.values(sectionLengths).every((value) => Number(value || 0) === 0)) errors.push('all_sections_empty_parser_error');
-  const repeated = detectRepeatedSentences(sections);
-  if (repeated.length) errors.push('같은 문장 반복 과다');
-  const passedSections = requiredSections.filter((key) => sectionErrors[key].length === 0);
-  const failedSections = requiredSections.filter((key) => sectionErrors[key].length > 0);
-  return {
-    ok: errors.length === 0,
-    reason: errors.length ? (errors.includes('raw_response_too_short_or_parse_failed') || errors.includes('all_sections_empty_parser_error') ? 'raw_response_too_short_or_parse_failed' : 'section_validation_failed') : 'ok',
+  const repeatInspection = inspectRepeatedSentences(sections, { warningThreshold: 2, strictThreshold: 3 });
+  const repeated = repeatInspection.critical;
+  if (repeatInspection.warnings.length) warnings.push('같은 문장 반복 감지');
+  if (repeatInspection.critical.length) warnings.push('동일 문장 과다 반복 섹션 후처리 필요');
+  return buildValidationOutcome({
+    requiredSections,
     errors,
     sectionErrors,
-    passedSections,
-    failedSections,
     paragraphCounts,
     sectionLengths,
-    totalSectionLength: totalLength,
-    minimumTotalLength: minimumTotal,
-    rawLength: Number(meta.rawLength || 0),
-    detectedFormat: meta.detectedFormat || 'unknown',
-    sourcePath: meta.sourcePath || '',
-    parseFailureReason: meta.parseFailureReason || '',
-    foundSectionKeys: meta.foundSectionKeys || [],
-    repeated: repeated.slice(0, 6)
-  };
+    totalLength,
+    minimumTotal,
+    meta,
+    repeatInspection,
+    warnings
+  });
 }
 
 
@@ -4510,6 +4753,20 @@ function buildSingleSectionPromptGuide(section) {
     base.push('결혼/이별/성공/실패를 단정하지 말고, 운명론적 표현과 확정적 예언을 금지하세요.');
     base.push('사과문, 거절문, 안내문, 코드블록, 요청받지 않은 다른 key를 절대 쓰지 마세요.');
   }
+  if (section === '대운') {
+    base.push('대운 섹션 첫 부분에는 반드시 현재 대운 기간을 1회 이상 포함하세요. 예: 현재 24세~33세 대운 구간에 해당합니다.');
+    base.push('대운에는 현재 대운의 전체 분위기, 직업과 역할 변화, 재물 흐름, 인간관계와 협업 흐름, 건강과 심리적 부담, 주의할 점, 현실적인 실천 조언을 자연스러운 상담 문체의 6~10문단으로 작성하세요.');
+    base.push('위 항목명을 소제목으로 나눌 필요는 없으며, 특정 템플릿이 일부 달라도 본문이 충분하면 괜찮습니다. 점술적 단정 표현은 피하고 가능성이 있습니다, 도움이 될 수 있습니다, 참고하시면 좋습니다 같은 표현을 사용하세요.');
+    base.push('이 리포트는 자기이해와 엔터테인먼트 목적의 참고 자료이며 실제 직업, 재무, 의료, 법률 판단을 대체하지 않는다는 취지를 자연스럽게 반영하세요.');
+    base.push('죄송하지만, 작성할 수 없습니다, 제공된 정보가 부족합니다 같은 메타 응답은 절대 쓰지 마세요.');
+  }
+  if (section === '직업운') {
+    base.push('직업운에는 직업적 성향, 잘 맞는 업무 환경, 강점과 성장 가능성, 조심해야 할 업무 패턴, 협업 방식, 현실적인 커리어 조언을 자연스러운 문단 속에 반드시 포함하세요.');
+    base.push('위 항목명을 소제목으로 나눌 필요는 없지만, 6문단 이상 10문단 이하의 상담 문체로 작성하세요.');
+    base.push('점술적 단정 표현은 피하고 가능성이 있습니다, 도움이 될 수 있습니다, 참고하시면 좋습니다 같은 표현을 사용하세요.');
+    base.push('이 리포트는 자기이해와 엔터테인먼트 목적의 참고 자료이며 실제 직업 선택, 재무 판단, 의료 판단, 법률 판단을 대체하지 않는다는 취지를 자연스럽게 반영하세요.');
+    base.push('죄송하지만, 작성할 수 없습니다, 제공된 정보가 부족합니다, 요청하신 형식의 내용을 그대로 작성해 드릴 수는 없습니다 같은 메타 응답은 절대 쓰지 마세요.');
+  }
   return base.join(' ');
 }
 
@@ -4521,6 +4778,7 @@ function buildSectionRequirementGuide(sections, isolated = false) {
 
 function getSectionMinParagraphs(section) {
   const map = {
+    '대운': 4,
     '재물운': 4,
     '직업운': 4,
     '애정운': 4,
@@ -4544,8 +4802,13 @@ function buildSectionSpecificPromptInstructions(sections, promptPayload = {}) {
     '이름 뒤 조사 오류가 생기지 않도록 이름님가 같은 표현은 금지하고, 이름님이 또는 이름님께서로만 쓰세요.'
   ];
   const { year, month } = getBaselineYearMonth(promptPayload);
+  const currentDaeunPeriodLabel = buildCurrentDaeunPeriodLabel(promptPayload);
   if (sections.includes('대운')) {
-    lines.push('대운은 반드시 24세~33세, 34세~43세, 44세~53세처럼 숫자 나이대 기준을 3개 이상 명시하세요. 각 구간마다 해당 나이대, 주요 흐름, 직업/돈/관계 중 최소 2가지 이상, 주의할 점, 실천 조언을 포함하세요. 마지막에는 반드시 대운 3줄 요약을 넣으세요. 20대 후반~30대 초반 같은 혼합 표현은 금지하고, 메타 응답이나 거절문은 절대 쓰지 마세요.');
+    lines.push(`대운 섹션 첫 부분에는 반드시 현재 대운 기간을 자연스럽게 포함하세요. 예: 현재 ${currentDaeunPeriodLabel} 대운 구간에 해당합니다.`);
+    lines.push('대운은 섹션 존재 여부, 본문 길이, 문단 수, 대운 기간 표현 포함 여부가 더 중요합니다. 특정 소제목이나 고정 템플릿이 일부 달라도 괜찮습니다.');
+    lines.push('대운에는 현재 대운의 전체 분위기, 직업과 역할 변화, 재물 흐름, 인간관계와 협업 흐름, 건강과 심리적 부담, 주의할 점, 현실적인 실천 조언을 자연스러운 상담 문체의 6문단 이상 10문단 이하로 작성하세요.');
+    lines.push('위 항목명을 소제목으로 나눌 필요는 없고, 현재 24세부터 33세까지 이어지는 흐름, 현재 24세~33세 구간, 현재 대운에서는 같은 자연스러운 표현을 사용해도 됩니다.');
+    lines.push('점술적 단정 표현은 피하고 가능성이 있습니다, 도움이 될 수 있습니다, 참고하시면 좋습니다 같은 표현을 사용하세요. 이 리포트는 자기이해와 엔터테인먼트 목적의 참고 자료이며 실제 직업, 재무, 의료, 법률 판단을 대체하지 않는다는 취지를 자연스럽게 반영하세요.');
   }
   if (sections.includes('세운')) {
     lines.push(`${year}년 세운이라는 점을 첫 문장에 분명히 밝히고, 일/커리어, 돈/재물, 관계/협업, 건강/컨디션, 올해의 선택 기준을 나누어 작성하세요.`);
@@ -4563,7 +4826,12 @@ function buildSectionSpecificPromptInstructions(sections, promptPayload = {}) {
     lines.push('재물운에는 돈이 들어오는 방식, 소비 패턴, 지출이 새는 지점, 저축/투자 주의점, 직업 수입 또는 부업 가능성, 올해 재물 관리 팁을 반드시 포함하고 최소 4문단 이상 작성하세요.');
   }
   if (sections.includes('직업운')) {
-    lines.push('직업운에는 잘 맞는 업무 환경, 피해야 할 업무 환경, 강점이 드러나는 역할, 이직/전환 시 확인할 기준, 기획·운영·관리·데이터 정리·교육·상담·행정·품질관리·프로젝트 매니징 같은 추천 직무 예시를 단정하지 않는 표현으로 포함하고 최소 4문단 이상 작성하세요.');
+    lines.push('직업운에는 반드시 직업적 성향, 잘 맞는 업무 환경, 강점과 성장 가능성, 조심해야 할 업무 패턴, 협업 방식, 현실적인 커리어 조언을 자연스러운 상담 문체로 포함하세요.');
+    lines.push('직업운은 항목명을 소제목으로 나눌 필요는 없지만 최소 6문단 이상 10문단 이하로 작성하고, 각 문단은 2~4문장 이내로 유지하세요.');
+    lines.push('역할이 분명한 조직, 기준이 명확한 환경, 협력과 도움을 주고받는 환경, 전문성을 꾸준히 쌓는 방식, 책임을 혼자 떠안지 않는 기준 같은 표현을 활용해도 좋으며, 정확한 키워드 반복보다 의미가 자연스럽게 전달되도록 작성하세요.');
+    lines.push('점술적 단정 표현은 피하고 가능성이 있습니다, 도움이 될 수 있습니다, 참고하시면 좋습니다 같은 표현을 사용하세요.');
+    lines.push('기획·운영·관리·데이터 정리·교육·상담·행정·품질관리·프로젝트 매니징 같은 역할 예시는 단정하지 않는 표현으로만 포함하고, 죄송하지만/작성할 수 없습니다/제공된 정보가 부족합니다 같은 메타 응답은 절대 쓰지 마세요.');
+    lines.push('이 리포트는 자기이해와 엔터테인먼트 목적의 참고 자료이며 실제 직업 선택, 재무 판단, 의료 판단, 법률 판단을 대체하지 않는다는 취지를 자연스럽게 반영하세요.');
   }
   if (sections.includes('애정운')) {
     lines.push('애정운에는 관계에서 중요하게 보는 기준, 잘 맞는 상대 유형, 조심해야 할 관계 패턴, 감정 표현 방식, 연애/결혼에서 현실적으로 점검할 부분을 포함하고 반드시 가능성 중심 표현만 사용하세요. 최소 4문단 이상 작성하세요.');
@@ -4769,24 +5037,10 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
     const metaResponse = detectMetaResponseText(result.raw);
     if (metaResponse.detected) {
       console.log('[KIE AI] meta response detected', JSON.stringify({ batchName: batch.batchName, matches: metaResponse.matches }));
-      if (Object.keys(preservedUsableSections).length === batch.sections.length) {
-        console.log('[KIE AI BATCH] discard meta/refusal attempt and keep previous usable sections', JSON.stringify({ batchName: batch.batchName, preservedSections: Object.keys(preservedUsableSections), matches: metaResponse.matches }));
-        return {
-          ok: true,
-          sections: preservedUsableSections,
-          validation: {
-            ok: true,
-            passedSections: Object.keys(preservedUsableSections),
-            failedSections: [],
-            recoverableSections: []
-          }
-        };
-      }
       if (!isSingleSection) {
-        return { ok: false, splitRecommended: true, splitReason: 'meta_response_detected', matches: metaResponse.matches, partialSections: { ...preservedUsableSections } };
+        return { ok: false, splitRecommended: true, splitReason: 'meta_response_detected', matches: metaResponse.matches, partialSections: {} };
       }
-      lastError = createKieBatchError('KIE AI meta response detected', { batchName: batch.batchName, failedSections: batch.sections.filter((section) => !preservedUsableSections[section]) });
-      lastError.partialSections = { ...preservedUsableSections };
+      lastError = createKieBatchError('KIE AI meta response detected', { batchName: batch.batchName, failedSections: batch.sections });
       retryReason = metaResponse.matches.join(', ') || 'meta_response_detected';
       if (attempt < maxAttempts) {
         await persistBatchProgress(order, batch.batchName, 'kie_batch_retry', { attempt, reason: retryReason });
@@ -4798,7 +5052,8 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
 
     const parsedMeta = parseKieSectionMap(result.raw, batch.sections);
     const normalized = parsedMeta.sections || Object.fromEntries(batch.sections.map((key) => [key, '']));
-    const validation = validateSectionMap(normalized, promptPayload, parsedMeta, {
+    const processedSections = postProcessReportSections(promptPayload, normalized);
+    const validation = validateSectionMap(processedSections, promptPayload, parsedMeta, {
       requiredSections: batch.sections,
       enforceTotalLength: true,
       requireRawLength: false,
@@ -4810,25 +5065,18 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
     console.log('[KIE AI BATCH] passed sections', JSON.stringify(validation.passedSections || []));
     console.log('[KIE AI BATCH] failed sections', JSON.stringify(validation.failedSections || []));
     console.log('[KIE AI BATCH] validation result', JSON.stringify(validation));
-    rememberUsableSections(normalized, validation);
     if (isCompatibilityBatch) {
       console.log('[KIE AI COMPATIBILITY] parsed keys', JSON.stringify(validation.foundSectionKeys.length ? validation.foundSectionKeys : Object.keys(normalized)));
       console.log('[KIE AI COMPATIBILITY] section length', JSON.stringify(validation.sectionLengths));
       console.log('[KIE AI COMPATIBILITY] paragraph count', JSON.stringify(validation.paragraphCounts));
       console.log('[KIE AI COMPATIBILITY] validation result', JSON.stringify({ ok: validation.ok, errors: validation.errors, failedSections: validation.failedSections }));
     }
-    if (Array.isArray(validation.recoverableSections) && validation.recoverableSections.length) {
-      console.log('[KIE AI BATCH] recoverable sections', JSON.stringify(validation.recoverableSections));
-    }
     if (validation.ok) {
-      const repairedSections = Array.isArray(validation.recoverableSections) && validation.recoverableSections.length
-        ? applyRecoverableValidationRepairs(promptPayload, normalized, validation)
-        : normalized;
-      console.log('[KIE AI BATCH] success', JSON.stringify({ batchName: batch.batchName, sections: batch.sections, recoverableSections: validation.recoverableSections || [] }));
+      console.log('[KIE AI BATCH] success', JSON.stringify({ batchName: batch.batchName, sections: batch.sections }));
       if (isCompatibilityBatch) {
         console.log('[KIE AI COMPATIBILITY] success', JSON.stringify({ attempt, sections: batch.sections }));
       }
-      return { ok: true, sections: repairedSections, validation };
+      return { ok: true, sections: processedSections, validation };
     }
     retryReason = validation.parseFailureReason || validation.errors.slice(0, 8).join(' | ') || 'batch_validation_failed';
     if (attempt < maxAttempts) {
@@ -4840,26 +5088,13 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       continue;
     }
     if (shouldSplitBatchOnValidation(batch, validation)) {
-      return { ok: false, splitRecommended: true, splitReason: retryReason, validation, partialSections: normalized };
-    }
-    if (Object.keys(preservedUsableSections).length === batch.sections.length) {
-      console.log('[KIE AI BATCH] recovered from earlier usable attempt', JSON.stringify({ batchName: batch.batchName, preservedSections: Object.keys(preservedUsableSections) }));
-      return {
-        ok: true,
-        sections: preservedUsableSections,
-        validation: {
-          ok: true,
-          passedSections: Object.keys(preservedUsableSections),
-          failedSections: [],
-          recoverableSections: []
-        }
-      };
+      return { ok: false, splitRecommended: true, splitReason: retryReason, validation, partialSections: processedSections };
     }
     lastError = createKieBatchError('KIE AI batch validation failed', {
       batchName: batch.batchName,
-      failedSections: Array.isArray(validation.failedSections) ? Array.from(new Set(validation.failedSections.filter(Boolean))).filter((section) => !preservedUsableSections[section]) : []
+      failedSections: Array.isArray(validation.failedSections) ? Array.from(new Set(validation.failedSections.filter(Boolean))) : []
     });
-    lastError.partialSections = { ...(lastError.partialSections || {}), ...preservedUsableSections };
+    lastError.partialSections = { ...processedSections };
     if (isCompatibilityBatch) {
       console.log('[KIE AI COMPATIBILITY] failed', JSON.stringify({ attempt, reason: retryReason, willRetry: false }));
     }
@@ -4899,7 +5134,12 @@ async function generateKieBatchOrSplit(promptPayload, batch, endpointPath, order
     batchResult = await generateKieBatch(promptPayload, batch, endpointPath, order);
   } catch (error) {
     if (rootBatchName === 'concern') return concernFallback();
-    throwWithPartialSections(error, {}, Array.isArray(error?.failedSections) ? error.failedSections : []);
+    const failedSections = Array.isArray(error?.failedSections) && error.failedSections.length ? error.failedSections : batch.sections.slice();
+    if (CONFIG.allowLocalFallback) {
+      const repaired = repairSectionsWithFallback(promptPayload, error?.partialSections || {}, failedSections, error?.message || 'batch_generation_failed');
+      if (Object.keys(repaired).length) return repaired;
+    }
+    throwWithPartialSections(error, error?.partialSections || {}, failedSections);
   }
 
   if (batchResult?.ok) return batchResult.sections;
@@ -4912,31 +5152,48 @@ async function generateKieBatchOrSplit(promptPayload, batch, endpointPath, order
     const failedSections = Array.isArray(validation.failedSections)
       ? Array.from(new Set(validation.failedSections.filter(Boolean)))
       : [];
+    const usableSections = batch.sections.filter((section) => hasUsableSectionContent(section, partialSections?.[section] || ''));
+    const preservedSections = Array.from(new Set([...passedSections, ...usableSections]));
     const missingSections = batch.sections.filter((section) => !String(partialSections?.[section] || '').trim());
-    const regenTargets = failedSections.length ? failedSections : (missingSections.length ? missingSections : batch.sections);
-    const merged = Object.fromEntries(passedSections.map((section) => [section, partialSections[section]]));
-    console.log('[KIE AI BATCH] passed sections', JSON.stringify(passedSections));
+    const regenTargets = batch.sections.filter((section) => !preservedSections.includes(section) && (failedSections.includes(section) || missingSections.includes(section) || !String(partialSections?.[section] || '').trim()));
+    const merged = Object.fromEntries(preservedSections.map((section) => [section, partialSections[section]]));
+    console.log('[KIE AI BATCH] passed sections', JSON.stringify(preservedSections));
     console.log('[KIE AI BATCH] failed sections', JSON.stringify(regenTargets));
+    console.log('[KIE AI BATCH] usable partial sections', JSON.stringify(usableSections));
     console.log('[KIE AI BATCH] regenerate failed sections only', JSON.stringify({ batchName: batch.batchName, failedSections: regenTargets }));
+    if (!regenTargets.length) return merged;
     for (const section of regenTargets) {
       const singleBatch = { batchName: `${batch.batchName}:${section}`, sections: [section], parentBatchName: batch.batchName, singleSectionMode: true };
       let singleResult;
       try {
         singleResult = await generateKieBatch(promptPayload, singleBatch, endpointPath, order);
       } catch (error) {
+        if (CONFIG.allowLocalFallback) {
+          const recoveredSection = repairSectionsWithFallback(promptPayload, { ...merged, ...(error?.partialSections || {}) }, [section], error?.message || 'single_section_failed');
+          Object.assign(merged, mergeSectionMaps(merged, recoveredSection, { requiredSections: [section], label: `single_section_fallback:${section}` }));
+          continue;
+        }
         throwWithPartialSections(error, merged, [section]);
       }
       if (!singleResult?.ok) {
+        if (CONFIG.allowLocalFallback) {
+          const repairedSection = repairSectionsWithFallback(promptPayload, { ...merged, ...(singleResult?.sections || {}) }, [section], 'single_section_validation_failed');
+          Object.assign(merged, mergeSectionMaps(merged, repairedSection, { requiredSections: [section], label: `single_section_validation_repair:${section}` }));
+          continue;
+        }
         throwWithPartialSections(createKieBatchError(`KIE AI single-section batch failed: ${section}`, {
           batchName: batch.batchName,
           failedSections: [section]
         }), merged, [section]);
       }
-      Object.assign(merged, singleResult.sections || {});
+      Object.assign(merged, mergeSectionMaps(merged, singleResult.sections || {}, { requiredSections: [section], label: `single_section_success:${section}` }));
     }
     return merged;
   }
   if (rootBatchName === 'concern') return concernFallback();
+  if (CONFIG.allowLocalFallback) {
+    return repairSectionsWithFallback(promptPayload, batchResult?.partialSections || {}, batch.sections.slice(), batchResult?.splitReason || `batch_failed:${batch.batchName}`);
+  }
   throwWithPartialSections(createKieBatchError(`KIE AI batch failed: ${batch.batchName}`, {
     batchName: batch.batchName,
     failedSections: batch.sections.slice()
@@ -5195,7 +5452,70 @@ async function runKieSmokeTest(mode = 'smoke', candidate = 'all') {
   return { ok: Boolean(winner), mode, candidate, configuredEndpointPath: allCandidates[0], tests, winner };
 }
 
+function logFinalSectionSnapshot(label, sections, requiredSections, extra = {}) {
+  const presentKeys = requiredSections.filter((section) => String(sections?.[section] || '').trim());
+  console.log('[KIE AI FINAL SNAPSHOT]', JSON.stringify({
+    label,
+    requiredSections,
+    presentKeys,
+    lengths: summarizeSectionLengths(sections || {}, requiredSections),
+    ...extra
+  }));
+}
+
+function finalizeReportSections(promptPayload, sections, requiredSections) {
+  let working = mergeSectionMaps({}, sections || {}, { requiredSections, label: 'finalize:initial_merge' });
+  working = mergeSectionMaps(working, ensureRequiredSectionsPresent(promptPayload, working), { requiredSections, label: 'finalize:ensure_required' });
+  working = postProcessReportSections(promptPayload, working);
+
+  const validateCurrent = (label) => {
+    const validation = validateSectionMap(working, promptPayload, {
+      rawLength: requiredSections.reduce((sum, key) => sum + countVisibleChars(working[key] || ''), 0),
+      detectedFormat: 'merged_sections',
+      sourcePath: label
+    }, {
+      requiredSections,
+      enforceTotalLength: false,
+      requireRawLength: false
+    });
+    const failedSections = recalculateFailedSections(requiredSections, working, validation);
+    logFinalSectionSnapshot(label, working, requiredSections, {
+      failedSections,
+      recoverableSections: validation.recoverableSections || [],
+      fatalSections: validation.fatalSections || [],
+      validationOk: validation.ok
+    });
+    console.log('[KIE AI FINAL] validation audit', JSON.stringify({
+      label,
+      requiredSections,
+      finalSectionKeys: Object.keys(working || {}).filter((key) => String(working[key] || '').trim()),
+      failedSections,
+      recoverableSections: validation.recoverableSections || [],
+      fatalSections: validation.fatalSections || []
+    }));
+    return { validation, failedSections };
+  };
+
+  let state = validateCurrent('finalize:initial_validation');
+  if ((state.validation.recoverableSections || []).length) {
+    const repairedRecoverable = repairSectionsWithFallback(promptPayload, working, state.validation.recoverableSections, 'final_recoverable_repair');
+    working = postProcessReportSections(promptPayload, mergeSectionMaps(working, repairedRecoverable, { requiredSections, label: 'finalize:recoverable_repair' }));
+    state = validateCurrent('finalize:after_recoverable_repair');
+  }
+  if (state.failedSections.length) {
+    const repairedFailed = repairSectionsWithFallback(promptPayload, working, state.failedSections, 'final_failed_repair');
+    working = postProcessReportSections(promptPayload, mergeSectionMaps(working, repairedFailed, { requiredSections, label: 'finalize:failed_repair' }));
+    state = validateCurrent('finalize:after_failed_repair');
+  }
+  return {
+    sections: working,
+    validation: state.validation,
+    failedSections: state.failedSections
+  };
+}
+
 async function generateAiSections(promptPayload, order = null) {
+
   if (!CONFIG.ai.apiKey) {
     console.log('[KIE AI FINAL] AI API key missing, using local fallback sections');
     return fallbackAiSections({
@@ -5238,7 +5558,9 @@ async function generateAiSections(promptPayload, order = null) {
       const result = settled[index];
       if (result.status === 'fulfilled') {
         const sections = postProcessReportSections(promptPayload, result.value.sections || {});
-        Object.assign(finalSections, sections);
+        const mergedSections = mergeSectionMaps(finalSections, sections, { requiredSections: batch.sections, label: `batch_success:${batch.batchName}` });
+        Object.keys(finalSections).forEach((key) => { delete finalSections[key]; });
+        Object.assign(finalSections, mergedSections);
         await persistBatchProgress(order, batch.batchName, 'kie_batch_success', {
           sections: Object.keys(sections),
           lengths: summarizeSectionLengths(sections, batch.sections)
@@ -5247,7 +5569,9 @@ async function generateAiSections(promptPayload, order = null) {
         const error = result.reason instanceof Error ? result.reason : new Error(String(result.reason || 'unknown'));
         if (error.partialSections && typeof error.partialSections === 'object' && Object.keys(error.partialSections).length) {
           const preservedSections = postProcessReportSections(promptPayload, error.partialSections);
-          Object.assign(finalSections, preservedSections);
+          const mergedSections = mergeSectionMaps(finalSections, preservedSections, { requiredSections: batch.sections, label: `batch_partial_preserve:${batch.batchName}` });
+          Object.keys(finalSections).forEach((key) => { delete finalSections[key]; });
+          Object.assign(finalSections, mergedSections);
           console.log('[KIE AI BATCH] preserved completed sections after partial failure', JSON.stringify({
             batchName: batch.batchName,
             preservedSections: Object.keys(preservedSections),
@@ -5276,131 +5600,92 @@ async function generateAiSections(promptPayload, order = null) {
           : [];
       }
       if (!Number.isFinite(Number(error.progress))) error.progress = getBatchProgress(firstFailure.batch.batchName);
-      const normalizedFailure = normalizeBatchFailureState({
+      const aggregatedFailedSections = Array.from(new Set(failures.flatMap(({ batch, error: batchError }) => {
+        const fromError = Array.isArray(batchError?.failedSections) && batchError.failedSections.length ? batchError.failedSections : [];
+        return fromError.length ? fromError : (Array.isArray(batch?.sections) ? batch.sections : []);
+      }).filter(Boolean)));
+      const initialRecoveryState = collectFailedSectionRecoveryState(aggregatedFailedSections, finalSections);
+      const usableRecoveredSections = initialRecoveryState.usableRecoveredSections;
+      let unrecoveredFailedSections = initialRecoveryState.unrecoveredFailedSections;
+      console.log('[KIE AI FINAL] batch failure fallback', JSON.stringify({
         batchName: firstFailure.batch.batchName,
-        failedSections: Array.isArray(error.failedSections) ? error.failedSections : [],
-        finalSections,
-        promptPayload
-      });
-      if (Object.keys(normalizedFailure.repairedSections || {}).length) {
-        Object.assign(finalSections, normalizedFailure.repairedSections);
-      }
-      console.log('[KIE AI FINAL] batch failure normalized', JSON.stringify({
-        batchName: normalizedFailure.batchName,
-        recoverableSections: normalizedFailure.recoverableSections,
-        usableRecoveredSections: normalizedFailure.usableRecoveredSections,
-        unrecoveredFailedSections: normalizedFailure.unrecoveredFailedSections,
-        serverSupplementedSections: normalizedFailure.serverSupplementedSections,
-        qualityStatus: normalizedFailure.qualityStatus
+        failedSections: initialRecoveryState.failedSections,
+        usableRecoveredSections,
+        unrecoveredFailedSections,
+        message: error.message || 'unknown'
       }));
-      if (!normalizedFailure.unrecoveredFailedSections.length) {
-        console.log('[KIE AI FINAL] batch recovered_success', JSON.stringify({
-          batchName: firstFailure.batch.batchName,
-          passedSections: firstFailure.batch.sections.filter((section) => !normalizedFailure.recoverableSections.includes(section)),
-          recoverableSections: normalizedFailure.recoverableSections,
-          usableRecoveredSections: normalizedFailure.usableRecoveredSections,
-          serverSupplementedSections: normalizedFailure.serverSupplementedSections,
-          failedSections: [],
-          unrecoveredFailedSections: []
-        }));
+      if (!unrecoveredFailedSections.length) {
+        const mergedSections = mergeSectionMaps(finalSections, ensureRequiredSectionsPresent(promptPayload, finalSections), { requiredSections: buildRequiredAiSections(hasCompatibilityPromptPayload(promptPayload)), label: 'wave_recovered:ensure_required' });
+        Object.keys(finalSections).forEach((key) => { delete finalSections[key]; });
+        Object.assign(finalSections, mergedSections);
         if (order) {
-          await persistBatchProgress(order, firstFailure.batch.batchName, 'kie_batch_recovered', {
-            recoverableSections: normalizedFailure.recoverableSections,
-            usableRecoveredSections: normalizedFailure.usableRecoveredSections,
-            serverSupplementedSections: normalizedFailure.serverSupplementedSections,
-            unrecoveredFailedSections: normalizedFailure.unrecoveredFailedSections,
-            qualityStatus: normalizedFailure.qualityStatus
-          });
+          order.artifacts = order.artifacts || {};
+          order.artifacts.partialAiSections = { ...finalSections };
+          order.logs.push(logLine('kie_wave_recovered_success', {
+            batches: wave.map((batch) => batch.batchName),
+            status: 'recovered_success',
+            usableRecoveredSections,
+            unrecoveredFailedSections: [],
+            failedSections: []
+          }));
+          await saveOrder(order);
         }
         continue;
       }
-      console.log('[KIE AI FINAL] batch failure fallback', JSON.stringify({
-        batchName: firstFailure.batch.batchName,
-        failedSections: normalizedFailure.unrecoveredFailedSections,
-        message: error.message || 'unknown'
-      }));
       if (!CONFIG.allowLocalFallback) {
         const fatal = createKieBatchError('KIE AI batch generation failed after retries', {
           batchName: firstFailure.batch.batchName,
-          failedSections: normalizedFailure.unrecoveredFailedSections,
+          failedSections: unrecoveredFailedSections,
           progress: error.progress || getBatchProgress(firstFailure.batch.batchName)
         });
         fatal.partialSections = { ...finalSections };
         throw fatal;
       }
-      return fallbackAiSections({
-        ...promptPayload,
-        applicant: promptPayload?.basicInfo || promptPayload?.applicant || {},
-        partner: promptPayload?.partnerInfo || promptPayload?.partner || null
-      });
+      if (unrecoveredFailedSections.length) {
+        const mergedSections = mergeSectionMaps(finalSections, repairSectionsWithFallback(promptPayload, finalSections, unrecoveredFailedSections, 'wave_failure_local_fallback'), { requiredSections: buildRequiredAiSections(hasCompatibilityPromptPayload(promptPayload)), label: 'wave_failure_local_fallback' });
+        Object.keys(finalSections).forEach((key) => { delete finalSections[key]; });
+        Object.assign(finalSections, mergedSections);
+      }
+      const mergedSections = mergeSectionMaps(finalSections, ensureRequiredSectionsPresent(promptPayload, finalSections), { requiredSections: buildRequiredAiSections(hasCompatibilityPromptPayload(promptPayload)), label: 'wave_soft_recovered:ensure_required' });
+      Object.keys(finalSections).forEach((key) => { delete finalSections[key]; });
+      Object.assign(finalSections, mergedSections);
+      unrecoveredFailedSections = collectFailedSectionRecoveryState(unrecoveredFailedSections, finalSections).unrecoveredFailedSections;
+      if (order) {
+        order.artifacts = order.artifacts || {};
+        order.artifacts.partialAiSections = { ...finalSections };
+        order.logs.push(logLine('kie_wave_soft_recovered', {
+          batches: wave.map((batch) => batch.batchName),
+          status: unrecoveredFailedSections.length ? 'soft_recovered_with_pending_failures' : 'recovered_success',
+          usableRecoveredSections,
+          unrecoveredFailedSections,
+          failedSections: unrecoveredFailedSections
+        }));
+        await saveOrder(order);
+      }
+      continue;
     }
   }
 
   const requiredSections = buildRequiredAiSections(hasCompatibility);
-  const totalLength = requiredSections.reduce((sum, key) => sum + countVisibleChars(finalSections[key] || ''), 0);
-  console.log('[KIE AI FINAL] merged section keys', JSON.stringify(Object.keys(finalSections)));
-  console.log('[KIE AI FINAL] total length', JSON.stringify({ totalLength, requiredSections }));
-  const processedFinalSections = postProcessReportSections(promptPayload, finalSections);
-  const finalValidation = validateSectionMap(processedFinalSections, promptPayload, {
-    rawLength: totalLength,
-    detectedFormat: 'merged_sections',
-    sourcePath: 'batch_merge'
-  }, {
-    requiredSections,
-    enforceTotalLength: true,
-    requireRawLength: false
-  });
-  console.log('[KIE AI FINAL] validation result', JSON.stringify(finalValidation));
-  const repairedFinalSections = Array.isArray(finalValidation.recoverableSections) && finalValidation.recoverableSections.length
-    ? applyRecoverableValidationRepairs(promptPayload, processedFinalSections, finalValidation)
-    : processedFinalSections;
-  if (finalValidation.ok) {
-    console.log('[KIE AI FINAL] validation success', JSON.stringify({ requiredSections, failedSections: finalValidation.failedSections || [], recoverableSections: finalValidation.recoverableSections || [] }));
-    return repairedFinalSections;
-  }
-  const failedSections = Array.isArray(finalValidation.failedSections) ? Array.from(new Set(finalValidation.failedSections.filter(Boolean))) : [];
-  const normalizedFinalFailure = normalizeBatchFailureState({
-    batchName: getPrimaryFailedBatchName(failedSections, 'kie_ai'),
-    failedSections,
-    finalSections: repairedFinalSections,
-    promptPayload
-  });
-  if (Object.keys(normalizedFinalFailure.repairedSections || {}).length) {
-    Object.assign(repairedFinalSections, normalizedFinalFailure.repairedSections);
-  }
-  console.log('[KIE AI FINAL] final failedSections recomputed', JSON.stringify({
-    failedSections,
-    recoverableSections: normalizedFinalFailure.recoverableSections,
-    usableRecoveredSections: normalizedFinalFailure.usableRecoveredSections,
-    serverSupplementedSections: normalizedFinalFailure.serverSupplementedSections,
-    unrecoveredFailedSections: normalizedFinalFailure.unrecoveredFailedSections,
-    qualityStatus: normalizedFinalFailure.qualityStatus
+  const finalized = finalizeReportSections(promptPayload, finalSections, requiredSections);
+  console.log('[KIE AI FINAL] validation result', JSON.stringify({
+    failedSections: finalized.failedSections,
+    recoverableSections: finalized.validation.recoverableSections || [],
+    fatalSections: finalized.validation.fatalSections || [],
+    errors: finalized.validation.errors || []
   }));
-  if (!normalizedFinalFailure.unrecoveredFailedSections.length) {
-    console.log('[KIE AI FINAL] validation success after failure normalization', JSON.stringify({
-      failedSections: [],
-      recoverableSections: normalizedFinalFailure.recoverableSections,
-      serverSupplementedSections: normalizedFinalFailure.serverSupplementedSections
-    }));
-    return repairedFinalSections;
+  if (finalized.failedSections.length === 0) {
+    console.log('[KIE AI FINAL] validation success', JSON.stringify({ requiredSections, failedSections: [] }));
+    return finalized.sections;
   }
-  console.log('[KIE AI FINAL] validation fallback', JSON.stringify({ failedSections: normalizedFinalFailure.unrecoveredFailedSections, errors: finalValidation.errors || [], recoverableSections: finalValidation.recoverableSections || [] }));
-  if (!CONFIG.allowLocalFallback) {
-    const fatal = createKieBatchError('KIE AI final validation failed after retries', {
-      batchName: getPrimaryFailedBatchName(normalizedFinalFailure.unrecoveredFailedSections, 'kie_ai'),
-      failedSections: normalizedFinalFailure.unrecoveredFailedSections,
-      progress: getBatchProgress(getPrimaryFailedBatchName(normalizedFinalFailure.unrecoveredFailedSections, 'kie_ai'))
-    });
-    fatal.partialSections = { ...repairedFinalSections };
-    throw fatal;
-  }
-  return fallbackAiSections({
-    ...promptPayload,
-    applicant: promptPayload?.basicInfo || promptPayload?.applicant || {},
-    partner: promptPayload?.partnerInfo || promptPayload?.partner || null
+  const fatal = createKieBatchError('KIE AI final validation failed after retries', {
+    batchName: getPrimaryFailedBatchName(finalized.failedSections, 'kie_ai'),
+    failedSections: finalized.failedSections,
+    progress: getBatchProgress(getPrimaryFailedBatchName(finalized.failedSections, 'kie_ai'))
   });
+  fatal.partialSections = { ...finalized.sections };
+  throw fatal;
 }
-
 
 function buildConcernFallbackText(promptPayload) {
   const applicantInfo = promptPayload?.basicInfo || promptPayload?.applicant || {};
