@@ -389,6 +389,7 @@
       font-size: 15px;
       color: #4d4340;
       word-break: keep-all;
+      font-weight: 400;
     }
 
     .report-summary-title {
@@ -408,6 +409,14 @@
       line-height: 1.85;
       font-size: 15px;
       word-break: keep-all;
+      font-weight: 400;
+    }
+
+    .report-card p strong,
+    .report-card p b,
+    .report-list li strong,
+    .report-list li b {
+      font-weight: 400;
     }
 
     .report-copy-wrap {
@@ -743,11 +752,19 @@
       return title;
     }
 
+    function stripInlineFormatting(text) {
+      return String(text || '')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/__(.*?)__/g, '$1')
+        .replace(/<\/?(?:b|strong)>/gi, '')
+        .trim();
+    }
+
     function getReportSectionBody(sections, title) {
       if (title === '신살·귀인') {
-        return String(sections['신살·귀인'] || sections['신살,귀인'] || '').trim();
+        return stripInlineFormatting(String(sections['신살·귀인'] || sections['신살,귀인'] || '').trim());
       }
-      return String(sections[title] || '').trim();
+      return stripInlineFormatting(String(sections[title] || '').trim());
     }
 
     function buildReportText(data) {
@@ -814,7 +831,7 @@
 
 
     function normalizeInlineSummaryBullets(text) {
-      let output = String(text || '').replace(/•\s*/g, '- ');
+      let output = stripInlineFormatting(String(text || '')).replace(/•\s*/g, '- ');
       const replacements = [
         [/((?:[가-힣A-Za-z0-9\s]+님을 위한 핵심 정리|핵심 정리|대운 3줄 요약))\s*-\s*(강점|흐름):\s*([^\n]+?)\s*-\s*주의:\s*([^\n]+?)\s*-\s*실천:\s*([^\n]+)/g, '$1\n\n- $2: $3\n- 주의: $4\n- 실천: $5'],
         [/((?:[가-힣A-Za-z0-9\s]+님을 위한 핵심 정리|핵심 정리|대운 3줄 요약))\s+(강점|흐름):\s*([^\n]+?)\s+주의:\s*([^\n]+?)\s+실천:\s*([^\n]+)/g, '$1\n\n- $2: $3\n- 주의: $4\n- 실천: $5'],

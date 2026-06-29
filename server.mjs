@@ -2696,6 +2696,87 @@ function fixRepeatedSummaryTransitions(text) {
   return cleanSectionText(output);
 }
 
+function stripInlineFormatting(text) {
+  return String(text || '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/<\/?(?:b|strong)>/gi, '');
+}
+
+function normalizeRepeatedWords(text) {
+  let output = String(text || '');
+  output = output
+    .replace(/\b(현재)(?:\s+\1){1,}/g, '$1')
+    .replace(/\b(요약하면)(?:\s+\1){1,}/g, '$1')
+    .replace(/\b(정리하면)(?:\s+\1){1,}/g, '$1');
+  output = fixRepeatedSummaryTransitions(output);
+  return cleanSectionText(output);
+}
+
+function keepSingleSummaryBulletSet(text) {
+  const lines = String(text || '').split('\n');
+  const seenLabels = new Set();
+  const output = [];
+  let seenSummaryTitle = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/(핵심 정리|3줄 요약)/.test(trimmed)) {
+      if (seenSummaryTitle) continue;
+      seenSummaryTitle = true;
+      output.push(line);
+      continue;
+    }
+    const labelMatch = trimmed.match(/^-\s*(강점|흐름|주의|실천):/);
+    if (labelMatch) {
+      const label = labelMatch[1];
+      if (seenLabels.has(label)) continue;
+      seenLabels.add(label);
+      output.push(line);
+      continue;
+    }
+    output.push(line);
+  }
+  return cleanSectionText(output.join('\n'));
+}
+
+function sanitizeHealthSectionWithoutAppend(text) {
+  let output = cleanSectionText(String(text || ''));
+  output = output
+    .replace(/건강운에서는 생활 리듬, 피로 누적 패턴, 회복 습관과 컨디션 관리 포인트를 설명합니다\.?/g, '건강운에서는 체력 소모 패턴과 회복 리듬, 생활 습관 관리 포인트를 점검합니다.')
+    .replace(/건강운에서는 체력 소모 패턴과 회복 리듬, 생활 습관 관리 포인트를 설명합니다\.?/g, '건강운에서는 체력 소모 패턴과 회복 리듬, 생활 습관 관리 포인트를 점검합니다.');
+  const paragraphs = splitParagraphs(output);
+  const rebuilt = [];
+  let introSeen = false;
+  let disclaimerSeen = false;
+  for (let paragraph of paragraphs) {
+    paragraph = cleanSectionText(paragraph);
+    if (!paragraph) continue;
+    if (isHealthDisclaimerLikeParagraph(paragraph)) {
+      if (disclaimerSeen) continue;
+      disclaimerSeen = true;
+      rebuilt.push(HEALTH_DISCLAIMER_TEXT);
+      continue;
+    }
+    if (/^건강운에서는 .*체력 소모 패턴과 회복 리듬, 생활 습관 관리 포인트를 점검합니다\.?$/.test(paragraph)) {
+      if (introSeen) continue;
+      introSeen = true;
+      rebuilt.push('건강운에서는 체력 소모 패턴과 회복 리듬, 생활 습관 관리 포인트를 점검합니다.');
+      continue;
+    }
+    rebuilt.push(paragraph);
+  }
+  return cleanSectionText(rebuilt.join('\n\n'));
+}
+
+function shouldPreserveExistingSectionText(section, text) {
+  const cleaned = cleanSectionText(text);
+  if (!cleaned) return false;
+  const usability = inspectSectionUsability(section, cleaned);
+  if (usability.metaResponse.detected || usability.policyRefusal.detected) return false;
+  if (containsForbiddenInternalText(cleaned)) return false;
+  return countVisibleChars(cleaned) >= 300;
+}
+
 function removeInternalEditorialLabels(text) {
   let output = String(text || '');
   const replacements = [
@@ -3265,14 +3346,7 @@ function buildPersonalizedSectionTail(promptPayload, section) {
 }
 
 function ensurePersonalizedMentions(promptPayload, section, text) {
-  const name = stripHonorificSuffix(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '');
-  if (!name) return String(text || '').trim();
-  const regex = new RegExp(`${escapeRegex(name)}님`, 'g');
-  const count = (String(text || '').match(regex) || []).length;
-  if (count >= 2) return String(text || '').trim();
-  return `${String(text || '').trim()}
-
-${buildPersonalizedSectionTail(promptPayload, section)}`.trim();
+  return cleanSectionText(text);
 }
 
 function buildDaeunSupplement(promptPayload) {
@@ -3370,34 +3444,7 @@ function buildConcernSupplement(promptPayload) {
 }
 
 function ensureSectionSpecificStructure(promptPayload, section, text) {
-  const output = String(text || '').trim();
-  if (!output) return output;
-  const supplements = {
-    '대운': buildDaeunSupplement(promptPayload),
-    '세운': buildSeunSupplement(promptPayload),
-    '월운': buildMonthlySupplement(promptPayload),
-    '운성': buildUnseongSupplement(promptPayload),
-    '신살·귀인': buildShinsalSupplement(promptPayload),
-    '고민에 대한 조언': buildConcernSupplement(promptPayload)
-  };
-  const markers = {
-    '대운': /대운 3줄 요약|\d{2}세\s*~\s*\d{2}세 대운|현재\s*대운/,
-    '세운': /일·커리어|돈·재물|관계·협업|건강·컨디션|올해의 선택 기준/,
-    '월운': /월초 흐름|월중 흐름|월말 흐름|이번 달 실천 포인트/,
-    '운성': /확인되는 운성 흐름|에너지 리듬과 회복 패턴/,
-    '신살·귀인': /확인되는 신살·귀인 흐름|귀인과 주변 도움의 흐름/,
-    '고민에 대한 조언': /선택 기준|우선순위|실천 조언|비교/
-  };
-  const minCharsMap = { '대운': 700, '세운': 700, '월운': 700, '운성': 520, '신살·귀인': 520, '고민에 대한 조언': 950 };
-  const supplement = supplements[section];
-  const marker = markers[section];
-  if (!supplement) return output;
-  const targetChars = minCharsMap[section] || getSectionMinVisibleChars(section);
-  const targetParagraphs = Math.max(3, getSectionMinParagraphs(section));
-  const enough = countVisibleChars(output) >= Math.floor(targetChars * 0.82)
-    && countMeaningfulParagraphs(output) >= Math.max(2, targetParagraphs - 1);
-  if (enough || (marker && marker.test(output))) return output;
-  return cleanSectionText(`${output}\n\n${supplement}`);
+  return cleanSectionText(text);
 }
 
 function buildSectionIntro(promptPayload, section) {
@@ -3426,24 +3473,12 @@ function buildSectionIntro(promptPayload, section) {
 }
 
 function ensureSingleSectionIntro(promptPayload, section, text) {
-  const intro = buildSectionIntro(promptPayload, section);
   const paragraphs = splitParagraphs(text);
   const filtered = paragraphs.filter((paragraph, index) => {
     if (index === 0) return true;
     return !/(항목입니다|살펴보는 항목|정리하는 항목|의미하는 항목|현재 자료 기준으로|차분히 정리합니다|이 항목은|이 리포트는)/.test(paragraph);
   });
-  if (!filtered.length) return intro;
-  const first = filtered[0] || '';
-  if (new RegExp(`^${escapeRegex(section)}\s*(은|는|에서는)`).test(first)) {
-    filtered[0] = intro;
-    return cleanSectionText(filtered.join('\n\n'));
-  }
-  if (/(에서는|살펴봅니다|정리합니다|설명합니다)/.test(first) && countVisibleChars(first) < 80) {
-    filtered[0] = intro;
-    return cleanSectionText(filtered.join('\n\n'));
-  }
-  if (countVisibleChars(first) >= 60) return cleanSectionText(filtered.join('\n\n'));
-  return cleanSectionText([intro, ...filtered].join('\n\n'));
+  return cleanSectionText(filtered.join('\n\n'));
 }
 
 function splitLongParagraphsForMobile(text) {
@@ -3480,6 +3515,23 @@ function removeRepeatedSentencesFromText(text, seenSentences = new Map(), option
     if (kept.length) rebuilt.push(kept.join(' ').trim());
   }
   return rebuilt.join('\n\n').trim();
+}
+
+function removeExactDuplicateSentences(text) {
+  const seen = new Set();
+  const paragraphs = String(text || '').split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  const rebuilt = [];
+  for (const paragraph of paragraphs) {
+    const kept = [];
+    for (const sentence of splitReportSentences(paragraph)) {
+      const normalized = sentence.replace(/\s+/g, ' ').trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      kept.push(normalized);
+    }
+    if (kept.length) rebuilt.push(kept.join(' ').trim());
+  }
+  return cleanSectionText(rebuilt.join('\n\n'));
 }
 
 const SECTION_SUMMARY_MAP = {
@@ -3526,28 +3578,15 @@ const SECTIONS_WITH_SUMMARY_BOX = new Set(['핵심 요약', '대운', '재물운
 const SECTIONS_WITH_SHORT_SUMMARY = new Set(['세운', '월운', '운성', '신살·귀인']);
 
 function appendSectionSummary(section, text) {
-  const output = String(text || '').trim();
-  if (!output) return output;
-  if (SECTIONS_WITH_SUMMARY_BOX.has(section) || !SECTIONS_WITH_SHORT_SUMMARY.has(section)) return output;
-  if (/(정리하면|핵심은|요약하면)/.test(output)) return output;
-  const summary = SECTION_SUMMARY_MAP[section] || '현재 흐름은 무리하게 단정하기보다 생활 속에서 조절하고 실천하는 방식으로 풀어가는 편이 좋습니다.';
-  return `${output}\n\n${summary}`.trim();
+  return cleanSectionText(text);
 }
 
 function appendSectionSummaryBox(section, promptPayload, text) {
-  const output = String(text || '').trim();
-  const template = SECTION_BOX_TEMPLATE_MAP[section];
-  if (!output || !template || !SECTIONS_WITH_SUMMARY_BOX.has(section)) return output;
-  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
-  const title = `${name}을 위한 핵심 정리`;
-  if (output.includes(title) || /(^|\n)(?:핵심 정리|대운 3줄 요약)\s*(\n|$)/.test(output)) return output;
-  return `${output}\n\n${title}\n\n- 강점: ${template.strength}\n- 주의: ${template.caution}\n- 실천: ${template.action}`.trim();
+  return cleanSectionText(text);
 }
 
 function appendHealthDisclaimer(text) {
-  const raw = String(text || '').trim();
-  if (!raw) return raw;
-  return dedupeHealthDisclaimer(raw);
+  return sanitizeHealthSectionWithoutAppend(text);
 }
 
 function orderReportSections(promptPayload, sections) {
@@ -3612,13 +3651,7 @@ function convertMonthlySectionToFormalStyle(text) {
 }
 
 function ensureSectionPerspective(section, text) {
-  const output = String(text || '').trim();
-  if (!output) return output;
-  const hint = SECTION_PERSPECTIVE_GUIDE[section] || '';
-  const firstParagraph = output.split(/\n{2,}/)[0] || '';
-  if (!hint || firstParagraph.includes(hint)) return output;
-  if (/무엇을 의미|살펴보는 항목|중심으로 설명합니다|초점을 맞춥니다|에서는 .*정리합니다|에서는 .*설명합니다|에서는 .*살펴봅니다/.test(firstParagraph)) return output;
-  return `${hint}\n\n${output}`.trim();
+  return cleanSectionText(text);
 }
 
 function getPreferredSectionParagraphCount(section) {
@@ -3705,10 +3738,16 @@ function dedupeHealthDisclaimer(text) {
   const paragraphs = splitParagraphs(output);
   const rebuilt = [];
   let introAdded = false;
+  let disclaimerAdded = false;
   for (let paragraph of paragraphs) {
     paragraph = cleanSectionText(paragraph);
     if (!paragraph) continue;
-    if (isHealthDisclaimerLikeParagraph(paragraph)) continue;
+    if (isHealthDisclaimerLikeParagraph(paragraph)) {
+      if (disclaimerAdded) continue;
+      disclaimerAdded = true;
+      rebuilt.push(HEALTH_DISCLAIMER_TEXT);
+      continue;
+    }
     if (/^건강운에서는 .*체력 소모 패턴과 회복 리듬, 생활 습관 관리 포인트를 (?:점검합니다|설명합니다)\.?$/.test(paragraph)) {
       if (introAdded) continue;
       introAdded = true;
@@ -3717,8 +3756,7 @@ function dedupeHealthDisclaimer(text) {
     }
     rebuilt.push(paragraph);
   }
-  if (!introAdded) rebuilt.unshift('건강운에서는 체력 소모 패턴과 회복 리듬, 생활 습관 관리 포인트를 점검합니다.');
-  return cleanSectionText([...rebuilt, HEALTH_DISCLAIMER_TEXT].join('\n\n'));
+  return cleanSectionText(rebuilt.join('\n\n'));
 }
 
 function removeMechanicalMetaPhrases(text) {
@@ -3733,9 +3771,11 @@ function removeMechanicalMetaPhrases(text) {
     /요청하신 형식의 내용을 그대로 작성해 드릴 수는 없습니다\.?/g
   ];
   for (const pattern of patterns) output = output.replace(pattern, ' ');
+  output = stripInlineFormatting(output);
   output = removeInternalEditorialLabels(output);
-  output = fixRepeatedSummaryTransitions(output);
+  output = normalizeRepeatedWords(output);
   output = fixQuotedConcernParticles(output);
+  output = keepSingleSummaryBulletSet(output);
   return cleanSectionText(output);
 }
 
@@ -3804,16 +3844,22 @@ function trimRedundantSectionIntro(promptPayload, section, text) {
 
 function polishSectionBody(promptPayload, section, text) {
   let output = cleanSectionText(text);
+  output = stripInlineFormatting(output);
   output = removeMechanicalMetaPhrases(output);
   output = formatSummaryBullets(output);
+  output = keepSingleSummaryBulletSet(output);
   if (section !== '건강운') output = stripHealthDisclaimerOutsideHealth(output);
-  if (section === '고민에 대한 조언') output = normalizeConcernSectionText(promptPayload, output);
+  if (section === '고민에 대한 조언') output = fixQuotedConcernParticles(output);
   if (section === '대운') output = normalizeDaeunSectionText(promptPayload, output);
   output = trimRedundantSectionIntro(promptPayload, section, output);
   output = removeRepeatedSentencesFromText(output, new Map(), { threshold: 2 });
+  output = removeExactDuplicateSentences(output);
   output = splitLongParagraphsForMobile(output);
+  output = removeExactDuplicateSentences(output);
+  output = normalizeRepeatedWords(output);
   output = formatSummaryBullets(output);
-  if (section === '건강운') output = dedupeHealthDisclaimer(output);
+  output = keepSingleSummaryBulletSet(output);
+  if (section === '건강운') output = sanitizeHealthSectionWithoutAppend(output);
   return cleanSectionText(output);
 }
 
@@ -3825,12 +3871,22 @@ function polishFinalReportSections(promptPayload, sections) {
     let output = polishSectionBody(promptPayload, normalizedSection, rawText);
     output = applyReportPostCorrections(promptPayload, output);
     output = formatSummaryBullets(output);
-    if (normalizedSection !== '건강운') output = stripHealthDisclaimerOutsideHealth(output);
-    if (normalizedSection === '건강운') output = dedupeHealthDisclaimer(output);
-    output = mergeSectionTextConservatively(normalizedSection, originalText, output, { preserveRatio: 0.8, allowAppendShorter: true });
-    polished[normalizedSection] = cleanSectionText(output);
+    output = keepSingleSummaryBulletSet(output);
+    output = normalizedSection === '건강운'
+      ? sanitizeHealthSectionWithoutAppend(output)
+      : stripHealthDisclaimerOutsideHealth(output);
+    output = removeRepeatedSentencesFromText(output, new Map(), { threshold: 2 });
+    output = removeExactDuplicateSentences(output);
+    output = normalizeRepeatedWords(output);
+    output = cleanSectionText(output);
+    const originalLength = countVisibleChars(originalText);
+    const polishedLength = countVisibleChars(output);
+    if (originalLength >= 300 && (polishedLength > Math.ceil(originalLength * 1.05) || polishedLength < Math.floor(originalLength * 0.8))) {
+      output = originalText;
+    }
+    polished[normalizedSection] = cleanSectionText(removeExactDuplicateSentences(output || originalText));
   }
-  if (polished['건강운']) polished['건강운'] = dedupeHealthDisclaimer(polished['건강운']);
+  if (polished['건강운']) polished['건강운'] = sanitizeHealthSectionWithoutAppend(polished['건강운']);
   return orderReportSections(promptPayload, polished);
 }
 
@@ -3854,38 +3910,27 @@ function applyReportPostCorrections(promptPayload, text) {
     output = output.replace(new RegExp(`${escapeRegex(name)}님가`, 'g'), `${name}님이`);
   }
   output = output.replace(/([가-힣A-Za-z0-9]+)님가/g, '$1님이');
+  output = stripInlineFormatting(output);
   output = removeInternalEditorialLabels(output);
-  output = fixRepeatedSummaryTransitions(output);
+  output = normalizeRepeatedWords(output);
   output = fixQuotedConcernParticles(output);
   output = formatSummaryBullets(output);
+  output = keepSingleSummaryBulletSet(output);
   return cleanSectionText(output);
 }
 
 function ensureSectionQuality(promptPayload, section, text) {
   let output = cleanSectionText(text);
   if (!output) return output;
-  const desiredParagraphs = getPreferredSectionParagraphCount(section);
+  const usability = inspectSectionUsability(section, output);
+  if (countVisibleChars(output) >= 300 && !containsForbiddenInternalText(output) && !usability.metaResponse.detected && !usability.policyRefusal.detected) {
+    if (section === '건강운') output = removeDuplicateHealthIntroAndDisclaimer(output);
+    if (section === '고민에 대한 조언') output = cleanupConcernTail(output);
+    return applyReportPostCorrections(promptPayload, output);
+  }
   const supplement = buildSectionQualitySupplement(promptPayload, section);
-  const visibleChars = countVisibleChars(output);
-  const minVisibleChars = getSectionMinVisibleChars(section);
-  const paragraphCount = countMeaningfulParagraphs(output);
-  const requirementChecks = {
-    '재물운': [/(수입|돈이 들어오는)/, /(소비|지출)/, /(저축|투자)/, /(부업|추가 수입|수입원)/, /(올해|이번 해)/],
-    '직업운': [/(환경|업무)/, /(피해야|맞지 않는)/, /(강점)/, /(이직|전환)/, /(기획|운영|관리|데이터 정리|교육|상담|행정|품질관리|프로젝트 매니징)/],
-    '애정운': [/(기준)/, /(상대|유형)/, /(조심|피로)/, /(감정 표현|표현)/, /(연애|결혼|현실)/],
-    '자녀운': [/(단정)/, /(후배|제자|가족)/, /(대화)/, /(체력|시간 분배)/],
-    '십성': [/(역할)/, /(실제 생활)/, /(주의|실천)/],
-    '신살·귀인': [/(천을귀인|문창귀인|월덕귀인|천덕귀인|도화살|역마살|화개살|현재 제공된 데이터에서 구체적인 신살·귀인 항목을 모두 확정하기 어렵기 때문에)/],
-    '운성': [/(병은|양은|사는|태는)/]
-  };
-  const missingContent = Array.isArray(requirementChecks[section]) && requirementChecks[section].some((regex) => !regex.test(output));
-  const needsSupplement = (visibleChars < Math.floor(minVisibleChars * 0.72))
-    || (paragraphCount < Math.max(2, desiredParagraphs - 1))
-    || missingContent;
-  if (needsSupplement && supplement && !output.includes(supplement.slice(0, 40))) {
-    output = `${output}
-
-${supplement}`.trim();
+  if (countVisibleChars(output) < 300 && supplement && !output.includes(supplement.slice(0, 40))) {
+    output = `${output}\n\n${supplement}`.trim();
   }
   if (section === '건강운') output = removeDuplicateHealthIntroAndDisclaimer(output);
   if (section === '고민에 대한 조언') output = cleanupConcernTail(output);
@@ -3923,12 +3968,13 @@ function ensureRequiredSectionsPresent(promptPayload, sections) {
   return output;
 }
 
-function postProcessReportSections(promptPayload, sections) {
+function postProcessReportSections(promptPayload, sections, options = {}) {
   const inputNames = [promptPayload?.basicInfo?.name, promptPayload?.applicant?.name, promptPayload?.partnerInfo?.name, promptPayload?.partner?.name]
     .map((item) => String(item || '').trim())
     .filter(Boolean);
   const explainedTerms = new Set();
   const seenSentences = new Map();
+  const repairApplied = options.repairApplied || {};
   const output = {};
   const requiredSections = buildRequiredAiSections(hasCompatibilityPromptPayload(promptPayload));
   const normalizedInputKeys = Object.keys(sections || {}).map((key) => normalizeSectionKeyAlias(key));
@@ -3943,29 +3989,42 @@ function postProcessReportSections(promptPayload, sections) {
       output[normalizedSection] = '';
       continue;
     }
+    const preserveExisting = shouldPreserveExistingSectionText(normalizedSection, originalText);
     nextText = stripCustomerFacingArtifacts(nextText);
     nextText = applyReportPostCorrections(promptPayload, nextText);
     nextText = replaceTemplateFlowLabels(nextText);
     nextText = ensureSingleSectionIntro(promptPayload, normalizedSection, nextText);
-    nextText = ensureSectionPerspective(normalizedSection, nextText);
-    nextText = ensureSectionSpecificStructure(promptPayload, normalizedSection, nextText);
-    nextText = annotateJargonFirstUse(nextText, explainedTerms);
-    nextText = pruneRepeatedJargonExplanations(nextText, explainedTerms);
+    if (!preserveExisting) {
+      nextText = annotateJargonFirstUse(nextText, explainedTerms);
+      nextText = pruneRepeatedJargonExplanations(nextText, explainedTerms);
+    }
     nextText = normalizeFormalKoreanStyle(nextText);
     if (normalizedSection === '월운') nextText = convertMonthlySectionToFormalStyle(nextText);
-    nextText = ensurePersonalizedMentions(promptPayload, normalizedSection, nextText);
     nextText = applyHonorificsToText(nextText, inputNames);
-    nextText = ensureSectionQuality(promptPayload, normalizedSection, nextText);
+    if (!preserveExisting && !repairApplied[normalizedSection] && countVisibleChars(nextText) < 300) {
+      const repairedText = ensureSectionQuality(promptPayload, normalizedSection, nextText);
+      if (cleanSectionText(repairedText) && cleanSectionText(repairedText) !== cleanSectionText(nextText)) {
+        repairApplied[normalizedSection] = true;
+        nextText = repairedText;
+      }
+    }
     nextText = removeRepeatedSentencesFromText(nextText, new Map(), { threshold: 2 });
     nextText = removeRepeatedSentencesFromText(nextText, seenSentences, { threshold: 3 });
     nextText = splitLongParagraphsForMobile(nextText);
-    nextText = appendSectionSummary(normalizedSection, nextText);
-    nextText = appendSectionSummaryBox(normalizedSection, promptPayload, nextText);
-    if (normalizedSection === '건강운') nextText = appendHealthDisclaimer(removeDuplicateHealthIntroAndDisclaimer(nextText));
+    nextText = removeRepeatedSentencesFromText(nextText, new Map(), { threshold: 2 });
+    nextText = normalizedSection === '건강운'
+      ? sanitizeHealthSectionWithoutAppend(nextText)
+      : stripHealthDisclaimerOutsideHealth(nextText);
     nextText = polishSectionBody(promptPayload, normalizedSection, nextText);
+    nextText = removeExactDuplicateSentences(nextText);
     nextText = fixHonorifics(applyReportPostCorrections(promptPayload, nextText));
-    nextText = mergeSectionTextConservatively(normalizedSection, originalText, nextText, { preserveRatio: 0.8, allowAppendShorter: true });
-    output[normalizedSection] = cleanSectionText(nextText);
+    nextText = removeExactDuplicateSentences(nextText);
+    const originalLength = countVisibleChars(originalText);
+    const nextLength = countVisibleChars(nextText);
+    if (originalLength >= 300 && (nextLength > Math.ceil(originalLength * 1.05) || nextLength < Math.floor(originalLength * 0.8))) {
+      nextText = originalText;
+    }
+    output[normalizedSection] = cleanSectionText(removeExactDuplicateSentences(nextText || originalText));
   }
   return orderReportSections(promptPayload, output);
 }
@@ -3998,17 +4057,20 @@ function repairSectionsWithFallback(promptPayload, sections, targetSections = []
   return merged;
 }
 
-function applySectionRepairResults(baseSections = {}, repairedSections = {}, targetSections = [], label = '') {
+function applySectionRepairResults(baseSections = {}, repairedSections = {}, targetSections = [], label = '', options = {}) {
   const output = { ...(baseSections || {}) };
   const applied = [];
+  const repairApplied = options.repairApplied || {};
   const uniqueSections = Array.from(new Set((Array.isArray(targetSections) ? targetSections : []).filter(Boolean)));
   for (const section of uniqueSections) {
+    if (repairApplied[section]) continue;
     const currentText = cleanSectionText(output?.[section] || '');
     const repairedText = cleanSectionText(repairedSections?.[section] || '');
     if (!repairedText) continue;
     const mergedText = mergeSectionTextConservatively(section, currentText, repairedText, { preserveRatio: 0.8, allowAppendShorter: true });
     if (!mergedText || mergedText === currentText) continue;
     output[section] = mergedText;
+    repairApplied[section] = true;
     applied.push({ section, from: countVisibleChars(currentText), to: countVisibleChars(mergedText), repairedLength: countVisibleChars(repairedText) });
   }
   if (label) console.log('[KIE AI REPAIR APPLY]', JSON.stringify({ label, applied }));
@@ -6006,6 +6068,7 @@ function logFinalSectionSnapshot(label, sections, requiredSections, extra = {}) 
 }
 
 function finalizeReportSections(promptPayload, sections, requiredSections) {
+  const repairApplied = {};
   let working = mergeSectionMaps({}, sections || {}, { requiredSections, label: 'finalize:initial_merge' });
   working = mergeSectionMaps(working, ensureRequiredSectionsPresent(promptPayload, working), { requiredSections, label: 'finalize:ensure_required' });
   working = postProcessReportSections(promptPayload, working);
@@ -6024,6 +6087,7 @@ function finalizeReportSections(promptPayload, sections, requiredSections) {
     const allRequiredSectionsHaveText = requiredSections.every((section) => hasTrimmedSectionText(working?.[section] || ''));
     const fatalSections = Array.isArray(validation.fatalSections) ? validation.fatalSections : [];
     const shouldComplete = fatalSections.length === 0 && allRequiredSectionsPresent && allRequiredSectionsHaveText;
+    if (shouldComplete) validation.recoverableSections = [];
     const failedSections = shouldComplete ? [] : recalculateFailedSections(requiredSections, working, validation);
     logFinalSectionSnapshot(label, working, requiredSections, {
       failedSections,
@@ -6049,14 +6113,14 @@ function finalizeReportSections(promptPayload, sections, requiredSections) {
   };
 
   let state = validateCurrent('finalize:initial_validation');
-  if ((state.validation.recoverableSections || []).length) {
+  if (!state.shouldComplete && (state.validation.recoverableSections || []).length) {
     const repairedRecoverable = repairSectionsWithFallback(promptPayload, working, state.validation.recoverableSections, 'final_recoverable_repair');
-    working = postProcessReportSections(promptPayload, applySectionRepairResults(working, repairedRecoverable, state.validation.recoverableSections, 'finalize:recoverable_repair'));
+    working = postProcessReportSections(promptPayload, applySectionRepairResults(working, repairedRecoverable, state.validation.recoverableSections, 'finalize:recoverable_repair', { repairApplied }), { repairApplied });
     state = validateCurrent('finalize:after_recoverable_repair');
   }
   if (state.failedSections.length && !state.shouldComplete) {
     const repairedFailed = repairSectionsWithFallback(promptPayload, working, state.failedSections, 'final_failed_repair');
-    working = postProcessReportSections(promptPayload, applySectionRepairResults(working, repairedFailed, state.failedSections, 'finalize:failed_repair'));
+    working = postProcessReportSections(promptPayload, applySectionRepairResults(working, repairedFailed, state.failedSections, 'finalize:failed_repair', { repairApplied }), { repairApplied });
     state = validateCurrent('finalize:after_failed_repair');
   }
   working = polishFinalReportSections(promptPayload, ensureRequiredSectionsPresent(promptPayload, working));
@@ -6064,7 +6128,7 @@ function finalizeReportSections(promptPayload, sections, requiredSections) {
   if (((state.validation.recoverableSections || []).length || state.failedSections.length) && !state.shouldComplete) {
     const retryTargets = Array.from(new Set([...(state.validation.recoverableSections || []), ...state.failedSections]));
     const repairedPolish = repairSectionsWithFallback(promptPayload, working, retryTargets, 'final_polish_repair');
-    working = polishFinalReportSections(promptPayload, postProcessReportSections(promptPayload, applySectionRepairResults(working, repairedPolish, retryTargets, 'finalize:polish_repair')));
+    working = polishFinalReportSections(promptPayload, postProcessReportSections(promptPayload, applySectionRepairResults(working, repairedPolish, retryTargets, 'finalize:polish_repair', { repairApplied }), { repairApplied }));
     state = validateCurrent('finalize:after_polish_repair');
   }
   return {
