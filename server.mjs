@@ -2722,10 +2722,30 @@ function stripInlineFormatting(text) {
     .replace(/<\/?(?:b|strong)>/gi, ''));
 }
 
-const REPORT_SECTION_TITLE_LINE_PATTERN = /^(?:핵심 요약|사주 원국 해석|대운|세운|월운|운성|신살[·,]귀인|귀인과 주변 도움의 흐름|십성|재물운|직업운|애정운|자녀운|건강운|실천 조언|주의할 점|고민에 대한 조언|관계\/궁합 해석)$/;
+const REPORT_SECTION_TITLES = [
+  '핵심 요약', '사주 원국 해석', '대운', '세운', '월운', '운성', '신살·귀인', '귀인과 주변 도움의 흐름',
+  '십성', '재물운', '직업운', '애정운', '자녀운', '건강운', '실천 조언', '주의할 점', '고민에 대한 조언', '관계/궁합 해석'
+];
+const REPORT_SECTION_TITLE_LINE_PATTERN = new RegExp(`^(?:${REPORT_SECTION_TITLES.map((title) => escapeRegex(title).replace(/·/g, '[·,]')).join('|')})$`);
 
 function normalizeLooseSectionTitle(value) {
   return normalizeSectionKeyAlias(String(value || '').replace(/^#{1,6}\s*/, '').replace(/\s+/g, ' ').trim());
+}
+
+function isStandaloneSectionTitleLine(value) {
+  const trimmed = cleanSectionText(value);
+  return Boolean(trimmed) && REPORT_SECTION_TITLE_LINE_PATTERN.test(trimmed);
+}
+
+function isSummaryLikeStandaloneHeadingContext(rawLines = [], index = 0) {
+  const nextLines = rawLines
+    .slice(index + 1, index + 4)
+    .map((item) => cleanSectionText(item))
+    .filter(Boolean);
+  if (!nextLines.length) return false;
+  return nextLines.some((line) => /^-\s+/.test(line)
+    || /^(?:강점|흐름|주의|실천|핵심|조언):/.test(line)
+    || /(핵심 정리|3줄 요약)/.test(line));
 }
 
 function stripSectionTitleEchoes(section, text) {
@@ -2752,7 +2772,7 @@ function stripSectionTitleEchoes(section, text) {
   let previousNormalizedTitle = '';
   for (const line of rawLines) {
     const trimmed = cleanSectionText(line);
-    const normalizedTitle = REPORT_SECTION_TITLE_LINE_PATTERN.test(trimmed) ? normalizeLooseSectionTitle(trimmed) : '';
+    const normalizedTitle = isStandaloneSectionTitleLine(trimmed) ? normalizeLooseSectionTitle(trimmed) : '';
     if (shouldStripLeadingEcho && skippedLeading < leadingEchoCount && trimmed && normalizeLooseSectionTitle(trimmed) === normalizedSection) {
       skippedLeading += 1;
       previousNormalizedTitle = normalizedTitle || previousNormalizedTitle;
@@ -2762,6 +2782,47 @@ function stripSectionTitleEchoes(section, text) {
       continue;
     }
     if (trimmed) previousNormalizedTitle = normalizedTitle || '';
+    output.push(line);
+  }
+  return cleanSectionText(output.join('\n').replace(/\n{3,}/g, '\n\n'));
+}
+
+function normalizeDuplicateSectionHeadings(section, text) {
+  const rawLines = String(text || '').split('\n');
+  if (!rawLines.length) return '';
+  const normalizedSection = normalizeLooseSectionTitle(section);
+  const output = [];
+  let summaryHeadingSeen = false;
+  for (let index = 0; index < rawLines.length; index += 1) {
+    const line = rawLines[index];
+    const trimmed = cleanSectionText(line);
+    if (!trimmed) {
+      output.push(line);
+      continue;
+    }
+    if (/^(핵심 정리|3줄 요약)$/.test(trimmed)) {
+      if (summaryHeadingSeen) continue;
+      summaryHeadingSeen = true;
+      output.push('핵심 정리');
+      continue;
+    }
+    if (!isStandaloneSectionTitleLine(trimmed)) {
+      output.push(line);
+      continue;
+    }
+    const normalizedTitle = normalizeLooseSectionTitle(trimmed);
+    const prevNonEmpty = [...output].reverse().map((item) => cleanSectionText(item)).find(Boolean) || '';
+    const nextNonEmpty = rawLines.slice(index + 1).map((item) => cleanSectionText(item)).find(Boolean) || '';
+    const hasContextAroundLine = Boolean(prevNonEmpty) || Boolean(nextNonEmpty);
+    const summaryLike = isSummaryLikeStandaloneHeadingContext(rawLines, index);
+    const isSameSectionHeading = normalizedSection && normalizedTitle === normalizedSection;
+    if (hasContextAroundLine && normalizedTitle) {
+      if ((isSameSectionHeading || summaryLike) && !summaryHeadingSeen) {
+        output.push('핵심 정리');
+        summaryHeadingSeen = true;
+      }
+      continue;
+    }
     output.push(line);
   }
   return cleanSectionText(output.join('\n').replace(/\n{3,}/g, '\n\n'));
@@ -2911,9 +2972,9 @@ function isInlineAdvisorySentence(sentence) {
   const score = [
     /(?:확정적\s*예측|확정적\s*예언|확정적인\s*결과)/.test(text),
     /(?:자기이해|생활\s*점검|참고용\s*해석|엔터테인먼트)/.test(text),
-    /(?:전문가(?:의)?\s*조언|전문가\s*상담|전문의\s*상담|의료진과\s*상담|검진)/.test(text),
+    /(?:전문가(?:의)?\s*(?:조언|의견)|전문가\s*상담|전문의\s*상담|의료진과\s*상담|검진)/.test(text),
     /(?:건강|투자|법률|계약|재무\s*결정|결혼|임신|수명)/.test(text),
-    /(?:함께\s*고려|단정하지\s*말|현실\s*조건)/.test(text)
+    /(?:함께\s*고려|단정하지\s*말|현실\s*조건|사주의\s*흐름만으로\s*결정하기보다)/.test(text)
   ].filter(Boolean).length;
   if (score >= 2) return true;
   return /(?:이\s*해석은|이\s*리포트는|이\s*콘텐츠는).*(?:참고용|확정적)/.test(text);
@@ -2970,12 +3031,158 @@ function normalizeCustomerFacingLineBreaks(text) {
   return cleanSectionText(output.replace(/\n{3,}/g, '\n\n'));
 }
 
-function normalizeSajuTerminology(text) {
+function normalizeWeakStrengthTerms(text) {
   let output = String(text || '');
   output = output
-    .replace(/신약에\s*가까운\s*구조(?:,\s*즉\s*자기\s*기운을\s*보강하는\s*흐름이\s*중요한\s*구조)?|중약한(?:\s*(?:기운|구조|흐름|편))?|신약한(?:\s*(?:기운|구조|흐름|편))?|신강하지\s*않은(?:\s*(?:흐름|구조))?/g, '기운이 다소 약한 편')
-    .replace(/(?:기운이 다소 약한 편\s*,\s*){1,}기운이 다소 약한 편/g, '기운이 다소 약한 편');
+    .replace(/신약에\s*가까운\s*구조(?:,\s*즉\s*자기\s*기운을\s*보강하는\s*흐름이\s*중요한\s*구조)?|중약(?:한)?(?:\s*(?:기운|구조|흐름|편|경향|성향|양상|타입))?|신약(?:한)?(?:\s*(?:기운|구조|흐름|편|경향|성향|양상|타입))?|신강하지\s*않은(?:\s*(?:흐름|구조|편|경향|성향|양상|타입))?|신약형|중약형|신약|중약/gu, '기운이 다소 약한 편')
+    .replace(/(?:기운이 다소 약한 편\s*,?\s*){2,}/g, '기운이 다소 약한 편')
+    .replace(/기운이 다소 약한 편\s*(?:의)?\s*(경향|구조|흐름|성향|양상|특성)/g, '기운이 다소 약한 편으로 나타나는 $1')
+    .replace(/기운이 다소 약한 편(?:을\s*가진|인)\s*(경향|구조|흐름|성향|양상|모습|특성)/g, '기운이 다소 약한 편으로 나타나는 $1')
+    .replace(/기운이 다소 약한 편(?:을\s*가진)?\s*모습에서는/g, '기운이 다소 약한 편으로 나타나는 경우에는')
+    .replace(/기운이 다소 약한 편(?:을\s*가진)?\s*경우에서는/g, '기운이 다소 약한 편으로 나타나는 경우에는')
+    .replace(/기운이 다소 약한 편(?:에\s*가까운|으로\s*보이는)\s*(경향|구조|흐름|성향|양상|특성)/g, '기운이 다소 약한 편으로 나타나는 $1')
+    .replace(/기운이 다소 약한 편과\s+/g, '기운이 다소 약한 편으로 나타나며, ')
+    .replace(/기운이 다소 약한 편으로 나타나며,\s*(\S[^,.!?\n]{0,40}?)\s*(보완 요소|작용|흐름|경향|의미|성향|특성|역할)/g, '기운이 다소 약한 편으로 나타나며, $1 $2')
+    .replace(/기운이 다소 약한 편을\s*(보완 요소|중심|축|기준)로/g, '기운이 다소 약한 편을 보완하는 $1로')
+    .replace(/기운이 다소 약한 편으로 나타나는\s+(경향|구조|흐름|성향|양상|특성)\s+\1/g, '기운이 다소 약한 편으로 나타나는 $1')
+    .replace(/기운이 다소 약한 편으로 나타나는 경우에는\s+경우에는/g, '기운이 다소 약한 편으로 나타나는 경우에는')
+    .replace(/기운이 다소 약한 편으로 나타나며,\s*,/g, '기운이 다소 약한 편으로 나타나며, ')
+    .replace(/기운이 다소 약한 편와/g, '기운이 다소 약한 편과')
+    .replace(/기운이 다소 약한 편가/g, '기운이 다소 약한 편이')
+    .replace(/기운이 다소 약한 편를/g, '기운이 다소 약한 편을')
+    .replace(/기운이 다소 약한 편는/g, '기운이 다소 약한 편은')
+    .replace(/기운이 다소 약한 편라는/g, '기운이 다소 약한 편이라는')
+    .replace(/기운이 다소 약한 편으로 나타나며,\s*기운이 다소 약한 편(?:이|은|을|를|과|이라는)/g, '기운이 다소 약한 편으로 나타나며, ')
+    .replace(/기운이 다소 약한 편\s+경향/g, '기운이 다소 약한 편으로 나타나는 경향');
   return cleanSectionText(output);
+}
+
+function normalizeSajuTerminology(text) {
+  return normalizeWeakStrengthTerms(text);
+}
+
+function collectAllowedConcreteSajuTokens(promptPayload) {
+  const allowedGanji = new Set();
+  const pushGanjiFromText = (value) => {
+    String(value || '').replace(/([갑을병정무기경신임계][자축인묘진사오미신유술해])/g, (match) => {
+      allowedGanji.add(match);
+      return match;
+    });
+  };
+  const pillars = promptPayload?.chartData?.pillars || promptPayload?.promptContext?.chartData?.pillars || {};
+  for (const value of Object.values(pillars || {})) pushGanjiFromText(value);
+  for (const rows of [promptPayload?.chartData?.daeun, promptPayload?.chartData?.futureFiveYears, promptPayload?.chartData?.futureSixMonths]) {
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      for (const value of Object.values(row)) pushGanjiFromText(value);
+    }
+  }
+  return allowedGanji;
+}
+
+function neutralizeUnverifiedConcreteSajuTerms(promptPayload, text) {
+  let output = String(text || '');
+  const allowedGanji = collectAllowedConcreteSajuTokens(promptPayload);
+  output = output.replace(/([갑을병정무기경신임계][자축인묘진사오미신유술해])\s*기운처럼/g, (match, ganji) => allowedGanji.has(ganji) ? match : '이런 흐름처럼');
+  output = output.replace(/([갑을병정무기경신임계][자축인묘진사오미신유술해])\s*기운(께서|으로는|으로도|으로|에서는|에서|에는|에게|은|는|이|가|을|를|의|에|과|와|로|도|만|까지|부터)?/g, (match, ganji, particle = '') => allowedGanji.has(ganji) ? match : '이 흐름' + (particle || ''));
+  output = output.replace(/((?:[갑을병정무기경신임계][자축인묘진사오미신유술해](?:\s*[·ㆍ,/]|\s+))+[갑을병정무기경신임계][자축인묘진사오미신유술해])(?=(?:로|으로)\s*정리된\s*흐름)/g, (match) => {
+    const tokens = match.match(/[갑을병정무기경신임계][자축인묘진사오미신유술해]/g) || [];
+    return tokens.length && tokens.every((token) => allowedGanji.has(token)) ? match : '현재 흐름';
+  });
+  output = output.replace(/(^|[^가-힣A-Za-z0-9])([갑을병정무기경신임계][자축인묘진사오미신유술해])(?!\s*(?:년|월|일|시|세|점|개))(?![가-힣A-Za-z0-9])/g, (match, prefix, ganji) => allowedGanji.has(ganji) ? match : prefix + '이 흐름');
+  return cleanSectionText(output);
+}
+
+function normalizeFlowReplacementParticles(text) {
+  let output = String(text || '');
+  const flowNouns = '(?:이 흐름|현재 흐름|원국 흐름|월지 흐름|계절 흐름|일간)';
+  output = output
+    .replace(new RegExp('(' + flowNouns + ')로\\b', 'g'), '$1으로')
+    .replace(new RegExp('(' + flowNouns + ')가\\b', 'g'), '$1이')
+    .replace(new RegExp('(' + flowNouns + ')를\\b', 'g'), '$1을')
+    .replace(new RegExp('(' + flowNouns + ')는\\b', 'g'), '$1은')
+    .replace(new RegExp('(' + flowNouns + ')와\\b', 'g'), '$1과')
+    .replace(new RegExp('(' + flowNouns + ')라는', 'g'), '$1이라는')
+    .replace(/이 흐름처럼처럼/g, '이런 흐름처럼')
+    .replace(/현재 흐름으로 정리된 흐름/g, '현재 흐름을 참고한 해석')
+    .replace(/이 흐름으로 정리된 흐름/g, '이 흐름을 참고한 해석');
+  return cleanSectionText(output);
+}
+
+function detectUnverifiedConcreteSajuTerms(promptPayload, text) {
+  const allowedGanji = collectAllowedConcreteSajuTokens(promptPayload);
+  const matches = [];
+  String(text || '').replace(/([갑을병정무기경신임계][자축인묘진사오미신유술해])\s*(?:기운|흐름)?/g, (match, ganji) => {
+    if (!allowedGanji.has(ganji)) matches.push(match.trim());
+    return match;
+  });
+  return Array.from(new Set(matches));
+}
+
+function softenInlineDisclaimerSentence(section, sentence) {
+  let output = String(sentence || '');
+  const genericPoint = section === '건강운' ? '생활 리듬과 회복 패턴' : '현실적인 조건';
+  const replacements = [
+    [/(?:신뢰할 수 있는\s*)?전문가의\s*(?:의견|조언)/g, genericPoint],
+    [/(?:전문가|전문의|의료진)과\s*함께\s*검토해\s*주세요/g, '조건을 다시 점검해 보세요'],
+    [/(?:전문가|전문의|의료진)과\s*상담해\s*주세요/g, section === '건강운' ? '생활 리듬을 더 세심하게 점검해 보세요' : '조건을 다시 점검해 보세요'],
+    [/의료진과\s*상담/g, section === '건강운' ? '생활 리듬 점검' : '조건 점검'],
+    [/사주의\s*흐름만으로\s*결정하기보다\s*/g, ''],
+    [/확정적\s*예측이\s*아니라\s*/g, ''],
+    [/자기이해를\s*돕는\s*참고용(?:의)?\s*/g, ''],
+    [/(?:투자|법률|계약)(?:[·,\s/]*(?:투자|법률|계약))*/g, '중요한 판단'],
+    [/현실\s*조건과\s*전문가\s*의견/g, '현실적인 조건'],
+    [/객관적인\s*자료와\s*(?:신뢰할 수 있는\s*)?현실적인\s*조건을\s*함께\s*살펴보시면/g, '객관적인 자료와 현실적인 조건을 함께 살펴보시면'],
+    [/관련\s*결정은\s*현실적인\s*조건과\s*함께\s*다시\s*확인해\s*주세요/g, '관련 결정은 조건을 다시 점검해 보세요']
+  ];
+  for (const [pattern, replacement] of replacements) output = output.replace(pattern, replacement);
+  output = output
+    .replace(/중요한 판단\s*관련\s*결정/g, '중요한 결정')
+    .replace(/현실적인\s*조건과\s*현실적인\s*조건/g, '현실적인 조건')
+    .replace(/조건을\s*다시\s*점검해\s*보세요\.?\s*조건을\s*다시\s*점검해\s*보세요\.?/g, '조건을 다시 점검해 보세요.')
+    .replace(/객관적인\s*자료와\s*현실적인\s*조건을\s*함께\s*살펴보시면\s*좋습니다/g, '객관적인 자료와 현실적인 조건을 함께 살펴보시면 좋습니다')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return output;
+}
+
+function removeInlineDisclaimers(section, text) {
+  const paragraphs = splitParagraphs(String(text || ''));
+  const rebuilt = [];
+  for (const paragraph of paragraphs) {
+    const sentences = splitSanitySentences(paragraph);
+    const kept = [];
+    for (const sentence of sentences) {
+      const softened = cleanSectionText(softenInlineDisclaimerSentence(section, sentence));
+      if (!softened) continue;
+      if (isInlineAdvisorySentence(softened)) continue;
+      kept.push(softened);
+    }
+    if (kept.length) rebuilt.push(kept.join(' '));
+  }
+  return cleanSectionText(rebuilt.join('\n\n'));
+}
+
+function detectAwkwardWeakStrengthPhrases(text) {
+  const matches = [];
+  const raw = String(text || '');
+  for (const pattern of [
+    /기운이\s*다소\s*약한\s*편\s*경향/g,
+    /기운이\s*다소\s*약한\s*편을\s*가진\s*모습에서는/g,
+    /기운이\s*다소\s*약한\s*편(?:과|으로\s*나타나며,\s*과)\s+[^,.!?\n]{1,40}\s+(?:보완\s*요소|작용|흐름|경향)/g,
+    /기운이\s*다소\s*약한\s*편(?:을\s*가진|인)\s*(?:구조|흐름|성향|양상)\s*(?:에서는|에서)/g
+  ]) {
+    raw.replace(pattern, (match) => {
+      matches.push(match);
+      return match;
+    });
+  }
+  return Array.from(new Set(matches));
+}
+
+function detectMixedWeakStrengthTerms(text) {
+  return /(신약|중약|신약형|중약형|신약한\s*(?:기운|구조|흐름|편|경향|성향|양상)?|중약한\s*(?:기운|구조|흐름|편|경향|성향|양상)?)/.test(String(text || ''));
 }
 
 function normalizeAgeReferenceText(promptPayload, section, text) {
@@ -3008,21 +3215,36 @@ function stripHealthContentOutsideHealth(section, text) {
 
 function sanitizeSectionText(promptPayload, section, text) {
   let output = stripMarkdownHeadingArtifacts(String(text || ''));
+  output = fixQuotedConcernParticles(output);
+  output = stripSectionTitleEchoes(section, output);
+  output = normalizeDuplicateSectionHeadings(section, output);
   output = normalizeRepeatedWords(output);
   output = normalizeDuplicateParticles(output);
   output = normalizeCustomerFacingLineBreaks(output);
+  output = removeMechanicalMetaPhrases(output);
   output = normalizeSajuTerminology(output);
   output = normalizeAgeReferenceText(promptPayload, section, output);
   output = neutralizeConflictingSajuValues(promptPayload, output);
+  output = neutralizeUnverifiedConcreteSajuTerms(promptPayload, output);
+  output = normalizeFlowReplacementParticles(output);
   output = stripHealthContentOutsideHealth(section, output);
   output = stripRepeatedAdvisoryDisclaimers(section, output);
+  output = removeInlineDisclaimers(section, output);
   output = stripInlineAdvisorySentences(output);
   output = naturalizeRepeatedAdvisories(section, output);
   output = keepSingleSummaryBulletSet(output);
+  if (section === '고민에 대한 조언') output = normalizeConcernSectionText(promptPayload, output);
   output = stripSectionTitleEchoes(section, output);
+  output = normalizeDuplicateSectionHeadings(section, output);
   output = stripMarkdownHeadingArtifacts(output);
   output = normalizeDuplicateParticles(output);
   output = normalizeRepeatedWords(output);
+  output = fixQuotedConcernParticles(output);
+  output = removeMechanicalMetaPhrases(output);
+  output = normalizeSajuTerminology(output);
+  output = normalizeFlowReplacementParticles(output);
+  output = normalizeDuplicateSectionHeadings(section, output);
+  output = stripSectionTitleEchoes(section, output);
   return cleanSectionText(output);
 }
 
@@ -3042,8 +3264,12 @@ function finalReportSanityCheck(promptPayload, sections = {}) {
       excessiveRepeatedWordsRemoved: !/(^|[\s(\[{"'“‘])([가-힣A-Za-z0-9]{1,20})(?:\s+\2){2,}(?=$|[\s)\]}"'”’.!?,:;])/u.test(body),
       duplicateParticlesRemoved: !hasDuplicateParticleTypo(body),
       monthConflictRemoved: detectConcreteMonthConflicts(promptPayload, body).length === 0,
+      unverifiedConcreteSajuRemoved: detectUnverifiedConcreteSajuTerms(promptPayload, body).length === 0,
       advisoryRemovedFromBody: !splitSanitySentences(body).some((sentence) => isInlineAdvisorySentence(sentence)),
-      noDuplicateTitleEcho: stripSectionTitleEchoes(section, body) === body
+      weakStrengthTermsUnified: !detectMixedWeakStrengthTerms(body),
+      awkwardWeakStrengthPhrasesRemoved: detectAwkwardWeakStrengthPhrases(body).length === 0,
+      noDuplicateTitleEcho: stripSectionTitleEchoes(section, body) === body,
+      noStandaloneSectionHeadingLines: normalizeDuplicateSectionHeadings(section, body) === body
     };
     if (!Object.values(sectionResult).every((value) => value === true || value === section)) ok = false;
     perSection.push(sectionResult);
@@ -4329,7 +4555,14 @@ function removeMechanicalMetaPhrases(text) {
     /이 리포트는 자기이해와 엔터테인먼트 목적의 참고 자료이며 실제 [^.?!]+[.?!]/g,
     /제공된 정보가 부족합니다\.?/g,
     /죄송하지만[^.?!]*[.?!]/g,
-    /요청하신 형식의 내용을 그대로 작성해 드릴 수는 없습니다\.?/g
+    /요청하신 형식의 내용을 그대로 작성해 드릴 수는 없습니다\.?/g,
+    /현재 같은 반복을 일부러 넣은 초안이어도[^.?!]*[.?!]/g,
+    /이 문단은 실제 생성 경로에서 후처리가 얼마나 안정적으로 작동하는지 확인하기 위한 변형 문장을 포함하지만[^.?!]*[.?!]/g,
+    /초안 단계에서는 [^.?!]*[.?!]/g,
+    /하지만 최종 저장 전에는 [^.?!]*[.?!]/g,
+    /[가-힣A-Za-z0-9]+님의 원국 정보는 undefined[^.?!]*[.?!]/g,
+    /undefined년주, undefined월주, undefined일주, undefined시주[^.?!]*[.?!]/g,
+    /후처리 단계에서 통일이 필요합니다\.?/g
   ];
   for (const pattern of patterns) output = output.replace(pattern, ' ');
   output = stripInlineFormatting(output);
@@ -4340,26 +4573,50 @@ function removeMechanicalMetaPhrases(text) {
   return cleanSectionText(output);
 }
 
+function buildConcernLeadSentence(promptPayload) {
+  const concern = String(promptPayload?.basicInfo?.concern || promptPayload?.applicant?.concern || '').trim();
+  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
+  if (!concern) return '현재 흐름에 대한 조언에서는 일상에서 균형을 잡기 위한 선택 기준을 정리합니다.';
+  const normalized = concern.replace(/\s+/g, ' ');
+  if (/(돈|재물|수입|소득|연봉|월급|부업|자산|투자|현금흐름|금전|벌 수|벌수)/.test(normalized)) return name + '께서 궁금해하신 금전 흐름과 수입 안정성을 중심으로 살펴보면, 지금은 무리한 확장보다 유지 가능한 기준을 먼저 세우는 편이 좋습니다.';
+  if (/(연애|결혼|인연|궁합|관계|재회|이별|호감|배우자)/.test(normalized)) return name + '께서 고민하신 인연과 관계의 흐름을 중심으로 살펴보면, 감정보다 생활 리듬과 대화 기준을 먼저 맞추는 태도가 중요합니다.';
+  if (/(직업|진로|이직|커리어|취업|직장|회사|사업|창업|동업|업무|연봉 협상|승진|공부|전환)/.test(normalized)) return name + '께서 고민하신 진로와 직업 선택의 흐름을 중심으로 살펴보면, 역할의 방향과 오래 유지할 수 있는 구조를 함께 점검하는 편이 좋습니다.';
+  if (/(건강|체력|수면|피로|회복|컨디션|생활 리듬|스트레스)/.test(normalized)) return name + '께서 걱정하신 건강 관리와 생활 리듬의 흐름을 중심으로 살펴보면, 무리한 버티기보다 회복 기준을 먼저 세우는 태도가 도움이 됩니다.';
+  if (/(가족|자녀|육아|돌봄|부모|형제|집안)/.test(normalized)) return name + '께서 고민하신 가족과 돌봄의 흐름을 중심으로 살펴보면, 책임을 혼자 짊어지기보다 역할을 나누는 기준이 중요합니다.';
+  return name + '께서 남기신 고민의 흐름을 중심으로 살펴보면, 무엇을 먼저 정리하고 어떤 순서로 움직일지 기준을 세우는 일이 가장 중요합니다.';
+}
+
 function normalizeConcernSectionText(promptPayload, text) {
   const concern = String(promptPayload?.basicInfo?.concern || promptPayload?.applicant?.concern || '').trim();
   let output = cleanSectionText(String(text || ''));
+  const leadSentence = buildConcernLeadSentence(promptPayload);
+  output = output
+    .replace(/^현재 흐름에 대한 조언에서는[^.?!]*[.?!]\s*/u, '')
+    .replace(/^고민에 대한 조언에서는[^.?!]*[.?!]\s*/u, '')
+    .replace(/고민 반영 보강 해석/g, '');
   if (!concern) {
-    const currentFlowIntro = '현재 흐름에 대한 조언에서는 일상에서 균형을 잡기 위한 선택 기준을 정리합니다.';
+    const currentFlowIntro = leadSentence;
     const defaultConcernIntro = buildSectionIntro(promptPayload, '고민에 대한 조언');
     output = output
-      .replace(new RegExp(`^${escapeRegex(defaultConcernIntro)}`), currentFlowIntro)
+      .replace(new RegExp('^' + escapeRegex(defaultConcernIntro)), currentFlowIntro)
       .replace(/고민에 대한 조언에서는 사용자의 질문에 직접 연결되는 현실적인 선택 기준을 제시합니다\.?/g, currentFlowIntro)
       .replace(/고민에 대한 조언에서는 [^.?!]*고민[^.?!]*풀어드립니다\.?/g, '현재 흐름에 대한 조언에서는 지금 생활에서 바로 적용할 수 있는 기준을 차분히 살펴봅니다.')
       .replace(/현재 입력된 고민이 구체적이지 않기 때문에,?\s*/g, '')
       .replace(/입력된 고민이 없어 전반적인 흐름을 기준으로 안내드립니다\.?/g, '')
-      .replace(/고민 반영 보강 해석/g, '')
       .replace(/사용자의 질문에 직접 연결되는/gi, '일상에 바로 연결해 볼 수 있는')
       .replace(/질문에 직접 답(?:하세요|합니다)\.?/g, '지금 생활에 바로 연결해 볼 수 있는 기준을 중심으로 풀어갑니다.');
-    if (!/^현재 흐름에 대한 조언/.test(output)) {
-      output = `${currentFlowIntro}\n\n${output}`;
-    }
+    if (!output.startsWith(currentFlowIntro)) output = currentFlowIntro + '\n\n' + output;
   } else {
-    output = output.replace(/고민 반영 보강 해석/g, '');
+    const paragraphs = splitParagraphs(output);
+    const firstParagraph = cleanSectionText(paragraphs[0] || '');
+    const concernKeywords = collectConcernKeywords(concern);
+    const reflectsConcern = concernKeywords.length ? concernKeywords.some((token) => firstParagraph.includes(token)) : false;
+    if (!reflectsConcern || !firstParagraph) {
+      const rest = firstParagraph ? paragraphs.slice(1) : paragraphs;
+      output = [leadSentence, ...rest].filter(Boolean).join('\n\n');
+    } else if (!output.startsWith(firstParagraph)) {
+      output = [firstParagraph, ...paragraphs.slice(1)].join('\n\n');
+    }
   }
   return cleanSectionText(output);
 }
