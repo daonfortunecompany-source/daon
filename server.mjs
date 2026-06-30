@@ -2693,7 +2693,7 @@ function normalizeConcernQuotedText(concern) {
     .replace(/\s+/g, ' ')
     .trim();
   if (!cleaned) return '';
-  return `“${cleaned}”라는 내용`;
+  return `“${cleaned}”이라는 내용`;
 }
 
 function fixRepeatedSummaryTransitions(text) {
@@ -2834,8 +2834,10 @@ const DUPLICATE_PARTICLE_RULES = [
   ['께서는는', '께서는'],
   ['으로는는', '으로는'],
   ['으로으로', '으로'],
+  ['로로', '로'],
   ['에서에서', '에서'],
   ['에게에게', '에게'],
+  ['에게게', '에게'],
   ['께서께서', '께서'],
   ['에는는', '에는'],
   ['은은', '은'],
@@ -2845,7 +2847,41 @@ const DUPLICATE_PARTICLE_RULES = [
   ['을을', '을'],
   ['를를', '를'],
   ['과과', '과'],
-  ['와와', '와']
+  ['와와', '와'],
+  ['이나나', '이나'],
+  ['거나나', '거나']
+];
+
+const GENERIC_AWKWARD_PATTERN_RULES = [
+  [/이\s*흐름\s+것으로\s+보입니다/g, '이런 흐름으로 보입니다'],
+  [/가지고\s+이\s*흐름/g, '가지고 있는 흐름'],
+  [/흐름의\s*대운\s*구간/g, '대운 구간'],
+  [/지금\s+현재(?:\s+현재)+/g, '현재'],
+  [/현재(?:\s+현재)+/g, '현재'],
+  [/이\s*시기에는는/g, '이 시기에는'],
+  [/평가\s+높아질/g, '평가가 높아질'],
+  [/다가지만/g, '다가가지만']
+];
+
+const REPORT_BAD_PHRASE_PATTERNS = [
+  /중요한\s*판단나/g,
+  /중요한\s*판단를/g,
+  /단기\s+중요한\s*판단/g,
+  /작은\s+중요한\s*판단/g,
+  /이\s*흐름\s+것으로/g,
+  /가지고\s+이\s*흐름/g,
+  /흐름의\s*대운\s*구간/g,
+  /현재\s+현재/g,
+  /지금\s+현재\s+현재/g,
+  /이\s*시기에는는/g,
+  /에는는/g,
+  /은은/g,
+  /는는/g,
+  /를를/g,
+  /을을/g,
+  /평가\s+높아질/g,
+  /다가지만/g,
+  /[“"][^“”"\n]{1,40}[”"]라는\s+내용/gu
 ];
 
 const SAJU_BRANCH_ELEMENT_MAP = { 자: '수', 축: '토', 인: '목', 묘: '목', 진: '토', 사: '화', 오: '화', 미: '토', 신: '금', 유: '금', 술: '토', 해: '수' };
@@ -2873,14 +2909,280 @@ function normalizeRepeatedWords(text) {
 
 function normalizeDuplicateParticles(text) {
   let output = String(text || '');
+  const generalRepeatParticles = ['에게는', '께서는', '으로는', '에서는', '에게', '께서', '에는', '으로', '이나', '거나', '은', '는', '이', '가', '을', '를', '과', '와', '도', '만', '에', '로'];
   for (let pass = 0; pass < 4; pass += 1) {
     const before = output;
     for (const [wrong, correct] of DUPLICATE_PARTICLE_RULES) {
       output = output.replace(new RegExp(wrong, 'g'), correct);
     }
+    for (const particle of generalRepeatParticles) {
+      output = output.replace(new RegExp(`(${escapeRegex(particle)})(?:\\s*${escapeRegex(particle)})+`, 'g'), '$1');
+    }
+    output = output
+      .replace(/(이\s*시기에는)\s*는/g, '$1')
+      .replace(/(으로는|에게는|께서는|에서는|에는)(?:\s*는)+/g, '$1')
+      .replace(/(에게|께서|으로|이나|거나)(?:\s*(은|는|이|가|을|를|과|와|도|만|에|로))/g, '$1$2');
     if (output === before) break;
   }
   return cleanSectionText(output);
+}
+
+function hasFinalConsonant(value = '') {
+  const text = String(value || '').trim();
+  const lastChar = text.slice(-1);
+  if (!lastChar) return false;
+  const code = lastChar.charCodeAt(0);
+  if (code < 0xac00 || code > 0xd7a3) return false;
+  return ((code - 0xac00) % 28) !== 0;
+}
+
+function attachSubjectParticle(noun = '') {
+  const word = String(noun || '').trim();
+  if (!word) return word;
+  return `${word}${hasFinalConsonant(word) ? '이' : '가'}`;
+}
+
+function normalizeQuotedTopicParticles(text) {
+  let output = String(text || '');
+  output = output
+    .replace(/([“"][^“”"\n]{1,40}[”"])(?:\s*)라는\s+(내용|질문|고민|표현|말)(?=(?:은|는|이|가|을|를|에|으로|로|과|와)\b)/gu, '$1이라는 $2')
+    .replace(/([“"][^“”"\n]{1,40}[”"])(?:\s*)라는(?=\s*(?:내용|질문|고민|표현|말)?\s*(?:은|는|이|가|을|를|에|으로|로|과|와)\b)/gu, (match, quoted) => {
+      const inner = String(quoted || '').replace(/[“”"]/g, '').trim();
+      if (!inner) return match;
+      if (/[.?!]$/.test(inner) || /(?:요|다|까)$/.test(inner)) return match;
+      return `${quoted}이라는`;
+    })
+    .replace(/([가-힣A-Za-z0-9]+)\s+고민라는/gu, '$1 고민이라는')
+    .replace(/([가-힣A-Za-z0-9]+)\s+질문라는/gu, '$1 질문이라는');
+  return cleanSectionText(output);
+}
+
+function normalizeMissingSubjectParticles(text) {
+  let output = String(text || '');
+  output = output.replace(/(^|[\s(\[\{“"'])([가-힣A-Za-z0-9]{2,20})\s+높아질\s+(?=가능성|수|전망|여지)/gu, (match, prefix, noun) => {
+    if (/(?:은|는|이|가|을|를|과|와|도|만|에|로)$/.test(noun)) return match;
+    return `${prefix}${attachSubjectParticle(noun)} 높아질 `;
+  });
+  return cleanSectionText(output.replace(/다가지만/gu, '다가가지만'));
+}
+
+function normalizeRepeatedAdviceWithinSection(text) {
+  const paragraphs = splitParagraphs(String(text || ''));
+  const seen = new Set();
+  const rebuilt = [];
+  for (const paragraph of paragraphs) {
+    const kept = [];
+    for (const sentence of splitSanitySentences(paragraph)) {
+      const normalized = cleanSectionText(sentence).replace(/\s+/g, ' ');
+      if (!normalized) continue;
+      const key = buildRepeatKey(normalized) || normalized;
+      const shouldDedupe = normalized.length >= 22
+        && /(편이 좋습니다|중요합니다|도움이 됩니다|확인해 보세요|점검해 보세요|고려해 보세요|함께 고려해 주세요|먼저 세우는 편이 좋습니다|먼저 정리하는 편이 좋습니다|현실적인 조건도 함께 고려해 주세요)/.test(normalized);
+      if (shouldDedupe && seen.has(key)) continue;
+      if (shouldDedupe) seen.add(key);
+      kept.push(normalized);
+    }
+    if (kept.length) rebuilt.push(kept.join(' '));
+  }
+  return cleanSectionText(rebuilt.join('\n\n'));
+}
+
+function chooseDecisionPhrase(section, context = '') {
+  const combined = `${section || ''} ${context || ''}`.replace(/\s+/g, ' ');
+  if (/(법률|계약)/.test(combined)) return '중요한 계약 결정';
+  if (/(재물|금전|수입|소득|연봉|월급|부업|자산|현금흐름|투자|지출|소비)/.test(combined)) return '금전 결정';
+  if (/(직업|진로|이직|커리어|취업|직장|회사|사업|창업|동업|업무|승진)/.test(combined)) return '진로 결정';
+  if (/(연애|결혼|인연|궁합|관계|재회|이별|배우자)/.test(combined)) return '관계 결정';
+  if (/(건강|체력|수면|피로|회복|컨디션|생활 리듬)/.test(combined)) return '건강 관련 결정';
+  return '중요한 결정';
+}
+
+function attachKoreanObjectParticle(noun, particle = '') {
+  const map = { 가: '이', 는: '은', 를: '을', 와: '과', 로: '으로', 나: '이나', 라는: '이라는' };
+  return noun + (map[particle] || particle || '');
+}
+
+function normalizeDecisionPlaceholderPhrases(section, text) {
+  let output = String(text || '');
+  const inferByMatch = (match) => chooseDecisionPhrase(section, match);
+  output = output.replace(/단기\s+중요한\s*판단(처럼|이나|나|은|는|이|가|을|를)?/g, (match, particle = '') => {
+    const phrase = /(재물|금전|수입|투자|지출|소비)/.test(`${section} ${match}`) ? '단기 수익' : /(직업|진로|이직|커리어|회사|업무)/.test(`${section} ${match}`) ? '단기 계획' : '단기적인 결정';
+    return attachKoreanObjectParticle(phrase, particle);
+  });
+  output = output.replace(/작은\s+중요한\s*판단(처럼|이나|나|은|는|이|가|을|를)?/g, (match, particle = '') => {
+    const phrase = /(재물|금전|수입|투자|지출|소비)/.test(`${section} ${match}`) ? '필요한 지출' : '작은 결정';
+    return attachKoreanObjectParticle(phrase, particle);
+  });
+  output = output.replace(/중요한\s*판단(처럼|이나|나|은|는|이|가|을|를|과|와|로|도|만|의)?/g, (match, particle = '') => {
+    if (particle === '처럼') return `${inferByMatch(match)}처럼`;
+    return attachKoreanObjectParticle(inferByMatch(match), particle);
+  });
+  output = output
+    .replace(/중요한\s*결정를/g, '중요한 결정을')
+    .replace(/중요한\s*결정가/g, '중요한 결정이')
+    .replace(/중요한\s*결정는/g, '중요한 결정은')
+    .replace(/중요한\s*계약\s*결정를/g, '중요한 계약 결정을')
+    .replace(/금전\s*결정를/g, '금전 결정을')
+    .replace(/진로\s*결정를/g, '진로 결정을')
+    .replace(/관계\s*결정를/g, '관계 결정을')
+    .replace(/건강\s*관련\s*결정를/g, '건강 관련 결정을');
+  return cleanSectionText(output);
+}
+
+function normalizeAwkwardTemplatePhrases(section, text) {
+  let output = String(text || '');
+  for (const [pattern, replacement] of GENERIC_AWKWARD_PATTERN_RULES) output = output.replace(pattern, replacement);
+  output = output
+    .replace(/현재\s*(\d{1,2}세\s*[~\-–—]\s*\d{1,2}세)\s*(?:대운\s*흐름\s*)?구간/g, '현재 $1 대운 구간')
+    .replace(/현재\s*(\d{1,2}대\s*(?:초반|중반|후반))(?:으로\s*이어지는)?\s*흐름의\s*대운\s*구간/g, '현재 $1으로 이어지는 대운 구간')
+    .replace(/이\s*흐름에\s*있는\s*것으로\s*보입니다/g, '이런 흐름으로 보입니다')
+    .replace(/현재\s+흐름의\s+대운\s+구간/g, '현재 대운 구간')
+    .replace(/가지고\s+있는\s+흐름\s+([가-힣]+)/g, '가지고 있는 $1')
+    .replace(/이\s*흐름으로\s*보입니다\s*처럼/g, '이런 흐름처럼');
+  output = normalizeDecisionPlaceholderPhrases(section, output);
+  output = normalizeDuplicateParticles(output);
+  return cleanSectionText(output);
+}
+
+function normalizeAwkwardPhrases(section, text) {
+  let output = String(text || '');
+  output = normalizeAwkwardTemplatePhrases(section, output);
+  output = normalizeQuotedTopicParticles(output);
+  output = normalizeMissingSubjectParticles(output);
+  output = output
+    .replace(/가지고\s+이\s*흐름\s+([가-힣A-Za-z0-9]{2,20})/gu, '가지고 있는 $1')
+    .replace(/가지고\s+있는\s+흐름\s+(연애|직업|진로|재물|금전|건강|인간관계)\s+고민/gu, '가지고 있는 $1 고민')
+    .replace(/이\s*흐름\s+것으로/gu, '이런 흐름으로')
+    .replace(/현재\s*(\d{1,2}대\s*(?:초반|중반|후반))(?:\s*으로\s*이어지는)?\s*흐름의?\s*대운\s*구간/gu, '현재 $1으로 이어지는 대운 구간');
+  output = normalizeDuplicateParticles(output);
+  return cleanSectionText(output);
+}
+
+function detectBadReportPhrases(text) {
+  const raw = String(text || '');
+  const hits = [];
+  for (const pattern of REPORT_BAD_PHRASE_PATTERNS) {
+    raw.replace(pattern, (match) => {
+      hits.push(cleanSectionText(match));
+      return match;
+    });
+  }
+  return Array.from(new Set(hits.filter(Boolean)));
+}
+
+function dedupeGenericAdviceAcrossSections(promptPayload, sections = {}) {
+  const ordered = orderReportSections(promptPayload, sections || {});
+  const seen = new Set();
+  const output = {};
+  for (const [section, value] of Object.entries(ordered || {})) {
+    const paragraphs = splitParagraphs(String(value || ''));
+    const rebuilt = [];
+    for (const paragraph of paragraphs) {
+      const kept = [];
+      for (const sentence of splitSanitySentences(paragraph)) {
+        const normalized = cleanSectionText(sentence).replace(/\s+/g, ' ');
+        if (!normalized) continue;
+        const key = normalized
+          .replace(/[“”"']/g, '')
+          .replace(/[가-힣A-Za-z0-9]+님/g, '고객님');
+        const isGenericAdvice = key.length <= 88
+          && /(편이 좋습니다|중요합니다|도움이 됩니다|확인해 보세요|점검해 보세요|우선에 두는 편이 좋습니다|기준을 먼저 세우는 편이 좋습니다|하루 정도 간격을 두는 편이 좋습니다)/.test(key);
+        if (isGenericAdvice && seen.has(key)) continue;
+        if (isGenericAdvice) seen.add(key);
+        kept.push(normalized);
+      }
+      if (kept.length) rebuilt.push(kept.join(' '));
+    }
+    output[section] = cleanSectionText(rebuilt.join('\n\n'));
+  }
+  return output;
+}
+
+function getConcernThemes(promptPayload) {
+  const concern = String(promptPayload?.basicInfo?.concern || promptPayload?.applicant?.concern || '').trim();
+  const themes = [];
+  if (!concern) return themes;
+  if (/(연애|결혼|인연|궁합|관계|재회|이별|호감|배우자)/.test(concern)) themes.push('love');
+  if (/(직업|진로|이직|커리어|취업|직장|회사|사업|창업|동업|업무|승진|공부|전환)/.test(concern)) themes.push('career');
+  if (/(돈|재물|수입|소득|연봉|월급|부업|자산|투자|현금흐름|금전|벌 수|벌수|지출|소비)/.test(concern)) themes.push('money');
+  if (/(건강|체력|수면|피로|회복|컨디션|생활 리듬|스트레스)/.test(concern)) themes.push('health');
+  if (/(인간관계|대인관계|가족|자녀|육아|돌봄|부모|형제|집안|친구|동료)/.test(concern)) themes.push('relationship');
+  return Array.from(new Set(themes));
+}
+
+function buildConcernCoverageSentence(promptPayload, section, theme) {
+  const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
+  const map = {
+    love: {
+      '핵심 요약': `${name}의 관계 고민은 감정보다 생활 리듬과 대화 기준을 먼저 맞추는 쪽에서 해답이 보이기 쉽습니다.`,
+      '애정운': `${name}은 연애 흐름을 볼 때 설렘의 강도보다 약속을 지키는 태도와 생활 호흡이 맞는지를 함께 보시는 편이 좋습니다.`,
+      '고민에 대한 조언': `${name}의 연애 고민은 상대의 마음을 단정하기보다, 지금 관계에서 무엇이 편안하고 무엇이 지치는지 기준을 선명하게 적어보실수록 답이 빨라질 수 있습니다.`
+    },
+    career: {
+      '핵심 요약': `${name}의 진로 고민은 속도를 내는 일보다 오래 유지할 수 있는 역할 구조를 먼저 확인하는 데서 풀리기 쉽습니다.`,
+      '직업운': `${name}은 직업 흐름에서 직함보다 실제 업무 범위와 성장 경로를 함께 보는 편이 더 안정적입니다.`,
+      '실천 조언': `${name}은 진로 선택지를 넓히기보다 남길 기준과 포기할 기준을 먼저 적어 보실수록 판단 피로를 줄일 수 있습니다.`
+    },
+    money: {
+      '핵심 요약': `${name}의 재물 고민은 큰 수익보다 지출 구조와 수입 안정성을 먼저 정리할 때 훨씬 현실적으로 풀릴 수 있습니다.`,
+      '재물운': `${name}은 금전 흐름을 볼 때 단기 수익보다 오래 유지할 수 있는 수입 구조와 지출 기준을 먼저 점검하는 편이 좋습니다.`,
+      '실천 조언': `${name}은 이번 흐름에서 지출 한도와 보류 기준을 먼저 적어 두실수록 재물 판단이 흔들리지 않기 쉽습니다.`
+    },
+    health: {
+      '핵심 요약': `${name}의 건강 고민은 버티는 힘보다 회복 기준을 먼저 세우는 쪽에서 체감 차이가 커질 수 있습니다.`,
+      '건강운': `${name}은 건강 흐름을 볼 때 무리한 버티기보다 수면·식사·피로 신호를 먼저 기록해 두는 편이 도움이 됩니다.`,
+      '주의할 점': `${name}은 컨디션이 무너질 때 판단도 함께 흔들릴 수 있으니, 과로가 쌓인 상태에서는 중요한 선택을 미루는 편이 좋습니다.`
+    },
+    relationship: {
+      '핵심 요약': `${name}의 인간관계 고민은 모든 사람과 맞추기보다 에너지를 지켜 주는 관계와 소모시키는 관계를 먼저 구분하는 데서 풀리기 쉽습니다.`,
+      '애정운': `${name}은 대인관계 흐름을 볼 때 호감의 크기보다 경계와 약속을 지키는 태도가 안정감을 만드는 기준이 됩니다.`,
+      '고민에 대한 조언': `${name}은 관계 문제를 풀 때 상대를 바꾸려 하기보다 내가 지킬 선과 대화 방식을 먼저 정리해 두는 편이 훨씬 현실적입니다.`
+    }
+  };
+  return map?.[theme]?.[section] || '';
+}
+
+function ensureConcernCoverageAcrossSections(promptPayload, sections = {}) {
+  const concern = String(promptPayload?.basicInfo?.concern || promptPayload?.applicant?.concern || '').trim();
+  if (!concern) return sections;
+  const themes = getConcernThemes(promptPayload);
+  if (!themes.length) return sections;
+  const output = { ...(sections || {}) };
+  const sectionText = (name) => String(output?.[name] || '');
+  const appendIfMissing = (section, sentence) => {
+    const body = cleanSectionText(sectionText(section));
+    if (!body || !sentence) return;
+    if (body.includes(sentence)) return;
+    output[section] = cleanSectionText(`${body}\n\n${sentence}`);
+  };
+  for (const theme of themes) {
+    if (theme === 'love') {
+      if (!/(연애|결혼|인연|관계|대화|약속)/.test(sectionText('핵심 요약'))) appendIfMissing('핵심 요약', buildConcernCoverageSentence(promptPayload, '핵심 요약', theme));
+      if (!/(연애|결혼|인연|관계|호흡|약속)/.test(sectionText('애정운'))) appendIfMissing('애정운', buildConcernCoverageSentence(promptPayload, '애정운', theme));
+      if (!/(연애|결혼|인연|관계)/.test(sectionText('고민에 대한 조언'))) appendIfMissing('고민에 대한 조언', buildConcernCoverageSentence(promptPayload, '고민에 대한 조언', theme));
+    }
+    if (theme === 'career') {
+      if (!/(진로|직업|이직|커리어|역할|업무)/.test(sectionText('핵심 요약'))) appendIfMissing('핵심 요약', buildConcernCoverageSentence(promptPayload, '핵심 요약', theme));
+      if (!/(직업|진로|이직|커리어|업무|역할)/.test(sectionText('직업운'))) appendIfMissing('직업운', buildConcernCoverageSentence(promptPayload, '직업운', theme));
+      if (!/(진로|직업|이직|기준|선택지)/.test(sectionText('실천 조언'))) appendIfMissing('실천 조언', buildConcernCoverageSentence(promptPayload, '실천 조언', theme));
+    }
+    if (theme === 'money') {
+      if (!/(재물|수입|지출|금전|자산|투자)/.test(sectionText('핵심 요약'))) appendIfMissing('핵심 요약', buildConcernCoverageSentence(promptPayload, '핵심 요약', theme));
+      if (!/(재물|수입|지출|금전|투자|현금흐름)/.test(sectionText('재물운'))) appendIfMissing('재물운', buildConcernCoverageSentence(promptPayload, '재물운', theme));
+      if (!/(지출|금전|재물|보류 기준|한도)/.test(sectionText('실천 조언'))) appendIfMissing('실천 조언', buildConcernCoverageSentence(promptPayload, '실천 조언', theme));
+    }
+    if (theme === 'health') {
+      if (!/(건강|체력|수면|회복|피로|생활 리듬)/.test(sectionText('핵심 요약'))) appendIfMissing('핵심 요약', buildConcernCoverageSentence(promptPayload, '핵심 요약', theme));
+      if (!/(건강|체력|수면|회복|피로|생활 리듬)/.test(sectionText('건강운'))) appendIfMissing('건강운', buildConcernCoverageSentence(promptPayload, '건강운', theme));
+      if (!/(과로|컨디션|피로|건강|무리한 버티기)/.test(sectionText('주의할 점'))) appendIfMissing('주의할 점', buildConcernCoverageSentence(promptPayload, '주의할 점', theme));
+    }
+    if (theme === 'relationship') {
+      if (!/(인간관계|대인관계|관계|에너지|경계)/.test(sectionText('핵심 요약'))) appendIfMissing('핵심 요약', buildConcernCoverageSentence(promptPayload, '핵심 요약', theme));
+      if (!/(관계|경계|약속|대화|호감)/.test(sectionText('애정운'))) appendIfMissing('애정운', buildConcernCoverageSentence(promptPayload, '애정운', theme));
+      if (!/(관계|선|대화|인간관계)/.test(sectionText('고민에 대한 조언'))) appendIfMissing('고민에 대한 조언', buildConcernCoverageSentence(promptPayload, '고민에 대한 조언', theme));
+    }
+  }
+  return output;
 }
 
 function hasDuplicateParticleTypo(text) {
@@ -3081,6 +3383,8 @@ function collectAllowedConcreteSajuTokens(promptPayload) {
   return allowedGanji;
 }
 
+const COMMON_WORD_LIKE_GANJI_TOKENS = new Set(['정해']);
+
 function neutralizeUnverifiedConcreteSajuTerms(promptPayload, text) {
   let output = String(text || '');
   const allowedGanji = collectAllowedConcreteSajuTokens(promptPayload);
@@ -3088,9 +3392,12 @@ function neutralizeUnverifiedConcreteSajuTerms(promptPayload, text) {
   output = output.replace(/([갑을병정무기경신임계][자축인묘진사오미신유술해])\s*기운(께서|으로는|으로도|으로|에서는|에서|에는|에게|은|는|이|가|을|를|의|에|과|와|로|도|만|까지|부터)?/g, (match, ganji, particle = '') => allowedGanji.has(ganji) ? match : '이 흐름' + (particle || ''));
   output = output.replace(/((?:[갑을병정무기경신임계][자축인묘진사오미신유술해](?:\s*[·ㆍ,/]|\s+))+[갑을병정무기경신임계][자축인묘진사오미신유술해])(?=(?:로|으로)\s*정리된\s*흐름)/g, (match) => {
     const tokens = match.match(/[갑을병정무기경신임계][자축인묘진사오미신유술해]/g) || [];
-    return tokens.length && tokens.every((token) => allowedGanji.has(token)) ? match : '현재 흐름';
+    return tokens.length && tokens.every((token) => allowedGanji.has(token) || COMMON_WORD_LIKE_GANJI_TOKENS.has(token)) ? match : '현재 흐름';
   });
-  output = output.replace(/(^|[^가-힣A-Za-z0-9])([갑을병정무기경신임계][자축인묘진사오미신유술해])(?!\s*(?:년|월|일|시|세|점|개))(?![가-힣A-Za-z0-9])/g, (match, prefix, ganji) => allowedGanji.has(ganji) ? match : prefix + '이 흐름');
+  output = output.replace(/(^|[^가-힣A-Za-z0-9])([갑을병정무기경신임계][자축인묘진사오미신유술해])(?!\s*(?:년|월|일|시|세|점|개))(?![가-힣A-Za-z0-9])/g, (match, prefix, ganji) => {
+    if (COMMON_WORD_LIKE_GANJI_TOKENS.has(ganji)) return match;
+    return allowedGanji.has(ganji) ? match : prefix + '이 흐름';
+  });
   return cleanSectionText(output);
 }
 
@@ -3114,7 +3421,7 @@ function detectUnverifiedConcreteSajuTerms(promptPayload, text) {
   const allowedGanji = collectAllowedConcreteSajuTokens(promptPayload);
   const matches = [];
   String(text || '').replace(/([갑을병정무기경신임계][자축인묘진사오미신유술해])\s*(?:기운|흐름)?/g, (match, ganji) => {
-    if (!allowedGanji.has(ganji)) matches.push(match.trim());
+    if (!allowedGanji.has(ganji) && !COMMON_WORD_LIKE_GANJI_TOKENS.has(ganji)) matches.push(match.trim());
     return match;
   });
   return Array.from(new Set(matches));
@@ -3131,7 +3438,9 @@ function softenInlineDisclaimerSentence(section, sentence) {
     [/사주의\s*흐름만으로\s*결정하기보다\s*/g, ''],
     [/확정적\s*예측이\s*아니라\s*/g, ''],
     [/자기이해를\s*돕는\s*참고용(?:의)?\s*/g, ''],
-    [/(?:투자|법률|계약)(?:[·,\s/]*(?:투자|법률|계약))*/g, '중요한 판단'],
+    [/(?:투자)(?:[·,\s/]*(?:투자))*/g, section === '재물운' ? '금전 결정' : '중요한 결정'],
+    [/(?:법률)(?:[·,\s/]*(?:법률))*/g, '중요한 계약 결정'],
+    [/(?:계약)(?:[·,\s/]*(?:계약))*/g, section === '재물운' ? '금전 계약' : '중요한 계약'],
     [/현실\s*조건과\s*전문가\s*의견/g, '현실적인 조건'],
     [/객관적인\s*자료와\s*(?:신뢰할 수 있는\s*)?현실적인\s*조건을\s*함께\s*살펴보시면/g, '객관적인 자료와 현실적인 조건을 함께 살펴보시면'],
     [/관련\s*결정은\s*현실적인\s*조건과\s*함께\s*다시\s*확인해\s*주세요/g, '관련 결정은 조건을 다시 점검해 보세요']
@@ -3139,6 +3448,8 @@ function softenInlineDisclaimerSentence(section, sentence) {
   for (const [pattern, replacement] of replacements) output = output.replace(pattern, replacement);
   output = output
     .replace(/중요한 판단\s*관련\s*결정/g, '중요한 결정')
+    .replace(/금전 결정\s*관련\s*결정/g, '금전 결정')
+    .replace(/중요한 계약 결정\s*관련\s*결정/g, '중요한 계약 결정')
     .replace(/현실적인\s*조건과\s*현실적인\s*조건/g, '현실적인 조건')
     .replace(/조건을\s*다시\s*점검해\s*보세요\.?\s*조건을\s*다시\s*점검해\s*보세요\.?/g, '조건을 다시 점검해 보세요.')
     .replace(/객관적인\s*자료와\s*현실적인\s*조건을\s*함께\s*살펴보시면\s*좋습니다/g, '객관적인 자료와 현실적인 조건을 함께 살펴보시면 좋습니다')
@@ -3216,10 +3527,12 @@ function stripHealthContentOutsideHealth(section, text) {
 function sanitizeSectionText(promptPayload, section, text) {
   let output = stripMarkdownHeadingArtifacts(String(text || ''));
   output = fixQuotedConcernParticles(output);
+  output = normalizeQuotedTopicParticles(output);
   output = stripSectionTitleEchoes(section, output);
   output = normalizeDuplicateSectionHeadings(section, output);
   output = normalizeRepeatedWords(output);
   output = normalizeDuplicateParticles(output);
+  output = normalizeAwkwardPhrases(section, output);
   output = normalizeCustomerFacingLineBreaks(output);
   output = removeMechanicalMetaPhrases(output);
   output = normalizeSajuTerminology(output);
@@ -3232,17 +3545,22 @@ function sanitizeSectionText(promptPayload, section, text) {
   output = removeInlineDisclaimers(section, output);
   output = stripInlineAdvisorySentences(output);
   output = naturalizeRepeatedAdvisories(section, output);
+  output = normalizeRepeatedAdviceWithinSection(output);
   output = keepSingleSummaryBulletSet(output);
   if (section === '고민에 대한 조언') output = normalizeConcernSectionText(promptPayload, output);
   output = stripSectionTitleEchoes(section, output);
   output = normalizeDuplicateSectionHeadings(section, output);
   output = stripMarkdownHeadingArtifacts(output);
+  output = normalizeQuotedTopicParticles(output);
+  output = normalizeMissingSubjectParticles(output);
   output = normalizeDuplicateParticles(output);
   output = normalizeRepeatedWords(output);
+  output = normalizeAwkwardPhrases(section, output);
   output = fixQuotedConcernParticles(output);
   output = removeMechanicalMetaPhrases(output);
   output = normalizeSajuTerminology(output);
   output = normalizeFlowReplacementParticles(output);
+  output = normalizeRepeatedAdviceWithinSection(output);
   output = normalizeDuplicateSectionHeadings(section, output);
   output = stripSectionTitleEchoes(section, output);
   return cleanSectionText(output);
@@ -3263,6 +3581,8 @@ function finalReportSanityCheck(promptPayload, sections = {}) {
       markdownHashesRemoved: !/^\s*#{3,}/m.test(body),
       excessiveRepeatedWordsRemoved: !/(^|[\s(\[{"'“‘])([가-힣A-Za-z0-9]{1,20})(?:\s+\2){2,}(?=$|[\s)\]}"'”’.!?,:;])/u.test(body),
       duplicateParticlesRemoved: !hasDuplicateParticleTypo(body),
+      awkwardPhrasePatternsRemoved: detectBadReportPhrases(body).length === 0,
+      quotedTopicParticlesNormalized: !/[“"][^“”"\n]{1,40}[”"]라는\s+내용/gu.test(body),
       monthConflictRemoved: detectConcreteMonthConflicts(promptPayload, body).length === 0,
       unverifiedConcreteSajuRemoved: detectUnverifiedConcreteSajuTerms(promptPayload, body).length === 0,
       advisoryRemovedFromBody: !splitSanitySentences(body).some((sentence) => isInlineAdvisorySentence(sentence)),
@@ -3283,7 +3603,13 @@ function applyFinalReportSanityToSections(promptPayload, sections = {}) {
   for (const [section, value] of Object.entries(ordered || {})) {
     sanitized[section] = sanitizeSectionText(promptPayload, section, value);
   }
-  return sanitized;
+  const concernBalanced = ensureConcernCoverageAcrossSections(promptPayload, sanitized);
+  const deduped = dedupeGenericAdviceAcrossSections(promptPayload, concernBalanced);
+  const finalized = {};
+  for (const [section, value] of Object.entries(orderReportSections(promptPayload, deduped) || {})) {
+    finalized[section] = sanitizeSectionText(promptPayload, section, value);
+  }
+  return orderReportSections(promptPayload, finalized);
 }
 
 function sanitizeHealthSectionWithoutAppend(text) {
@@ -3351,15 +3677,15 @@ function fixQuotedConcernParticles(text) {
   let output = String(text || '');
   output = output
     .replace(/고민\s*중/gi, '고민 중')
-    .replace(/([가-힣A-Za-z0-9]+님이\s*(?:적어주신|남겨주신|전해주신)\s*)고민인\s*["“]([^"”\n]+)["”]\s*(은|는)\s*/g, '$1“$2”라는 내용은 ')
-    .replace(/([가-힣A-Za-z0-9]+님이\s*(?:적어주신|남겨주신|전해주신)\s*)고민인\s*["“]([^"”\n]+)["”]\s*(이|가)\s*/g, '$1“$2”라는 내용이 ')
-    .replace(/([가-힣A-Za-z0-9]+님이\s*(?:적어주신|남겨주신|전해주신)\s*)고민인\s*["“]([^"”\n]+)["”]\s*(을|를)\s*/g, '$1“$2”라는 내용을 ')
-    .replace(/고민인\s*["“]([^"”\n]+)["”]\s*(은|는)\s*/g, '“$1”라는 내용은 ')
-    .replace(/고민인\s*["“]([^"”\n]+)["”]\s*(이|가)\s*/g, '“$1”라는 내용이 ')
-    .replace(/고민인\s*["“]([^"”\n]+)["”]\s*(을|를)\s*/g, '“$1”라는 내용을 ')
-    .replace(/([가-힣A-Za-z0-9]+님의\s*(?:고민|질문|상담\s*내용)은?)\s*["“]([^"”\n]+)["”]\s*(은|는)\s*/g, '$1 “$2”라는 내용은 ')
-    .replace(/([가-힣A-Za-z0-9]+님의\s*(?:고민|질문|상담\s*내용)이)\s*["“]([^"”\n]+)["”]\s*(이|가)\s*/g, '$1 “$2”라는 내용이 ')
-    .replace(/([가-힣A-Za-z0-9]+님의\s*(?:고민|질문|상담\s*내용)을)\s*["“]([^"”\n]+)["”]\s*(을|를)\s*/g, '$1 “$2”라는 내용을 ');
+    .replace(/([가-힣A-Za-z0-9]+님이\s*(?:적어주신|남겨주신|전해주신)\s*)고민인\s*["“]([^"”\n]+)["”]\s*(은|는)\s*/g, '$1“$2”이라는 내용은 ')
+    .replace(/([가-힣A-Za-z0-9]+님이\s*(?:적어주신|남겨주신|전해주신)\s*)고민인\s*["“]([^"”\n]+)["”]\s*(이|가)\s*/g, '$1“$2”이라는 내용이 ')
+    .replace(/([가-힣A-Za-z0-9]+님이\s*(?:적어주신|남겨주신|전해주신)\s*)고민인\s*["“]([^"”\n]+)["”]\s*(을|를)\s*/g, '$1“$2”이라는 내용을 ')
+    .replace(/고민인\s*["“]([^"”\n]+)["”]\s*(은|는)\s*/g, '“$1”이라는 내용은 ')
+    .replace(/고민인\s*["“]([^"”\n]+)["”]\s*(이|가)\s*/g, '“$1”이라는 내용이 ')
+    .replace(/고민인\s*["“]([^"”\n]+)["”]\s*(을|를)\s*/g, '“$1”이라는 내용을 ')
+    .replace(/([가-힣A-Za-z0-9]+님의\s*(?:고민|질문|상담\s*내용)은?)\s*["“]([^"”\n]+)["”]\s*(은|는)\s*/g, '$1 “$2”이라는 내용은 ')
+    .replace(/([가-힣A-Za-z0-9]+님의\s*(?:고민|질문|상담\s*내용)이)\s*["“]([^"”\n]+)["”]\s*(이|가)\s*/g, '$1 “$2”이라는 내용이 ')
+    .replace(/([가-힣A-Za-z0-9]+님의\s*(?:고민|질문|상담\s*내용)을)\s*["“]([^"”\n]+)["”]\s*(을|를)\s*/g, '$1 “$2”이라는 내용을 ');
   return cleanSectionText(output);
 }
 
@@ -3915,18 +4241,57 @@ function buildCurrentDaeunPeriodLabel(promptPayload) {
   return `${row.startAge}세~${row.endAge}세`;
 }
 
+function getBaselineDateParts(promptPayload) {
+  const baseline = String(promptPayload?.basicInfo?.baselineDate || '').trim();
+  const match = baseline.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+  const { year, month } = getBaselineYearMonth(promptPayload);
+  return { year: Number(year || 2026), month: Number(month || 6), day: 30 };
+}
+
+function getCurrentAge(promptPayload) {
+  const birthYear = Number(promptPayload?.basicInfo?.birthYear || promptPayload?.applicant?.birthYear || 0);
+  const birthMonth = Number(promptPayload?.basicInfo?.birthMonth || promptPayload?.applicant?.birthMonth || 0);
+  const birthDay = Number(promptPayload?.basicInfo?.birthDay || promptPayload?.applicant?.birthDay || 0);
+  if (!birthYear || !birthMonth || !birthDay) return null;
+  const baseline = getBaselineDateParts(promptPayload);
+  let age = baseline.year - birthYear;
+  if (baseline.month < birthMonth || (baseline.month === birthMonth && baseline.day < birthDay)) age -= 1;
+  return Number.isFinite(age) ? Math.max(0, age) : null;
+}
+
+function getDaeunCurrentAgeBandLabel(promptPayload) {
+  const age = getCurrentAge(promptPayload);
+  if (!Number.isFinite(age)) return '';
+  if (age < 20) return '10대 전후';
+  if (age >= 70) return '70대 이후';
+  return `${Math.floor(age / 10) * 10}대`;
+}
+
+function countDaeunAgeBandLabels(text) {
+  const source = String(text || '');
+  const labels = ['10대 전후', '20대', '30대', '40대', '50대', '60대', '70대 이후'];
+  return labels.filter((label) => source.includes(label)).length;
+}
+
 function hasDaeunPeriodExpression(text, promptPayload = null) {
   const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
   if (!cleaned) return false;
   const exactCurrentPeriod = promptPayload ? buildCurrentDaeunPeriodLabel(promptPayload).replace(/\s+/g, '') : '';
+  const currentAge = promptPayload ? getCurrentAge(promptPayload) : null;
+  const currentBandLabel = promptPayload ? getDaeunCurrentAgeBandLabel(promptPayload).replace(/\s+/g, '') : '';
   const compact = cleaned.replace(/\s+/g, '');
   if (exactCurrentPeriod && compact.includes(exactCurrentPeriod)) return true;
+  if (Number.isFinite(currentAge) && compact.includes(`${currentAge}세전후`)) return true;
+  if (currentBandLabel && compact.includes(currentBandLabel) && /(현재|기준|해당|가장 자세히)/.test(cleaned)) return true;
+  if (countDaeunAgeBandLabels(cleaned) >= 6) return true;
   const patterns = [
     /\d{1,2}세\s*[~\-–—]\s*\d{1,2}세/,
     /\d{1,2}세부터\s*\d{1,2}세(?:까지)?/,
     /현재\s*\d{1,2}세\s*[~\-–—]\s*\d{1,2}세\s*(?:구간|대운|시기)?/,
     /현재\s*대운(?:에서는|은|의)?/,
-    /현재\s*\d{1,2}세부터\s*\d{1,2}세(?:까지)?\s*(?:이어지는\s*)?(?:흐름|대운|시기)?/
+    /현재\s*\d{1,2}세부터\s*\d{1,2}세(?:까지)?\s*(?:이어지는\s*)?(?:흐름|대운|시기)?/,
+    /(10대\s*전후|20대|30대|40대|50대|60대|70대\s*이후|노년기\s*후반)/
   ];
   return patterns.some((pattern) => pattern.test(cleaned));
 }
@@ -3960,17 +4325,77 @@ function ensurePersonalizedMentions(promptPayload, section, text) {
 
 function buildDaeunSupplement(promptPayload) {
   const name = formatHonorificName(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '') || '고객님';
-  const ranges = buildDaeunRangeRows(promptPayload);
-  const currentRange = ranges[0] || { startAge: 24, endAge: 33, label: '현재 대운' };
-  const nextRange = ranges[1] || { startAge: currentRange.endAge + 1, endAge: currentRange.endAge + 10, label: '다음 시기' };
-  const currentIntro = `현재 ${name}은 ${currentRange.startAge}세~${currentRange.endAge}세 대운 구간에 있습니다.`;
-  const nextPreview = `${nextRange.startAge}세~${nextRange.endAge}세에는 사람과 역할을 조금 더 선별하면서, 지금 다져 둔 기반을 어떻게 안정적으로 확장할지에 관심이 옮겨갈 수 있습니다.`;
-  return `${currentIntro}
-지금 시기에는 단기간에 결과를 크게 키우기보다, 오래 가져갈 수 있는 역할과 생활 리듬을 정리하는 일이 더 중요하게 들어올 수 있습니다. 일에서는 책임의 범위를 분명히 하고, 돈에서는 수입 확대만큼이나 고정비와 반복 지출을 함께 점검하실수록 흐름이 안정적으로 이어질 수 있습니다.
+  const { year } = getBaselineYearMonth(promptPayload);
+  const currentAge = getCurrentAge(promptPayload);
+  const currentBandLabel = getDaeunCurrentAgeBandLabel(promptPayload) || '현재 연령대';
+  const concernThemes = getConcernThemes(promptPayload);
+  const themeLabelMap = {
+    love: '관계와 감정의 균형',
+    career: '역할과 성장 방향',
+    money: '수입 구조와 재정 리듬',
+    health: '체력과 회복 리듬',
+    relationship: '거리 조절과 책임 분배'
+  };
+  const baseThemes = Array.from(new Set([
+    ...concernThemes.map((theme) => themeLabelMap[theme]).filter(Boolean),
+    '역할과 책임의 균형',
+    '생활 리듬의 안정'
+  ])).slice(0, 3);
+  const primaryTheme = baseThemes[0] || '역할과 책임의 균형';
+  const secondaryTheme = baseThemes[1] || '생활 리듬의 안정';
+  const tertiaryTheme = baseThemes[2] || '관계와 재정의 균형';
+  const currentGuide = Number.isFinite(currentAge)
+    ? `${year}년 기준으로 ${name}은 세는나이 ${currentAge}세 전후에 해당하므로, 아래 연령대별 장기 흐름 중 ${currentBandLabel} 구간을 가장 현실적으로 참고하시면 좋습니다.`
+    : '현재 나이에 해당하는 구간은 아래 연령대별 장기 흐름 중에서 가장 자세히 참고하시면 좋습니다.';
+  const currentThemeSentence = concernThemes.includes('love')
+    ? '지금 고민이 연애나 관계 문제와 연결되어 있다면, 속도보다 신뢰와 생활 호흡을 맞추는 선택이 특히 중요해질 수 있습니다.'
+    : concernThemes.includes('career')
+      ? '지금 고민이 진로·이직·직업 문제와 연결되어 있다면, 직함보다 실제 역할과 성장 경로를 다시 정리하는 과정이 특히 중요해질 수 있습니다.'
+      : concernThemes.includes('money')
+        ? '지금 고민이 재물이나 수입 구조와 연결되어 있다면, 큰 한 번보다 꾸준히 이어지는 현금 흐름과 지출 기준을 세우는 태도가 특히 중요해질 수 있습니다.'
+        : concernThemes.includes('health')
+          ? '지금 고민이 건강이나 체력과 연결되어 있다면, 버티는 힘보다 회복 기준을 먼저 세우는 태도가 특히 중요해질 수 있습니다.'
+          : concernThemes.includes('relationship')
+            ? '지금 고민이 가족·인간관계와 연결되어 있다면, 모두를 맞추려 하기보다 지킬 선과 책임 범위를 먼저 정하는 태도가 특히 중요해질 수 있습니다.'
+            : `${name}의 장기 흐름은 한 시점의 성패보다, 어떤 시기마다 무엇을 줄이고 무엇을 키워야 하는지 구분할 때 더 안정적으로 읽을 수 있습니다.`;
 
-관계와 협업에서는 모두를 만족시키려 하기보다 기준이 맞는 사람과 오래 갈 구조를 남기는 태도가 도움이 됩니다. 마음이 급해질수록 큰 결정을 서두르기보다, 지금 감당 가능한 속도와 체력을 먼저 확인해 두시면 부담을 훨씬 줄일 수 있습니다.
+  const ageBandParagraphs = [
+    '10대 전후에는 자기표현과 관계 감각의 밑바탕이 만들어지기 쉽습니다. 사주 구조상 외부 기대를 예민하게 읽으면서도 스스로 납득되는 기준이 있어야 움직이는 성향이 드러나면, 학교·가정·또래 관계 안에서 말수의 많고 적음보다 마음의 거리 조절이 더 큰 과제가 될 수 있습니다. 이 시기에는 성적이나 평가 하나에 자신을 단정하기보다, 어떤 환경에서 집중이 살아나고 어떤 사람 앞에서 위축되는지 관찰하는 일이 중요합니다. 실천으로는 기록 습관, 기본 체력 관리, 한 가지 강점을 오래 붙드는 연습이 도움이 될 수 있습니다.',
+    '20대에는 경험 확장과 방향 탐색이 동시에 커지기 쉽습니다. 타고난 흐름상 사람과 일의 결을 빨리 읽는 편이라면 전공, 첫 직장, 독립, 연애, 인간관계가 한꺼번에 넓어지면서도 무엇을 오래 가져갈지 결정하는 압박을 강하게 느낄 수 있습니다. 이 시기에는 직업과 관계를 모두 크게 벌이기보다 남길 기준 두세 개를 정해 두는 편이 안정적이며, 주의할 점은 가능성을 한 번에 다 잡으려는 과속입니다. 실천으로는 경험을 넓히되 수입 구조와 생활 리듬을 함께 점검하는 습관이 중요합니다.',
+    '30대는 역할과 책임의 구조가 본격적으로 자리 잡는 구간으로 읽힙니다. 사주적·성향적으로 기준 의식과 현실 감각이 함께 작동하면 직업, 재물, 관계를 따로 보지 않고 서로 연결된 문제로 다루게 되기 때문에, 커리어 방향과 수입 구조를 다시 설계하는 일이 중요해질 수 있습니다. 실제 삶에서는 이직, 승진, 사업 확장, 결혼 또는 동거, 자산 관리 같은 선택이 겹치며 무엇을 유지하고 무엇을 줄일지 정해야 하는 모습으로 나타날 수 있습니다. 주의할 점은 책임을 혼자 떠안아 체력과 감정이 동시에 마르는 것이고, 실천으로는 협업 구조 정비, 고정비 점검, 약속의 우선순위 재배치가 도움이 될 수 있습니다.',
+    '40대에는 성과를 넓히는 일만큼 구조를 정교하게 다듬는 일이 중요해질 수 있습니다. 타고난 흐름이 한 번 만든 기반을 오래 책임지려는 쪽으로 작동하면, 실무 능력과 판단력은 안정되지만 사람·돈·시간을 과하게 끌어안는 순간 피로가 누적되기 쉽습니다. 실제 삶에서는 조직 안에서 책임이 커지거나, 가족과 재정 문제를 함께 조율해야 하거나, 지금까지의 방식이 여전히 맞는지 다시 점검하는 모습으로 나타날 수 있습니다. 이 시기에는 직업과 재물의 균형을 다시 맞추고, 큰 결정보다 지속 가능한 운영 방식에 힘을 두시는 편이 좋습니다.',
+    '50대에는 선택과 집중의 힘이 더 중요해질 수 있습니다. 사주 구조상 경험이 쌓일수록 사람을 넓게 늘리기보다 실제로 호흡이 맞는 관계와 오래 가는 수입 구조를 남기려는 경향이 강해질 수 있어, 일의 규모보다 무엇이 내 삶을 지탱하는지 선별하는 태도가 필요합니다. 실제 삶에서는 자산 재배치, 역할 재정의, 가족 안의 책임 조정, 건강 리듬 재정비 같은 문제로 흐름이 체감될 수 있습니다. 주의할 점은 익숙함만 믿고 변화 신호를 미루는 것이며, 실천으로는 생활비·자산·체력 관리 기준을 다시 세우는 일이 도움이 됩니다.',
+    '60대에는 속도를 줄이는 것이 아니라 리듬을 바르게 재배치하는 흐름이 중요해질 수 있습니다. 성향적으로 책임감이 오래 유지되는 편이라면 일을 완전히 놓기보다 경험을 전수하거나, 필요한 역할만 남기고 생활의 밀도를 조절하는 방식이 더 잘 맞을 수 있습니다. 실제 삶에서는 건강 관리, 관계 정리, 일의 방식 전환, 경제적 안전판 점검이 핵심 과제로 떠오르기 쉽고, 이때는 성취보다 회복과 안정이 더 큰 경쟁력이 됩니다. 주의할 점은 아직도 예전 속도를 기준으로 자신을 몰아붙이는 것이고, 실천으로는 수면·식사·운동 루틴과 재정 점검 루틴을 함께 단순화하는 일이 좋습니다.',
+    '70대 이후에는 결과를 키우는 흐름보다 삶의 결을 정돈하고 의미를 남기는 흐름이 더 중요해질 수 있습니다. 사주 구조상 기준 의식과 책임감이 오래 가는 편이라면 80대, 90대, 100세 전후에도 사람을 완전히 끊기보다 필요한 관계만 남기고 생활을 단순하게 운영할 때 마음의 안정이 커질 수 있습니다. 실제 생활에서는 건강과 체력 관리, 가족과의 거리 조절, 재정의 안전성, 정서적 평온을 어떻게 지켜 갈지가 핵심으로 나타나기 쉽습니다. 주의할 점은 도움을 받는 일을 약함으로 오해하는 것이고, 실천으로는 생활 지원 체계 정비, 관계의 정리, 하루 리듬의 안정에 힘을 두시는 편이 좋습니다.'
+  ];
 
-실천으로는 연간 목표를 일·돈·관계 세 축으로 나눠 보고, 분기마다 유지할 것과 줄일 것을 다시 점검해 보시는 편이 좋습니다. ${nextPreview}`;
+  const currentDetail = `특히 ${currentBandLabel} 구간은 ${name}에게 ${primaryTheme}과 ${secondaryTheme}이 실제 결정 문제로 압축되어 나타나기 쉽습니다. ${currentThemeSentence} 실제 생활에서는 해야 할 일은 늘어나는데 체력과 감정 여유는 줄어들어, 직업·재물·관계 가운데 무엇을 먼저 정리해야 할지 판단 피로가 커질 수 있습니다. 이럴수록 큰 결론을 서두르기보다 현재 맡은 역할, 월간 현금 흐름, 가까운 관계의 약속 구조를 한 번에 점검하는 방식이 도움이 됩니다. ${name}은 지금 시기일수록 속도보다 지속 가능성을 우선에 두는 판단을 하실수록 장기 흐름을 훨씬 안정적으로 타실 수 있습니다.`;
+
+  const summaryFlow = Number.isFinite(currentAge)
+    ? '10대 전후의 감각 형성에서 출발해 20대의 확장, 30~40대의 구조 정비, 50~60대의 선택과 집중, 70대 이후의 안정과 정리로 이어지는 흐름을 보이기 쉽습니다.'
+    : '10대 전후의 감각 형성에서 출발해 성인기에는 역할과 재정 구조를 다듬고, 이후에는 선택과 회복을 중심으로 흐름이 정리되기 쉽습니다.';
+
+  const summary = `대운 3줄 요약
+
+- 강점: ${name}은 ${primaryTheme}과 ${secondaryTheme}을 함께 조율하며 장기 흐름을 읽는 감각이 강점이 될 수 있습니다.
+- 흐름: ${summaryFlow}
+- 주의: 책임과 기대를 한꺼번에 떠안아 체력·재정·관계가 동시에 흔들리는 상황은 특히 조심하실 필요가 있습니다.
+- 실천: 현재 연령대에서는 역할 정리, 고정비 점검, 관계의 우선순위 조정, 회복 루틴 고정을 함께 가져가시면 좋습니다.`;
+
+  return cleanSectionText([
+    `아래 내용은 정확한 대운 간지표를 단정하기보다, 사주 구조를 바탕으로 본 연령대별 장기 흐름입니다. ${currentGuide}`,
+    `${name}의 인생 흐름을 길게 보면 ${primaryTheme}, ${secondaryTheme}, ${tertiaryTheme}이 반복 주제로 떠오르기 쉽습니다. 사주 구조상 한 번 맡은 책임을 쉽게 버리지 않고, 사람·일·돈의 균형이 맞아야 마음이 편해지는 경향이 있으면 시기마다 선택 기준을 다시 세우는 일이 곧 운을 잘 타는 방법이 될 수 있습니다.`,
+    `${name}은 한 시점의 성패보다 어느 연령대에서 무엇을 더하고 무엇을 줄여야 하는지를 구분할수록 흐름을 안정적으로 활용하실 수 있습니다. ${currentThemeSentence}`,
+    ageBandParagraphs[0],
+    ageBandParagraphs[1],
+    ageBandParagraphs[2],
+    ageBandParagraphs[3],
+    ageBandParagraphs[4],
+    ageBandParagraphs[5],
+    ageBandParagraphs[6],
+    currentDetail,
+    summary
+  ].filter(Boolean).join('\n\n'));
 }
 
 function buildSeunSupplement(promptPayload) {
@@ -4642,7 +5067,7 @@ function normalizeDaeunSectionText(promptPayload, text) {
       .replace(/(\d{1,2}세\s*[~\-–—]\s*\d{1,2}세)\s*대운\s*\(?\s*다음 시기\s*\)?\s*에서는?/g, '$1에는')
       .replace(/다음 대운에서/g, '다음 시기에는')
       .replace(/현재\s*대운\s*구간(?:에 있습니다)?/g, '현재 흐름')
-      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/[ 	]{2,}/g, ' ')
       .trim();
     if (!paragraph) continue;
     const compact = paragraph.replace(/\s+/g, '');
@@ -4653,7 +5078,15 @@ function normalizeDaeunSectionText(promptPayload, text) {
     if (nextLabel && compact.includes(nextLabel)) nextMentionSeen = true;
     rebuilt.push(paragraph);
   }
-  return cleanSectionText(rebuilt.join('\n\n'));
+  let output = cleanSectionText(rebuilt.join('\n\n'));
+  const ageBandCount = countDaeunAgeBandLabels(output);
+  const hasSummary = /대운 3줄 요약/.test(output);
+  const currentBandLabel = getDaeunCurrentAgeBandLabel(promptPayload);
+  const hasCurrentBand = currentBandLabel ? output.includes(currentBandLabel) : true;
+  if (countVisibleChars(output) < 1100 || ageBandCount < 6 || !hasSummary || !hasCurrentBand) {
+    output = buildDaeunSupplement(promptPayload);
+  }
+  return cleanSectionText(output);
 }
 
 function trimRedundantSectionIntro(promptPayload, section, text) {
@@ -5820,7 +6253,10 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
         sectionErrors[key].push('대운 기간 표현 부족');
         errors.push('대운 기간 표현 부족');
       }
-      const structureMismatch = ageBandMatches.length < 3 || hasMixedBands || !/대운 3줄 요약/.test(text);
+      const decadeMatches = Array.from(new Set(text.match(/10대\s*전후|20대|30대|40대|50대|60대|70대\s*이후|노년기\s*후반/g) || []));
+      const currentBandLabel = getDaeunCurrentAgeBandLabel(promptPayload);
+      const hasCurrentBandDetail = currentBandLabel ? text.includes(currentBandLabel) : true;
+      const structureMismatch = (ageBandMatches.length < 3 && decadeMatches.length < 6) || hasMixedBands || !/대운 3줄 요약/.test(text) || !hasCurrentBandDetail;
       if (structureMismatch && Boolean(text.trim()) && !daeunMetaResponse.detected && !daeunPolicyRefusal.detected) {
         warnings.push('대운 구조 기준 일부 불일치 - 생성 본문 사용');
       }
@@ -6168,7 +6604,7 @@ function buildSectionSpecificPromptInstructionsLegacy(sections, promptPayload = 
   ];
   const { year, month } = getBaselineYearMonth(promptPayload);
   if (sections.includes('대운')) {
-    lines.push('대운은 반드시 나이대 또는 실제 대운 기간 표현을 자연스럽게 포함하세요. 예: 25세~34세 대운, 35세~44세 대운. 각 구간마다 직업/돈/관계 중 두 가지 이상, 주의할 점, 실천 조언을 포함하고 말미에는 필요할 때만 짧게 정리하세요.');
+    lines.push('대운은 정확한 대운 시작 나이와 간지를 검증할 수 있을 때만 구체값을 쓰고, 그렇지 않으면 연령대별 장기 흐름 형식으로 작성하세요. 10대 전후, 20대, 30대, 40대, 50대, 60대, 70대 이후를 포함하고 현재 나이 구간은 가장 자세히 설명하세요. 각 구간마다 핵심 주제, 왜 그렇게 읽히는지에 대한 성향적 근거, 실제 삶의 모습, 중요한 영역, 주의할 점, 실천 조언을 자연스럽게 포함하세요.');
   }
   if (sections.includes('세운')) {
     lines.push(`${year}년 세운이라는 점을 첫 문장에 분명히 밝히고, 일/커리어, 돈/재물, 관계/협업, 건강/컨디션, 올해의 선택 기준을 나누어 작성하세요.`);
@@ -6223,11 +6659,11 @@ function buildSingleSectionPromptGuide(section) {
     base.push('사과문, 거절문, 안내문, 코드블록, 요청받지 않은 다른 key를 절대 쓰지 마세요.');
   }
   if (section === '대운') {
-    base.push('대운 섹션 첫 부분에는 반드시 현재 대운 기간을 1회 이상 포함하세요. 예: 현재 24세~33세 대운 구간에 해당합니다.');
-    base.push('대운에는 현재 대운의 전체 분위기, 직업과 역할 변화, 재물 흐름, 인간관계와 협업 흐름, 건강과 심리적 부담, 주의할 점, 현실적인 실천 조언을 자연스러운 상담 문체의 6~10문단으로 작성하세요.');
-    base.push('위 항목명을 소제목으로 나눌 필요는 없으며, 특정 템플릿이 일부 달라도 본문이 충분하면 괜찮습니다. 점술적 단정 표현은 피하고 가능성이 있습니다, 도움이 될 수 있습니다, 참고하시면 좋습니다 같은 표현을 사용하세요.');
-    base.push('직업, 재무, 건강, 관계 판단은 실제 생활 조건과 함께 검토하는 태도가 중요하다는 점을 자연스럽게 녹여 주세요.');
-    base.push('죄송하지만, 작성할 수 없습니다, 제공된 정보가 부족합니다 같은 메타 응답은 절대 쓰지 마세요.');
+    base.push('대운은 정확한 대운 간지표와 시작 나이를 검증할 수 있을 때만 구체값을 쓰고, 그렇지 않으면 연령대별 장기 흐름으로 안전하게 작성하세요.');
+    base.push('대운에는 전체 흐름 개요 1~2문단 뒤에 10대 전후, 20대, 30대, 40대, 50대, 60대, 70대 이후 흐름을 자연스러운 문단형으로 포함하세요. 가능하면 노년기 후반까지 넓게 보되 반복은 피하세요.');
+    base.push('각 연령대 문단에는 핵심 주제, 왜 그렇게 읽히는지에 대한 사주적·성향적 근거, 실제 삶에서 나타날 수 있는 모습, 직업/재물 또는 관계/연애 중 중요한 영역, 주의할 점, 실천 조언을 포함하세요.');
+    base.push('현재 나이가 속한 구간은 다른 구간보다 더 자세히 설명하고, 마지막에는 대운 3줄 요약 제목 아래 - 강점, - 흐름, - 주의, - 실천 불렛으로 정리하세요.');
+    base.push('죄송하지만, 작성할 수 없습니다, 제공된 정보가 부족합니다 같은 메타 응답은 절대 쓰지 마세요. 점술적 단정 표현은 피하고 가능성이 있습니다, 도움이 될 수 있습니다, 참고하시면 좋습니다 같은 표현을 사용하세요.');
   }
   if (section === '직업운') {
     base.push('직업운에는 직업적 성향, 잘 맞는 업무 환경, 강점과 성장 가능성, 조심해야 할 업무 패턴, 협업 방식, 현실적인 커리어 조언을 자연스러운 문단 속에 반드시 포함하세요.');
@@ -6274,11 +6710,11 @@ function buildSectionSpecificPromptInstructions(sections, promptPayload = {}) {
   const { year, month } = getBaselineYearMonth(promptPayload);
   const currentDaeunPeriodLabel = buildCurrentDaeunPeriodLabel(promptPayload);
   if (sections.includes('대운')) {
-    lines.push(`대운 섹션 첫 부분에는 반드시 현재 대운 기간을 자연스럽게 포함하세요. 예: 현재 ${currentDaeunPeriodLabel} 대운 구간에 해당합니다.`);
-    lines.push('대운은 섹션 존재 여부, 본문 길이, 문단 수, 대운 기간 표현 포함 여부가 더 중요합니다. 특정 소제목이나 고정 템플릿이 일부 달라도 괜찮습니다.');
-    lines.push('대운에는 현재 대운의 전체 분위기, 직업과 역할 변화, 재물 흐름, 인간관계와 협업 흐름, 건강과 심리적 부담, 주의할 점, 현실적인 실천 조언을 자연스러운 상담 문체의 6문단 이상 10문단 이하로 작성하세요.');
-    lines.push('위 항목명을 소제목으로 나눌 필요는 없고, 현재 24세부터 33세까지 이어지는 흐름, 현재 24세~33세 구간, 현재 대운에서는 같은 자연스러운 표현을 사용해도 됩니다.');
-    lines.push('대운 섹션에서는 "첫 번째 대운 흐름" 같은 기계적인 라벨, 괄호형 보충 문구, 현재 자료 기준 같은 메모성 표현, 같은 나이대 설명의 반복을 피하고 현재 구간과 다음 시기를 자연스러운 상담 문장으로만 연결하세요.');
+    lines.push(`대운 섹션 첫 부분에는 현재 나이 구간을 자연스럽게 포함하세요. 예: ${year}년 기준으로 현재 30대 구간을 가장 자세히 참고하시면 좋습니다. 정확한 대운 시작 나이와 간지는 검증 가능한 경우에만 쓰세요.`);
+    lines.push('대운은 섹션 존재 여부, 본문 길이, 문단 수, 현재 나이 구간 반영, 연령대별 장기 흐름 포함 여부가 더 중요합니다. 특정 소제목이나 고정 템플릿이 일부 달라도 괜찮습니다.');
+    lines.push('대운에는 전체 흐름 개요 1~2문단 뒤에 10대 전후, 20대, 30대, 40대, 50대, 60대, 70대 이후를 자연스러운 문단형으로 작성하세요. 가능하면 노년기 후반 흐름까지 넓게 보되 반복은 피하세요.');
+    lines.push('각 연령대 문단에는 핵심 주제, 왜 그렇게 읽히는지에 대한 사주적·성향적 근거, 실제 삶에서 나타날 수 있는 모습, 직업·재물 또는 관계·연애 중 중요한 영역, 주의할 점, 실천 조언을 포함하고 현재 나이 구간은 가장 자세히 설명하세요.');
+    lines.push('대운 섹션에서는 "첫 번째 대운 흐름" 같은 기계적인 라벨, 괄호형 보충 문구, 현재 자료 기준 같은 메모성 표현, 확인되지 않은 대운 간지나 시작 나이, 같은 나이대 설명의 반복을 피하세요. 마지막에는 대운 3줄 요약 제목 아래 - 강점, - 흐름, - 주의, - 실천 형식으로 정리하세요.');
     lines.push('점술적 단정 표현은 피하고 가능성이 있습니다, 도움이 될 수 있습니다, 참고하시면 좋습니다 같은 표현을 사용하세요. 직업·재무·건강 관련 판단은 실제 생활 조건과 함께 검토하는 태도를 자연스럽게 녹여 주세요.');
   }
   if (sections.includes('세운')) {
