@@ -834,12 +834,22 @@
         .trim();
     }
 
+    function stripInternalEditorialLabels(text) {
+      return String(text || '')
+        .replace(/고민 반영 보강 해석/g, '')
+        .replace(/\b(?:mockReport|defaultSections|fallbackSections|recoverable|validation|fixture)\b/gi, '')
+        .replace(/\bqa_[A-Za-z0-9_-]+\b/gi, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    }
+
     function normalizeCustomerFacingReportText(sectionTitle, text) {
       let output = stripInlineFormatting(String(text || ''));
       output = normalizeCustomerFacingLineBreaks(output);
       output = normalizeSajuTerminology(output);
       output = normalizeAgeReferenceText(sectionTitle, output);
       output = stripHealthContentOutsideHealth(sectionTitle, output);
+      output = stripInternalEditorialLabels(output);
       output = keepSingleSummaryBulletSet(output);
       return output.replace(/\n{3,}/g, '\n\n').trim();
     }

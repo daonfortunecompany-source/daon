@@ -3086,6 +3086,51 @@ function escapeRegex(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const GENERIC_HONORIFIC_NAME_BLOCKLIST = new Set(['고객', '사용자', '본인', '상대', '파트너', '의뢰인', '질문자']);
+
+function getAllowedIdentityNames(promptPayload) {
+  return Array.from(new Set([
+    promptPayload?.basicInfo?.name,
+    promptPayload?.applicant?.name,
+    promptPayload?.partnerInfo?.name,
+    promptPayload?.partner?.name
+  ].map((item) => stripHonorificSuffix(item || '')).filter(Boolean)));
+}
+
+function inspectSectionPersonalizationLeak(text, promptPayload) {
+  const raw = String(text || '');
+  const applicantInfo = promptPayload?.basicInfo || promptPayload?.applicant || {};
+  const applicantName = stripHonorificSuffix(applicantInfo.name || '');
+  const applicantBirthDate = [applicantInfo.birthYear, applicantInfo.birthMonth, applicantInfo.birthDay]
+    .map((item, index) => index === 0 ? String(item || '').padStart(4, '0') : String(item || '').padStart(2, '0'))
+    .join('-')
+    .replace(/^0{4}-00-00$/, '');
+  const applicantBirthTime = String(applicantInfo.birthTime || '').trim();
+  const allowedNames = new Set(getAllowedIdentityNames(promptPayload));
+  const unexpectedNames = Array.from(new Set((raw.match(/([가-힣A-Za-z][가-힣A-Za-z0-9]{0,11})님/g) || [])
+    .map((item) => stripHonorificSuffix(item))
+    .filter((name) => name && !allowedNames.has(name) && !GENERIC_HONORIFIC_NAME_BLOCKLIST.has(name))));
+  const fixtureSignals = [];
+  const qaTokenPatterns = [
+    { label: 'fixture_token', pattern: /\bfixture\b/i },
+    { label: 'sample_token', pattern: /\bsample\b/i },
+    { label: 'mockreport_token', pattern: /\bmockReport\b/i },
+    { label: 'defaultsections_token', pattern: /\bdefaultSections\b/i },
+    { label: 'fallbacksections_token', pattern: /\bfallbackSections\b/i },
+    { label: 'qa_token', pattern: /\bqa_[A-Za-z0-9_-]+\b/i }
+  ];
+  for (const { label, pattern } of qaTokenPatterns) {
+    if (pattern.test(raw)) fixtureSignals.push(label);
+  }
+  if (applicantName !== '수연' && /수연님|수연/.test(raw)) fixtureSignals.push('suyeon_fixture_name');
+  if (applicantBirthDate && applicantBirthDate !== '1996-07-03' && /1996-07-03/.test(raw)) fixtureSignals.push('suyeon_fixture_birth_date');
+  if (applicantBirthTime && applicantBirthTime !== '15:00' && /(^|[^0-9])15:00([^0-9]|$)/.test(raw)) fixtureSignals.push('suyeon_fixture_birth_time');
+  return {
+    unexpectedNames,
+    fixtureSignals: Array.from(new Set(fixtureSignals))
+  };
+}
+
 function prependSectionIntro(section, text) {
   const body = String(text || '').trim();
   if (!body) return body;
@@ -4345,7 +4390,7 @@ function isIgnorableRepeatedSentence(sentence = '') {
   if (!normalized) return true;
   const core = normalizeRepeatedSentenceCore(normalized);
   if (normalized.length < 28 || core.length < 22) return true;
-  if (/^(수연님은|[가-힣A-Za-z0-9_]+님은|정리하면|도움이 될 수 있습니다|좋습니다|중요합니다|필요합니다|할 수 있습니다|보실 수 있습니다|권장드립니다)/.test(normalized)) return true;
+  if (/^([가-힣A-Za-z0-9_]+님은|정리하면|도움이 될 수 있습니다|좋습니다|중요합니다|필요합니다|할 수 있습니다|보실 수 있습니다|권장드립니다)/.test(normalized)) return true;
   if (/^(이 흐름은|현재 흐름은|이번 흐름은|생활에서 바로 적용할 수 있는 선택 기준|기록[, ]확인[, ]일정 조절 같은 기본 습관)/.test(core)) return true;
   return /(도움이 될 수 있습니다|정리하면|할 수 있습니다|좋습니다|중요합니다|권장드립니다|필요합니다)$/.test(normalized);
 }
@@ -5143,6 +5188,16 @@ function validateAiSections(sections, promptPayload, meta = {}, options = {}) {
       sectionErrors[key].push('중복 호칭 포함');
       errors.push(`${key} 중복 호칭 포함`);
     }
+    const personalizationLeak = inspectSectionPersonalizationLeak(text, promptPayload);
+    if (personalizationLeak.unexpectedNames.length || personalizationLeak.fixtureSignals.length) {
+      sectionErrors[key].push('개인화 오염 감지');
+      errors.push(`${key} 개인화 오염 감지`);
+      console.log('[KIE AI PERSONALIZATION LEAK]', JSON.stringify({
+        section: key,
+        unexpectedNames: personalizationLeak.unexpectedNames,
+        fixtureSignals: personalizationLeak.fixtureSignals
+      }));
+    }
   }
   const totalLength = Object.values(sectionLengths).reduce((sum, value) => sum + Number(value || 0), 0);
   const minimumTotal = requiredSections.reduce((sum, key) => sum + getSectionMinVisibleChars(key), 0);
@@ -5599,7 +5654,7 @@ function buildSectionSpecificPromptInstructions(sections, promptPayload = {}) {
   }
   if (sections.includes('고민에 대한 조언')) {
     lines.push('고민 관련 보강 문단은 본문이 부족할 때만 최소한으로 사용하세요. 이미 충분한 본문 뒤에 같은 의미의 보강 문단을 덧붙이지 마세요.');
-    lines.push('고민 문구를 직접 인용할 때는 "..."은 형태로 붙이지 말고, "…"라는 내용은 또는 자연스러운 서술문으로 풀어 쓰세요. 예: "이직을 고민 중이에요"라는 내용은, 수연님의 이직 고민은 같은 자연스러운 형태를 사용하세요.');
+    lines.push('고민 문구를 직접 인용할 때는 "..."은 형태로 붙이지 말고, "…"라는 내용은 또는 자연스러운 서술문으로 풀어 쓰세요. 예: "이직을 고민 중이에요"라는 내용은, 신청자의 이직 고민은 같은 자연스러운 형태를 사용하세요.');
     lines.push('"정리하면 요약하면" 같은 중복 접속 표현, "보강 해석" 같은 내부 편집 문구, 고민 인용문 뒤 조사 오류는 절대 만들지 마세요.');
   }
   return lines.join(' ');
@@ -5733,6 +5788,28 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       promptPayload: payloadForAi
     });
 
+    console.log('[KIE AI PROMPT IDENTITY]', JSON.stringify({
+      batchName: batch.batchName,
+      attempt,
+      sections: batch.sections,
+      applicant: {
+        name: payloadForAi?.basicInfo?.name || '',
+        gender: payloadForAi?.basicInfo?.gender || '',
+        birthYear: payloadForAi?.basicInfo?.birthYear || '',
+        birthMonth: payloadForAi?.basicInfo?.birthMonth || '',
+        birthDay: payloadForAi?.basicInfo?.birthDay || '',
+        birthTime: payloadForAi?.basicInfo?.birthTime || '',
+        concern: String(payloadForAi?.basicInfo?.concern || '').slice(0, 120)
+      },
+      partner: payloadForAi?.partnerInfo ? {
+        name: payloadForAi.partnerInfo.name || '',
+        gender: payloadForAi.partnerInfo.gender || '',
+        birthYear: payloadForAi.partnerInfo.birthYear || '',
+        birthMonth: payloadForAi.partnerInfo.birthMonth || '',
+        birthDay: payloadForAi.partnerInfo.birthDay || '',
+        birthTime: payloadForAi.partnerInfo.birthTime || ''
+      } : null
+    }));
     console.log('[KIE AI BATCH] start', JSON.stringify({ batchName: batch.batchName, attempt, endpointPath, outputMode: 'json' }));
     console.log('[KIE AI BATCH] batchName', batch.batchName);
     console.log('[KIE AI BATCH] sections', JSON.stringify(batch.sections));
@@ -6083,17 +6160,17 @@ function buildSmokePromptPayload() {
   const requiredSections = buildRequiredAiSections(true);
   return {
     basicInfo: {
-      name: '테스트 사용자',
+      name: '스모크 사용자',
       gender: 'male',
       genderCode: 'male',
       genderLabel: '남성',
-      birthYear: '1996',
-      birthMonth: '07',
-      birthDay: '03',
-      birthTime: '15:00',
+      birthYear: '1987',
+      birthMonth: '04',
+      birthDay: '18',
+      birthTime: '09:30',
       calendarType: '양력',
       baselineDate: '2026-06-01',
-      concern: '온라인 사주 사업을 준비중인데 잘 될까요?'
+      concern: '새로운 프로젝트의 방향을 어떻게 잡아야 할지 궁금합니다.'
     },
     partnerInfo: {
       name: '테스트 상대',
@@ -6120,10 +6197,10 @@ function buildSmokePromptPayload() {
       compatibility: { summary: '서로의 생활 속도는 다르지만 역할 분담이 되면 안정적입니다.' }
     },
     rawBundle: {
-      mansae: { sample: true },
-      saju: { sample: true },
-      period: { sample: true },
-      compatibility: { sample: true }
+      mansae: { smoke: true },
+      saju: { smoke: true },
+      period: { smoke: true },
+      compatibility: { smoke: true }
     },
     internalReference: {
       consistencyWarnings: [],
