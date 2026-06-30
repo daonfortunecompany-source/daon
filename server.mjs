@@ -843,9 +843,17 @@ async function generatePremiumReport(orderId) {
     });
     order.runtimeReport = {
       sections: aiSections,
+      chartData: promptPayload.chartData || null,
+      promptContext: {
+        basicInfo: promptPayload.basicInfo || {},
+        partnerInfo: promptPayload.partnerInfo || null,
+        analysisNotes: promptPayload.analysisNotes || {},
+        internalReference: promptPayload.internalReference || {}
+      },
       deliveredAt: null,
       copyReady: true,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      sanitySummary: null
     };
     order.artifacts = { partialAiSections: null };
     order.logs.push(logLine('generation_completed', { viewMode: 'html' }));
@@ -900,9 +908,12 @@ async function generatePremiumReport(orderId) {
         if (canFinalizeCompleted) {
           order.runtimeReport = {
             sections: { ...partialSections },
+            chartData: order.runtimeReport?.chartData || null,
+            promptContext: order.runtimeReport?.promptContext || null,
             deliveredAt: null,
             copyReady: true,
-            createdAt: order.runtimeReport?.createdAt || new Date().toISOString()
+            createdAt: order.runtimeReport?.createdAt || new Date().toISOString(),
+            sanitySummary: order.runtimeReport?.sanitySummary || null
           };
         }
         updateOrderProgress(order, {
@@ -2756,14 +2767,167 @@ function stripSectionTitleEchoes(section, text) {
   return cleanSectionText(output.join('\n').replace(/\n{3,}/g, '\n\n'));
 }
 
-function normalizeRepeatedWords(text) {
+const DUPLICATE_PARTICLE_RULES = [
+  ['에서는는', '에서는'],
+  ['에게는는', '에게는'],
+  ['께서는는', '께서는'],
+  ['으로는는', '으로는'],
+  ['으로으로', '으로'],
+  ['에서에서', '에서'],
+  ['에게에게', '에게'],
+  ['께서께서', '께서'],
+  ['에는는', '에는'],
+  ['은은', '은'],
+  ['는는', '는'],
+  ['이이', '이'],
+  ['가가', '가'],
+  ['을을', '을'],
+  ['를를', '를'],
+  ['과과', '과'],
+  ['와와', '와']
+];
+
+const SAJU_BRANCH_ELEMENT_MAP = { 자: '수', 축: '토', 인: '목', 묘: '목', 진: '토', 사: '화', 오: '화', 미: '토', 신: '금', 유: '금', 술: '토', 해: '수' };
+
+function collapseExcessiveRepeatedTokens(text) {
   let output = String(text || '');
+  const repeatedTokenPattern = /(^|[\s(\[{"'“‘])([가-힣A-Za-z0-9]{1,20})(?:\s+\2){2,}(?=$|[\s)\]}"'”’.!?,:;])/gu;
+  for (let pass = 0; pass < 4; pass += 1) {
+    const before = output;
+    output = output.replace(repeatedTokenPattern, (match, prefix, token) => `${prefix}${token}`);
+    if (output === before) break;
+  }
+  return cleanSectionText(output);
+}
+
+function normalizeRepeatedWords(text) {
+  let output = collapseExcessiveRepeatedTokens(String(text || ''));
   output = output
     .replace(/\b(현재)(?:\s+\1){1,}/g, '$1')
     .replace(/\b(요약하면)(?:\s+\1){1,}/g, '$1')
     .replace(/\b(정리하면)(?:\s+\1){1,}/g, '$1');
   output = fixRepeatedSummaryTransitions(output);
   return cleanSectionText(output);
+}
+
+function normalizeDuplicateParticles(text) {
+  let output = String(text || '');
+  for (let pass = 0; pass < 4; pass += 1) {
+    const before = output;
+    for (const [wrong, correct] of DUPLICATE_PARTICLE_RULES) {
+      output = output.replace(new RegExp(wrong, 'g'), correct);
+    }
+    if (output === before) break;
+  }
+  return cleanSectionText(output);
+}
+
+function hasDuplicateParticleTypo(text) {
+  const raw = String(text || '');
+  return DUPLICATE_PARTICLE_RULES.some(([wrong]) => raw.includes(wrong));
+}
+
+function extractMonthBranchFromPromptPayload(promptPayload) {
+  const monthPillar = String(promptPayload?.chartData?.pillars?.month || promptPayload?.promptContext?.chartData?.pillars?.month || '').trim();
+  const match = monthPillar.match(/[자축인묘진사오미신유술해](?!.*[자축인묘진사오미신유술해])/);
+  return match ? match[0] : '';
+}
+
+function extractDayStemFromPromptPayload(promptPayload) {
+  const dayPillar = String(promptPayload?.chartData?.pillars?.day || promptPayload?.promptContext?.chartData?.pillars?.day || '').trim();
+  const match = dayPillar.match(/[갑을병정무기경신임계]/);
+  return match ? match[0] : '';
+}
+
+function neutralizeConflictingSajuValues(promptPayload, text) {
+  let output = String(text || '');
+  const monthBranch = extractMonthBranchFromPromptPayload(promptPayload);
+  const monthElement = monthBranch ? (SAJU_BRANCH_ELEMENT_MAP[monthBranch] || '') : '';
+  const dayStem = extractDayStemFromPromptPayload(promptPayload);
+  const concreteMonthRegex = /([갑을병정무기경신임계]?[자축인묘진사오미신유술해])월(께서|으로는|으로도|으로|에서는|에서|에는|에게|은|는|이|가|을|를|의|에|과|와|로|도|만|까지|부터)?/gu;
+  const monthJiRegex = /(월지|월령)\s*([자축인묘진사오미신유술해])(?:\s*([화수목금토]))?(께서|으로는|으로도|으로|에서는|에서|에는|에게|은|는|이|가|을|를|의|에|과|와|로|도|만|까지|부터)?/gu;
+  const dayStemRegex = /([갑을병정무기경신임계])\s*일간(께서|으로는|으로도|으로|에서는|에서|에는|에게|은|는|이|가|을|를|의|에|과|와|로|도|만|까지|부터)?/gu;
+
+  output = output.replace(concreteMonthRegex, (match, rawLabel, particle = '') => {
+    const branch = String(rawLabel || '').slice(-1);
+    if (monthBranch && branch === monthBranch) return match;
+    return `원국 흐름${particle || ''}`;
+  });
+
+  output = output.replace(monthJiRegex, (match, label, branch, element = '', particle = '') => {
+    const sameBranch = monthBranch && branch === monthBranch;
+    const sameElement = !element || !monthElement || element === monthElement;
+    if (sameBranch && sameElement) return match;
+    return `${label === '월령' ? '계절 흐름' : '월지 흐름'}${particle || ''}`;
+  });
+
+  output = output.replace(dayStemRegex, (match, stem, particle = '') => {
+    if (dayStem && stem === dayStem) return match;
+    return `일간${particle || ''}`;
+  });
+
+  output = output
+    .replace(/(원국 흐름|월지 흐름|계절 흐름)(가|를|는|와)\b/g, (match, noun, particle) => `${noun}${{ 가: '이', 를: '을', 는: '은', 와: '과' }[particle] || particle}`)
+    .replace(/(원국 흐름|월지 흐름|계절 흐름)라는/g, '$1이라는');
+
+  return cleanSectionText(output);
+}
+
+function detectConcreteMonthConflicts(promptPayload, text) {
+  const monthBranch = extractMonthBranchFromPromptPayload(promptPayload);
+  const monthElement = monthBranch ? (SAJU_BRANCH_ELEMENT_MAP[monthBranch] || '') : '';
+  const dayStem = extractDayStemFromPromptPayload(promptPayload);
+  const matches = [];
+  const raw = String(text || '');
+  raw.replace(/([갑을병정무기경신임계]?[자축인묘진사오미신유술해])월/gu, (match, rawLabel) => {
+    const branch = String(rawLabel || '').slice(-1);
+    if (!monthBranch || branch !== monthBranch) matches.push(match);
+    return match;
+  });
+  raw.replace(/(월지|월령)\s*([자축인묘진사오미신유술해])(?:\s*([화수목금토]))?/gu, (match, _label, branch, element = '') => {
+    const sameBranch = monthBranch && branch === monthBranch;
+    const sameElement = !element || !monthElement || element === monthElement;
+    if (!sameBranch || !sameElement) matches.push(match);
+    return match;
+  });
+  raw.replace(/([갑을병정무기경신임계])\s*일간/gu, (match, stem) => {
+    if (!dayStem || stem !== dayStem) matches.push(match);
+    return match;
+  });
+  return Array.from(new Set(matches));
+}
+
+function splitSanitySentences(text) {
+  return String(text || '')
+    .replace(/\r/g, '')
+    .split(/(?<=[.!?]|다\.|요\.)\s+/u)
+    .map((item) => cleanSectionText(item))
+    .filter(Boolean);
+}
+
+function isInlineAdvisorySentence(sentence) {
+  const text = cleanSectionText(sentence).replace(/\s+/g, ' ');
+  if (!text) return false;
+  const score = [
+    /(?:확정적\s*예측|확정적\s*예언|확정적인\s*결과)/.test(text),
+    /(?:자기이해|생활\s*점검|참고용\s*해석|엔터테인먼트)/.test(text),
+    /(?:전문가(?:의)?\s*조언|전문가\s*상담|전문의\s*상담|의료진과\s*상담|검진)/.test(text),
+    /(?:건강|투자|법률|계약|재무\s*결정|결혼|임신|수명)/.test(text),
+    /(?:함께\s*고려|단정하지\s*말|현실\s*조건)/.test(text)
+  ].filter(Boolean).length;
+  if (score >= 2) return true;
+  return /(?:이\s*해석은|이\s*리포트는|이\s*콘텐츠는).*(?:참고용|확정적)/.test(text);
+}
+
+function stripInlineAdvisorySentences(text) {
+  const paragraphs = splitParagraphs(String(text || ''));
+  const rebuilt = [];
+  for (const paragraph of paragraphs) {
+    const sentences = splitSanitySentences(paragraph);
+    const kept = sentences.filter((sentence) => !isInlineAdvisorySentence(sentence));
+    if (kept.length) rebuilt.push(kept.join(' '));
+  }
+  return cleanSectionText(rebuilt.join('\n\n'));
 }
 
 function keepSingleSummaryBulletSet(text) {
@@ -2808,16 +2972,9 @@ function normalizeCustomerFacingLineBreaks(text) {
 
 function normalizeSajuTerminology(text) {
   let output = String(text || '');
-  let explained = false;
-  output = output.replace(/중약한 기운|신약한 구조|신강하지 않은 흐름|신강하지 않은 구조|신약한 흐름/g, (match) => {
-    if (!explained) {
-      explained = true;
-      return match === '신약한 흐름'
-        ? '신약한 흐름'
-        : '신약에 가까운 구조, 즉 자기 기운을 보강하는 흐름이 중요한 구조';
-    }
-    return '신약한 흐름';
-  });
+  output = output
+    .replace(/신약에\s*가까운\s*구조(?:,\s*즉\s*자기\s*기운을\s*보강하는\s*흐름이\s*중요한\s*구조)?|중약한(?:\s*(?:기운|구조|흐름|편))?|신약한(?:\s*(?:기운|구조|흐름|편))?|신강하지\s*않은(?:\s*(?:흐름|구조))?/g, '기운이 다소 약한 편')
+    .replace(/(?:기운이 다소 약한 편\s*,\s*){1,}기운이 다소 약한 편/g, '기운이 다소 약한 편');
   return cleanSectionText(output);
 }
 
@@ -2849,16 +3006,58 @@ function stripHealthContentOutsideHealth(section, text) {
   return cleanSectionText(filtered.join('\n\n'));
 }
 
-function normalizeCustomerFacingReportText(promptPayload, section, text) {
+function sanitizeSectionText(promptPayload, section, text) {
   let output = stripMarkdownHeadingArtifacts(String(text || ''));
+  output = normalizeRepeatedWords(output);
+  output = normalizeDuplicateParticles(output);
   output = normalizeCustomerFacingLineBreaks(output);
   output = normalizeSajuTerminology(output);
   output = normalizeAgeReferenceText(promptPayload, section, output);
+  output = neutralizeConflictingSajuValues(promptPayload, output);
   output = stripHealthContentOutsideHealth(section, output);
   output = stripRepeatedAdvisoryDisclaimers(section, output);
+  output = stripInlineAdvisorySentences(output);
   output = naturalizeRepeatedAdvisories(section, output);
+  output = keepSingleSummaryBulletSet(output);
   output = stripSectionTitleEchoes(section, output);
-  return cleanSectionText(stripMarkdownHeadingArtifacts(output));
+  output = stripMarkdownHeadingArtifacts(output);
+  output = normalizeDuplicateParticles(output);
+  output = normalizeRepeatedWords(output);
+  return cleanSectionText(output);
+}
+
+function normalizeCustomerFacingReportText(promptPayload, section, text) {
+  return sanitizeSectionText(promptPayload, section, text);
+}
+
+function finalReportSanityCheck(promptPayload, sections = {}) {
+  const ordered = orderReportSections(promptPayload, sections || {});
+  const perSection = [];
+  let ok = true;
+  for (const [section, value] of Object.entries(ordered || {})) {
+    const body = cleanSectionText(value);
+    const sectionResult = {
+      section,
+      markdownHashesRemoved: !/^\s*#{3,}/m.test(body),
+      excessiveRepeatedWordsRemoved: !/(^|[\s(\[{"'“‘])([가-힣A-Za-z0-9]{1,20})(?:\s+\2){2,}(?=$|[\s)\]}"'”’.!?,:;])/u.test(body),
+      duplicateParticlesRemoved: !hasDuplicateParticleTypo(body),
+      monthConflictRemoved: detectConcreteMonthConflicts(promptPayload, body).length === 0,
+      advisoryRemovedFromBody: !splitSanitySentences(body).some((sentence) => isInlineAdvisorySentence(sentence)),
+      noDuplicateTitleEcho: stripSectionTitleEchoes(section, body) === body
+    };
+    if (!Object.values(sectionResult).every((value) => value === true || value === section)) ok = false;
+    perSection.push(sectionResult);
+  }
+  return { ok, sections: perSection, footerNote: GLOBAL_REPORT_DISCLAIMER_TEXT };
+}
+
+function applyFinalReportSanityToSections(promptPayload, sections = {}) {
+  const ordered = orderReportSections(promptPayload, sections || {});
+  const sanitized = {};
+  for (const [section, value] of Object.entries(ordered || {})) {
+    sanitized[section] = sanitizeSectionText(promptPayload, section, value);
+  }
+  return sanitized;
 }
 
 function sanitizeHealthSectionWithoutAppend(text) {
@@ -3774,16 +3973,21 @@ function appendHealthDisclaimer(text) {
 }
 
 function buildCustomerFacingPromptPayloadFromOrder(order) {
+  const storedPromptContext = order?.runtimeReport?.promptContext || {};
   return {
     basicInfo: {
-      name: order?.applicant?.name || '',
-      concern: order?.applicant?.concern || '',
-      birthTimeUnknown: order?.applicant?.birthTimeUnknown === true
+      ...(storedPromptContext?.basicInfo || {}),
+      name: order?.applicant?.name || storedPromptContext?.basicInfo?.name || '',
+      concern: order?.applicant?.concern || storedPromptContext?.basicInfo?.concern || '',
+      birthTimeUnknown: order?.applicant?.birthTimeUnknown === true || storedPromptContext?.basicInfo?.birthTimeUnknown === true
     },
+    partnerInfo: storedPromptContext?.partnerInfo || order?.partner || null,
+    analysisNotes: storedPromptContext?.analysisNotes || {},
+    internalReference: storedPromptContext?.internalReference || {},
     applicant: order?.applicant || {},
     basicProfile: order?.runtimeReport?.basicProfile || null,
     chartData: order?.runtimeReport?.chartData || null,
-    promptContext: order?.runtimeReport?.promptContext || null
+    promptContext: storedPromptContext
   };
 }
 
@@ -3803,7 +4007,7 @@ function buildCustomerFacingReportSections(order) {
     if (section === '건강운') output = sanitizeHealthSectionWithoutAppend(output);
     normalized[section] = cleanSectionText(output);
   }
-  return normalized;
+  return applyFinalReportSanityToSections(promptPayload, normalized);
 }
 
 function orderReportSections(promptPayload, sections) {
@@ -5852,6 +6056,7 @@ function buildSectionSpecificPromptInstructions(sections, promptPayload = {}) {
   if (sections.includes('건강운')) {
     lines.push('건강운 도입문은 하나만 사용하고, 건강운 참고 문구는 본문 마지막에 한 번만 넣으세요. 동일하거나 유사한 도입문과 문구를 두 번 반복하지 마세요. 전문의 상담, 의학적 진단, 생활 습관, 참고용 해석 관련 문장은 서로 다른 표현이라도 한 번만 남도록 작성하세요.');
   }
+  lines.push('월지, 월령, 일간, 격국, 용신, 십성 등 사주 고유값은 promptPayload.chartData 또는 rawBundle에 실제로 제공된 값만 사용하세요. 제공되지 않았거나 확신할 수 없으면 구체 명칭을 추측하지 말고 원국 흐름, 계절감, 관계 작용 같은 일반 표현으로 바꾸세요. 서로 다른 월지·월령 표현을 같은 리포트에 혼용하지 마세요.');
   if (sections.includes('고민에 대한 조언')) {
     lines.push('고민 관련 보강 문단은 본문이 부족할 때만 최소한으로 사용하세요. 이미 충분한 본문 뒤에 같은 의미의 보강 문단을 덧붙이지 마세요.');
     lines.push('고민 문구를 직접 인용할 때는 "..."은 형태로 붙이지 말고, "…"라는 내용은 또는 자연스러운 서술문으로 풀어 쓰세요. 예: "이직을 고민 중이에요"라는 내용은, 신청자의 이직 고민은 같은 자연스러운 형태를 사용하세요.');
@@ -5966,6 +6171,7 @@ async function generateKieBatch(promptPayload, batch, endpointPath, order = null
       '건강운 참고 문구는 본문 마지막에 한 번만 넣으세요. 전문의 상담, 의학적 진단, 참고용 해석이라는 의미의 문장을 두 번 이상 반복하지 마세요.',
       '사주 해석은 자기이해와 현실 점검을 돕는 참고용 조언입니다. 미래를 확정하는 예언처럼 단정하지 말고, 반드시·절대·확실히 같은 표현 대신 가능성·경향성 중심으로 설명하세요.',
       '이 콘텐츠는 확정적 예언이 아니라 자기이해와 생활 점검을 돕는 참고용 해석입니다. 건강, 투자, 결혼, 임신, 수명, 법률, 중대한 재무 결정은 단정하지 말고, 중요한 결정은 현실 조건과 전문가 상담을 함께 고려하도록 자연스럽게 안내하세요.',
+      '월지, 월령, 일간, 격국, 용신, 십성 등 사주 고유값은 promptPayload.chartData 또는 rawBundle에 실제로 있는 값만 사용하세요. 확신할 수 없는 구체 명칭은 쓰지 말고 원국 흐름, 계절감, 관계 작용처럼 안전한 일반 표현으로 바꾸세요. 서로 충돌하는 월지/월령 표현을 한 리포트 안에 함께 쓰지 마세요.',
       '반드시 요청받은 섹션 key만 포함하세요. 다른 섹션은 절대 작성하지 마세요.',
       '각 섹션 값에는 실제 리포트 본문만 작성하세요.',
       '"한 번에 작성할 수 없습니다" 같은 메타 문장을 절대 쓰지 마세요.',
@@ -6566,12 +6772,16 @@ function finalizeReportSections(promptPayload, sections, requiredSections) {
     working = polishFinalReportSections(promptPayload, postProcessReportSections(promptPayload, applySectionRepairResults(working, repairedPolish, retryTargets, 'finalize:polish_repair', { repairApplied }), { repairApplied }));
     state = validateCurrent('finalize:after_polish_repair');
   }
+  working = applyFinalReportSanityToSections(promptPayload, ensureRequiredSectionsPresent(promptPayload, working));
+  const sanitySummary = finalReportSanityCheck(promptPayload, working);
+  console.log('[FINAL REPORT SANITY]', JSON.stringify(sanitySummary));
   return {
     sections: working,
     validation: state.validation,
     failedSections: state.failedSections,
     allRequiredSectionsHaveText: state.allRequiredSectionsHaveText,
-    shouldComplete: state.shouldComplete
+    shouldComplete: state.shouldComplete,
+    sanitySummary
   };
 }
 
@@ -6876,6 +7086,11 @@ function cloneRuntimeOrder(order) {
 }
 
 async function saveOrder(order) {
+  if (order?.runtimeReport?.sections && typeof order.runtimeReport.sections === 'object') {
+    const promptPayload = buildCustomerFacingPromptPayloadFromOrder(order);
+    order.runtimeReport.sections = applyFinalReportSanityToSections(promptPayload, order.runtimeReport.sections);
+    order.runtimeReport.sanitySummary = finalReportSanityCheck(promptPayload, order.runtimeReport.sections);
+  }
   order.updatedAt = new Date().toISOString();
   runtimeOrderStore.set(order.id, cloneRuntimeOrder(order));
 }
