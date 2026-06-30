@@ -355,6 +355,17 @@
       font-size: 14px;
     }
 
+    .report-footer-note {
+      background: #fff7f1;
+      border: 1px solid #f0ddd1;
+      border-radius: 18px;
+      padding: 16px;
+      color: #6f5b50;
+      line-height: 1.75;
+      font-size: 14px;
+      white-space: pre-line;
+    }
+
     .report-meta-card,
     .report-card {
       background: #fffdfa;
@@ -606,6 +617,7 @@
     const timelinePanel = document.getElementById('timelinePanel');
     const reportView = document.getElementById('reportView');
     const REPORT_SECTION_ORDER = ['핵심 요약','사주 원국 해석','대운','세운','월운','운성','신살·귀인','십성','재물운','직업운','애정운','자녀운','건강운','실천 조언','주의할 점','고민에 대한 조언','관계/궁합 해석'];
+    const REPORT_FOOTER_NOTE = '※ 이 리포트는 자기이해를 돕는 참고용 해석입니다. 건강 내용은 생활 리듬 점검용으로만 활용하시고, 불편한 증상은 검진이나 전문의 상담으로 확인해 주세요. 투자·법률·계약처럼 중요한 결정도 현실 조건과 전문가 의견을 함께 확인해 주세요.';
     const REPORT_CACHE_PREFIX = 'daon-runtime-report:';
     let pollTimer = null;
     let pollingStopped = false;
@@ -783,6 +795,79 @@
     }
 
 
+    function normalizeInlineBulletTitleBreaks(text, labelPattern) {
+      return String(text || '').replace(new RegExp(`(^|\\n)(?!-\\s)([^\\n:]{2,40}?)\\s+-\\s*(${labelPattern}):\\s*`, 'g'), (match, prefix, rawTitle, label) => {
+        const title = String(rawTitle || '').replace(/\s+/g, ' ').trim();
+        if (!title) return match;
+        if (/[.!?:]$/.test(title)) return match;
+        if (/(?:입니다|합니다|습니다|됩니다|있습니다|보입니다|느껴집니다)$/.test(title)) return match;
+        return `${prefix}${title}\n\n- ${label}: `;
+      });
+    }
+
+    function normalizeUniversalBulletLineBreaks(text, labelPattern) {
+      let output = String(text || '');
+      for (let pass = 0; pass < 4; pass += 1) {
+        const before = output;
+        output = normalizeInlineBulletTitleBreaks(output, labelPattern);
+        output = output
+          .replace(new RegExp(`([^\\n])\\s+-\\s*(${labelPattern}):\\s*`, 'g'), '$1\n- $2: ')
+          .replace(new RegExp(`(^|[^\\n-])\\s+(${labelPattern}):\\s*`, 'g'), (match, prefix, label) => `${prefix}\n- ${label}: `)
+          .replace(new RegExp(`(^|\\n)\\s*(${labelPattern}):\\s*`, 'g'), '$1- $2: ')
+          .replace(/\n{3,}/g, '\n\n');
+        if (output === before) break;
+      }
+      return output.trim();
+    }
+
+    function isAdvisoryDisclaimerParagraph(paragraph) {
+      const text = String(paragraph || '').replace(/\s+/g, ' ').trim();
+      if (!text) return false;
+      const score = [
+        /(?:전문의 상담|의료 전문가|검진|전문가 상담)/.test(text),
+        /(?:의학적 진단|참고용 해석|생활 습관)/.test(text),
+        /(?:중요한 결정|현실 조건|단정하지 말고)/.test(text),
+        /(?:건강|투자|법률|결혼|임신|수명|재무 결정)/.test(text)
+      ].filter(Boolean).length;
+      return score >= 2;
+    }
+
+    function stripRepeatedAdvisoryDisclaimers(sectionTitle, text) {
+      const output = String(text || '').trim();
+      if (!output) return '';
+      return output
+        .split(/\n{2,}/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .filter((paragraph) => !(sectionTitle !== '건강운' && /(의학적 진단이 아니라 생활 습관을 점검하기 위한 참고용 해석|전문의 상담|의료 전문가|검진)/.test(paragraph)))
+        .filter((paragraph) => !isAdvisoryDisclaimerParagraph(paragraph))
+        .join('\n\n')
+        .trim();
+    }
+
+    function naturalizeRepeatedAdvisories(sectionTitle, text) {
+      let output = String(text || '').trim();
+      if (!output) return '';
+      if (sectionTitle !== '건강운') {
+        output = output
+          .replace(/※?\s*건강운은 의학적 진단이 아니라 생활 습관을 점검하기 위한 참고용 해석(?:입니다|이며)?\.?/g, '')
+          .replace(/불편한 증상이 있다면 전문의 상담을 권장드립니다\.?/g, '')
+          .replace(/건강운 참고 문구:\s*/g, '')
+          .replace(/건강 관련 내용은 참고용 해석이며 검진이 필요할 수 있습니다\.?/g, '건강 관리는 생활 리듬을 먼저 점검해 보시는 편이 좋습니다.')
+          .replace(/중요한 결정은 현실 조건과 전문가 상담을 함께 고려하세요\.?/g, '중요한 선택일수록 조건과 책임 범위를 끝까지 확인해 보세요.')
+          .replace(/투자와 법률 판단은 단정하지 마세요\.?/g, '판단을 서두르지 말고 조건을 다시 확인해 보세요.')
+          .replace(/건강,?\s*투자,?\s*법률(?:,?\s*결혼)?\s*(?:같은\s*)?중요한 결정은 단정하지 마세요\.?/g, '중요한 선택일수록 한 번 더 검토해 보세요.')
+          .replace(/(?:건강|법률|투자) 결정은 전문가 상담을 함께 고려하세요\.?/g, '결정 전에는 조건을 문서로 다시 확인해 보세요.')
+          .replace(/전문의 상담|의료 전문가|검진/g, '');
+      }
+      return output
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/-\s*(강점|흐름|주의|실천|조언|핵심):\s*(?=(?:-\s*(강점|흐름|주의|실천|조언|핵심):|$))/g, '')
+        .replace(/^\s*-\s*$/gm, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    }
+
     function normalizeCustomerFacingLineBreaks(text) {
       const labelPattern = '강점|흐름|주의|실천|조언|핵심';
       let output = String(text || '');
@@ -791,9 +876,8 @@
         .replace(/([.!?])\s*(핵심 정리)(?=(?:\s|$))/g, '$1\n\n$2')
         .replace(/([^\n])\s+(핵심 정리)(?=(?:\s|$))/g, '$1\n\n$2')
         .replace(/(핵심 정리|대운 3줄 요약)\s*-\s*/g, '$1\n\n- ');
-      output = output.replace(new RegExp(`\s+-\s*(${labelPattern}):\s*`, 'g'), '\n- $1: ');
-      output = output.replace(new RegExp(`(^|[^\n])\s+(${labelPattern}):\s*`, 'g'), (match, prefix, label) => `${prefix}\n- ${label}: `);
-      output = output.replace(new RegExp(`(^|\n)\s*(${labelPattern}):\s*`, 'g'), '$1- $2: ');
+      output = normalizeUniversalBulletLineBreaks(output, labelPattern);
+      output = normalizeUniversalBulletLineBreaks(output, labelPattern);
       return output.replace(/\n{3,}/g, '\n\n').trim();
     }
 
@@ -823,12 +907,13 @@
 
     function stripHealthContentOutsideHealth(sectionTitle, text) {
       let output = String(text || '').replace(/건강운 참고 문구:\s*/g, '').trim();
-      if (!output || sectionTitle === '건강운') return output;
+      if (!output || sectionTitle === '건강운') return naturalizeRepeatedAdvisories(sectionTitle, stripRepeatedAdvisoryDisclaimers(sectionTitle, output));
       return output
         .split(/\n{2,}/)
         .map((item) => item.trim())
         .filter(Boolean)
         .filter((paragraph) => !/(의학적 진단이 아니라 생활 습관을 점검하기 위한 참고용 해석|전문의 상담|의료 전문가|검진)/.test(paragraph))
+        .filter((paragraph) => !isAdvisoryDisclaimerParagraph(paragraph))
         .filter((paragraph) => !/^(?:건강과 관련된|건강 관련|건강 측면에서는|건강운 참고 문구)/.test(paragraph))
         .join('\n\n')
         .trim();
@@ -849,9 +934,15 @@
       output = normalizeSajuTerminology(output);
       output = normalizeAgeReferenceText(sectionTitle, output);
       output = stripHealthContentOutsideHealth(sectionTitle, output);
+      output = stripRepeatedAdvisoryDisclaimers(sectionTitle, output);
+      output = naturalizeRepeatedAdvisories(sectionTitle, output);
       output = stripInternalEditorialLabels(output);
       output = keepSingleSummaryBulletSet(output);
       return output.replace(/\n{3,}/g, '\n\n').trim();
+    }
+
+    function getReportFooterNote(data) {
+      return String(data?.reportFooterNote || REPORT_FOOTER_NOTE).trim();
     }
 
     function buildReportText(data) {
@@ -871,6 +962,8 @@
         if (!body) return;
         blocks.push(getReportSectionTitle(title, body, applicantName), normalizeInlineSummaryBullets(body, title), '');
       });
+      const footerNote = getReportFooterNote(data);
+      if (footerNote) blocks.push(footerNote);
       return blocks.join('\n');
     }
 
@@ -929,9 +1022,7 @@
       ];
       for (const [pattern, replacement] of replacements) output = output.replace(pattern, replacement);
       const labelPattern = '강점|흐름|주의|실천|핵심|조언';
-      output = output.replace(new RegExp(`\s+-\s*(${labelPattern}):\s*`, 'g'), '\n- $1: ');
-      output = output.replace(new RegExp(`(^|[^\n])\s+(${labelPattern}):\s*`, 'g'), (match, prefix, label) => `${prefix}\n- ${label}: `);
-      output = output.replace(new RegExp(`(^|\n)\s*(${labelPattern}):\s*`, 'g'), '$1- $2: ');
+      output = normalizeUniversalBulletLineBreaks(output, labelPattern);
       if (/^\s*자녀운\s*-\s*(강점|흐름|주의|실천|핵심|조언):/m.test(output)) {
         output = output.replace(/^\s*자녀운\s*-\s*/m, '- ');
         output = `자녀운은 실제 자녀와의 관계뿐 아니라 후배, 가족, 주변 사람을 돌보는 태도를 함께 살펴보는 항목입니다.\n\n${output.trim()}`;
@@ -1004,6 +1095,7 @@
       }
       const applicantMetaMarkup = buildApplicantMetaMarkup(data);
       const reportNoteMarkup = data.reportNote ? `<div class="report-notice">${escapeHtml(data.reportNote)}</div>` : '';
+      const reportFooterMarkup = getReportFooterNote(data) ? `<div class="report-footer-note">${escapeHtml(getReportFooterNote(data))}</div>` : '';
       reportView.innerHTML = `
         <article class="report-meta-card">
           <h2>프리미엄 사주 리포트</h2>
@@ -1011,6 +1103,7 @@
         </article>
         ${reportNoteMarkup}
         ${cards}
+        ${reportFooterMarkup}
         <div class="report-copy-wrap">
           <button class="report-copy-btn" id="copyReportButton" type="button">전체 내용 복사하기</button>
         </div>
@@ -1259,6 +1352,5 @@
     });
     poll();
   </script>
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
