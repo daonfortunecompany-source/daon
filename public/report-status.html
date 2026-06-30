@@ -762,9 +762,9 @@
 
     function getReportSectionBody(sections, title) {
       if (title === '신살·귀인') {
-        return stripInlineFormatting(String(sections['신살·귀인'] || sections['신살,귀인'] || '').trim());
+        return normalizeCustomerFacingReportText(title, String(sections['신살·귀인'] || sections['신살,귀인'] || '').trim());
       }
-      return stripInlineFormatting(String(sections[title] || '').trim());
+      return normalizeCustomerFacingReportText(title, String(sections[title] || '').trim());
     }
 
     function keepSingleSummaryBulletSet(text) {
@@ -782,6 +782,68 @@
       }).replace(/\n{3,}/g, '\n\n').trim();
     }
 
+
+    function normalizeCustomerFacingLineBreaks(text) {
+      const labelPattern = '강점|흐름|주의|실천|조언|핵심';
+      let output = String(text || '');
+      output = output
+        .replace(/건강운 참고 문구:\s*/g, '')
+        .replace(/([.!?])\s*(핵심 정리)(?=(?:\s|$))/g, '$1\n\n$2')
+        .replace(/([^\n])\s+(핵심 정리)(?=(?:\s|$))/g, '$1\n\n$2')
+        .replace(/(핵심 정리|대운 3줄 요약)\s*-\s*/g, '$1\n\n- ');
+      output = output.replace(new RegExp(`\s+-\s*(${labelPattern}):\s*`, 'g'), '\n- $1: ');
+      output = output.replace(new RegExp(`(^|[^\n])\s+(${labelPattern}):\s*`, 'g'), (match, prefix, label) => `${prefix}\n- ${label}: `);
+      output = output.replace(new RegExp(`(^|\n)\s*(${labelPattern}):\s*`, 'g'), '$1- $2: ');
+      return output.replace(/\n{3,}/g, '\n\n').trim();
+    }
+
+    function normalizeSajuTerminology(text) {
+      let output = String(text || '');
+      let explained = false;
+      output = output.replace(/중약한 기운|신약한 구조|신강하지 않은 흐름|신강하지 않은 구조|신약한 흐름/g, (match) => {
+        if (!explained) {
+          explained = true;
+          return match === '신약한 흐름'
+            ? '신약한 흐름'
+            : '신약에 가까운 구조, 즉 자기 기운을 보강하는 흐름이 중요한 구조';
+        }
+        return '신약한 흐름';
+      });
+      return output.trim();
+    }
+
+    function normalizeAgeReferenceText(sectionTitle, text) {
+      if (sectionTitle !== '대운') return String(text || '').trim();
+      return String(text || '')
+        .replace(/현재\s+30대\s+초중반\s+대운\s+흐름\s+구간/g, '2026년 기준으로 30대 초반 흐름')
+        .replace(/\b(\d{1,2})세인\s+([가-힣A-Za-z0-9]+님)(께서는|은|는|이|가)?/g, (match, age, name, particle = '은') => `세는나이 기준 ${age}세에 해당하는 ${name}${particle}`)
+        .replace(/(?<!기준\s)\b31세\b(?![^.]{0,12}기준)/g, '세는나이 기준 31세')
+        .trim();
+    }
+
+    function stripHealthContentOutsideHealth(sectionTitle, text) {
+      let output = String(text || '').replace(/건강운 참고 문구:\s*/g, '').trim();
+      if (!output || sectionTitle === '건강운') return output;
+      return output
+        .split(/\n{2,}/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .filter((paragraph) => !/(의학적 진단이 아니라 생활 습관을 점검하기 위한 참고용 해석|전문의 상담|의료 전문가|검진)/.test(paragraph))
+        .filter((paragraph) => !/^(?:건강과 관련된|건강 관련|건강 측면에서는|건강운 참고 문구)/.test(paragraph))
+        .join('\n\n')
+        .trim();
+    }
+
+    function normalizeCustomerFacingReportText(sectionTitle, text) {
+      let output = stripInlineFormatting(String(text || ''));
+      output = normalizeCustomerFacingLineBreaks(output);
+      output = normalizeSajuTerminology(output);
+      output = normalizeAgeReferenceText(sectionTitle, output);
+      output = stripHealthContentOutsideHealth(sectionTitle, output);
+      output = keepSingleSummaryBulletSet(output);
+      return output.replace(/\n{3,}/g, '\n\n').trim();
+    }
+
     function buildReportText(data) {
       const sections = data.reportSections || {};
       const applicant = data.applicant || {};
@@ -797,7 +859,7 @@
       REPORT_SECTION_ORDER.forEach((title) => {
         const body = getReportSectionBody(sections, title);
         if (!body) return;
-        blocks.push(getReportSectionTitle(title, body, applicantName), normalizeInlineSummaryBullets(body), '');
+        blocks.push(getReportSectionTitle(title, body, applicantName), normalizeInlineSummaryBullets(body, title), '');
       });
       return blocks.join('\n');
     }
@@ -845,8 +907,8 @@
     }
 
 
-    function normalizeInlineSummaryBullets(text) {
-      let output = stripInlineFormatting(String(text || ''))
+    function normalizeInlineSummaryBullets(text, sectionTitle = '') {
+      let output = normalizeCustomerFacingReportText(sectionTitle, text)
         .replace(/•\s*/g, '- ')
         .replace(/([가-힣A-Za-z0-9]+님)(일상(?:에서는|에서|은|에도|까지|과))/g, '$1 $2')
         .replace(/(^|[\n.!?]\s*)건강운은\s+/g, '$1건강 측면에서는 ');
@@ -869,8 +931,8 @@
     }
 
 
-    function renderHtmlParagraphs(text) {
-      const blocks = normalizeInlineSummaryBullets(text)
+    function renderHtmlParagraphs(text, sectionTitle = '') {
+      const blocks = normalizeInlineSummaryBullets(text, sectionTitle)
         .split(/\n{2,}/)
         .map((item) => item.trim())
         .filter(Boolean);
@@ -915,7 +977,7 @@
         .filter((title) => getReportSectionBody(sections, title))
         .map((title) => {
           const body = getReportSectionBody(sections, title);
-          const paragraphs = renderHtmlParagraphs(body);
+          const paragraphs = renderHtmlParagraphs(body, title);
           return `<article class="report-card"><h2>${escapeHtml(getReportSectionTitle(title, body, applicantName))}</h2>${paragraphs}</article>`;
         })
         .join('');
@@ -1187,6 +1249,6 @@
     });
     poll();
   </script>
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
