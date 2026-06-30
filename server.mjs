@@ -2739,6 +2739,72 @@ function keepSingleSummaryBulletSet(text) {
   return cleanSectionText(output.join('\n'));
 }
 
+
+function normalizeCustomerFacingLineBreaks(text) {
+  const labelPattern = '강점|흐름|주의|실천|조언|핵심';
+  let output = String(text || '');
+  output = output
+    .replace(/건강운 참고 문구:\s*/g, '')
+    .replace(/([.!?])\s*(핵심 정리)(?=(?:\s|$))/g, '$1\n\n$2')
+    .replace(/([^\n])\s+(핵심 정리)(?=(?:\s|$))/g, '$1\n\n$2')
+    .replace(/(핵심 정리|대운 3줄 요약)\s*-\s*/g, '$1\n\n- ');
+  output = output.replace(new RegExp(`\s+-\s*(${labelPattern}):\s*`, 'g'), '\n- $1: ');
+  output = output.replace(new RegExp(`(^|[^\n])\s+(${labelPattern}):\s*`, 'g'), (match, prefix, label) => `${prefix}\n- ${label}: `);
+  output = output.replace(new RegExp(`(^|\n)\s*(${labelPattern}):\s*`, 'g'), '$1- $2: ');
+  return cleanSectionText(output.replace(/\n{3,}/g, '\n\n'));
+}
+
+function normalizeSajuTerminology(text) {
+  let output = String(text || '');
+  let explained = false;
+  output = output.replace(/중약한 기운|신약한 구조|신강하지 않은 흐름|신강하지 않은 구조|신약한 흐름/g, (match) => {
+    if (!explained) {
+      explained = true;
+      return match === '신약한 흐름'
+        ? '신약한 흐름'
+        : '신약에 가까운 구조, 즉 자기 기운을 보강하는 흐름이 중요한 구조';
+    }
+    return '신약한 흐름';
+  });
+  return cleanSectionText(output);
+}
+
+function normalizeAgeReferenceText(promptPayload, section, text) {
+  if (section !== '대운') return cleanSectionText(text);
+  const { year } = getBaselineYearMonth(promptPayload);
+  let output = String(text || '');
+  output = output
+    .replace(/현재\s+30대\s+초중반\s+대운\s+흐름\s+구간/g, `${year}년 기준으로 30대 초반 흐름`)
+    .replace(/\b(\d{1,2})세인\s+([가-힣A-Za-z0-9]+님)(께서는|은|는|이|가)?/g, (match, age, name, particle = '은') => `세는나이 기준 ${age}세에 해당하는 ${name}${particle}`)
+    .replace(/(?<!기준\s)\b31세\b(?![^.]{0,12}기준)/g, '세는나이 기준 31세');
+  return cleanSectionText(output);
+}
+
+function stripHealthContentOutsideHealth(section, text) {
+  let output = cleanSectionText(String(text || '').replace(/건강운 참고 문구:\s*/g, ''));
+  if (!output) return '';
+  if (section === '건강운') return output;
+  const paragraphs = splitParagraphs(output);
+  const filtered = paragraphs.filter((paragraph) => {
+    const cleaned = cleanSectionText(paragraph);
+    if (!cleaned) return false;
+    if (isHealthDisclaimerLikeParagraph(cleaned)) return false;
+    if (/(?:의료 전문가|전문의)\s*(?:의\s*)?(?:상담|진료)|검진/.test(cleaned)) return false;
+    if (/^(?:건강과 관련된|건강 관련|건강 측면에서는|건강운 참고 문구)/.test(cleaned) && /(생활 리듬|컨디션|회복|상담|검진|의학적 진단)/.test(cleaned)) return false;
+    return true;
+  });
+  return cleanSectionText(filtered.join('\n\n'));
+}
+
+function normalizeCustomerFacingReportText(promptPayload, section, text) {
+  let output = String(text || '');
+  output = normalizeCustomerFacingLineBreaks(output);
+  output = normalizeSajuTerminology(output);
+  output = normalizeAgeReferenceText(promptPayload, section, output);
+  output = stripHealthContentOutsideHealth(section, output);
+  return cleanSectionText(output);
+}
+
 function sanitizeHealthSectionWithoutAppend(text) {
   let output = cleanSectionText(String(text || ''));
   output = output
@@ -3894,13 +3960,15 @@ function trimRedundantSectionIntro(promptPayload, section, text) {
 function polishSectionBody(promptPayload, section, text) {
   let output = cleanSectionText(text);
   output = stripInlineFormatting(output);
+  output = normalizeCustomerFacingReportText(promptPayload, section, output);
   output = removeMechanicalMetaPhrases(output);
   output = formatSummaryBullets(output);
   output = normalizeBulletsInSection(section, output);
   output = keepSingleSummaryBulletSet(output);
-  if (section !== '건강운') output = stripHealthDisclaimerOutsideHealth(output);
+  if (section !== '건강운') output = stripHealthContentOutsideHealth(section, output);
   if (section === '고민에 대한 조언') output = fixQuotedConcernParticles(output);
   if (section === '대운') output = normalizeDaeunSectionText(promptPayload, output);
+  output = normalizeAgeReferenceText(promptPayload, section, output);
   output = trimRedundantSectionIntro(promptPayload, section, output);
   output = removeRepeatedSentencesFromText(output, new Map(), { threshold: 2 });
   output = removeExactDuplicateSentences(output);
@@ -3910,6 +3978,7 @@ function polishSectionBody(promptPayload, section, text) {
   output = formatSummaryBullets(output);
   output = normalizeBulletsInSection(section, output);
   output = keepSingleSummaryBulletSet(output);
+  output = normalizeCustomerFacingReportText(promptPayload, section, output);
   if (section === '건강운') output = sanitizeHealthSectionWithoutAppend(output);
   return cleanSectionText(output);
 }
@@ -3920,13 +3989,13 @@ function polishFinalReportSections(promptPayload, sections) {
     const normalizedSection = normalizeSectionKeyAlias(section);
     const originalText = cleanSectionText(rawText);
     let output = polishSectionBody(promptPayload, normalizedSection, rawText);
-    output = applyReportPostCorrections(promptPayload, output);
+    output = applyReportPostCorrections(promptPayload, normalizedSection, output);
     output = formatSummaryBullets(output);
     output = normalizeBulletsInSection(normalizedSection, output);
     output = keepSingleSummaryBulletSet(output);
     output = normalizedSection === '건강운'
       ? sanitizeHealthSectionWithoutAppend(output)
-      : stripHealthDisclaimerOutsideHealth(output);
+      : stripHealthContentOutsideHealth(normalizedSection, output);
     output = removeRepeatedSentencesFromText(output, new Map(), { threshold: 2 });
     output = removeExactDuplicateSentences(output);
     output = normalizeRepeatedWords(output);
@@ -3952,7 +4021,7 @@ function cleanupConcernTail(text) {
     .replace(/현재 입력된 고민이 구체적이지 않기 때문에,?\s*/g, ''));
 }
 
-function applyReportPostCorrections(promptPayload, text) {
+function applyReportPostCorrections(promptPayload, section, text) {
   const name = stripHonorificSuffix(promptPayload?.basicInfo?.name || promptPayload?.applicant?.name || '');
   let output = String(text || '');
   output = output
@@ -3969,6 +4038,7 @@ function applyReportPostCorrections(promptPayload, text) {
   output = fixQuotedConcernParticles(output);
   output = formatSummaryBullets(output);
   output = keepSingleSummaryBulletSet(output);
+  output = normalizeCustomerFacingReportText(promptPayload, section, output);
   return cleanSectionText(output);
 }
 
@@ -3979,7 +4049,7 @@ function ensureSectionQuality(promptPayload, section, text) {
   if (countVisibleChars(output) >= 300 && !containsForbiddenInternalText(output) && !usability.metaResponse.detected && !usability.policyRefusal.detected) {
     if (section === '건강운') output = removeDuplicateHealthIntroAndDisclaimer(output);
     if (section === '고민에 대한 조언') output = cleanupConcernTail(output);
-    return applyReportPostCorrections(promptPayload, output);
+    return applyReportPostCorrections(promptPayload, section, output);
   }
   const supplement = buildSectionQualitySupplement(promptPayload, section);
   if (countVisibleChars(output) < 300 && supplement && !output.includes(supplement.slice(0, 40))) {
@@ -3987,7 +4057,7 @@ function ensureSectionQuality(promptPayload, section, text) {
   }
   if (section === '건강운') output = removeDuplicateHealthIntroAndDisclaimer(output);
   if (section === '고민에 대한 조언') output = cleanupConcernTail(output);
-  return applyReportPostCorrections(promptPayload, output);
+  return applyReportPostCorrections(promptPayload, section, output);
 }
 
 function buildMissingSectionFallback(promptPayload, section) {
@@ -4044,7 +4114,7 @@ function postProcessReportSections(promptPayload, sections, options = {}) {
     }
     const preserveExisting = shouldPreserveExistingSectionText(normalizedSection, originalText);
     nextText = stripCustomerFacingArtifacts(nextText);
-    nextText = applyReportPostCorrections(promptPayload, nextText);
+    nextText = applyReportPostCorrections(promptPayload, normalizedSection, nextText);
     nextText = replaceTemplateFlowLabels(nextText);
     nextText = ensureSingleSectionIntro(promptPayload, normalizedSection, nextText);
     nextText = normalizeBulletsInSection(normalizedSection, nextText);
@@ -4068,10 +4138,10 @@ function postProcessReportSections(promptPayload, sections, options = {}) {
     nextText = removeRepeatedSentencesFromText(nextText, new Map(), { threshold: 2 });
     nextText = normalizedSection === '건강운'
       ? sanitizeHealthSectionWithoutAppend(nextText)
-      : stripHealthDisclaimerOutsideHealth(nextText);
+      : stripHealthContentOutsideHealth(normalizedSection, nextText);
     nextText = polishSectionBody(promptPayload, normalizedSection, nextText);
     nextText = removeExactDuplicateSentences(nextText);
-    nextText = fixHonorifics(applyReportPostCorrections(promptPayload, nextText));
+    nextText = fixHonorifics(applyReportPostCorrections(promptPayload, normalizedSection, nextText));
     nextText = removeExactDuplicateSentences(nextText);
     const originalLength = countVisibleChars(originalText);
     const nextLength = countVisibleChars(nextText);
