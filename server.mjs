@@ -2697,11 +2697,63 @@ function fixRepeatedSummaryTransitions(text) {
   return cleanSectionText(output);
 }
 
-function stripInlineFormatting(text) {
+function stripMarkdownHeadingArtifacts(text) {
   return String(text || '')
+    .replace(/^\s*#{3,}\s*(.+?)\s*$/gm, '$1')
+    .replace(/^\s*#{3,}\s*$/gm, '')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+function stripInlineFormatting(text) {
+  return stripMarkdownHeadingArtifacts(String(text || '')
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/__(.*?)__/g, '$1')
-    .replace(/<\/?(?:b|strong)>/gi, '');
+    .replace(/<\/?(?:b|strong)>/gi, ''));
+}
+
+const REPORT_SECTION_TITLE_LINE_PATTERN = /^(?:핵심 요약|사주 원국 해석|대운|세운|월운|운성|신살[·,]귀인|귀인과 주변 도움의 흐름|십성|재물운|직업운|애정운|자녀운|건강운|실천 조언|주의할 점|고민에 대한 조언|관계\/궁합 해석)$/;
+
+function normalizeLooseSectionTitle(value) {
+  return normalizeSectionKeyAlias(String(value || '').replace(/^#{1,6}\s*/, '').replace(/\s+/g, ' ').trim());
+}
+
+function stripSectionTitleEchoes(section, text) {
+  const rawLines = String(text || '').split('\n');
+  if (!rawLines.length) return '';
+  const normalizedSection = normalizeLooseSectionTitle(section);
+  let leadingEchoCount = 0;
+  for (const line of rawLines) {
+    const trimmed = cleanSectionText(line);
+    if (!trimmed) {
+      if (leadingEchoCount === 0) continue;
+      break;
+    }
+    if (normalizedSection && normalizeLooseSectionTitle(trimmed) === normalizedSection) {
+      leadingEchoCount += 1;
+      continue;
+    }
+    break;
+  }
+  const hasRemainingContent = rawLines.slice(leadingEchoCount).some((line) => cleanSectionText(line));
+  const shouldStripLeadingEcho = Boolean(normalizedSection) && leadingEchoCount > 0 && hasRemainingContent;
+  const output = [];
+  let skippedLeading = 0;
+  let previousNormalizedTitle = '';
+  for (const line of rawLines) {
+    const trimmed = cleanSectionText(line);
+    const normalizedTitle = REPORT_SECTION_TITLE_LINE_PATTERN.test(trimmed) ? normalizeLooseSectionTitle(trimmed) : '';
+    if (shouldStripLeadingEcho && skippedLeading < leadingEchoCount && trimmed && normalizeLooseSectionTitle(trimmed) === normalizedSection) {
+      skippedLeading += 1;
+      previousNormalizedTitle = normalizedTitle || previousNormalizedTitle;
+      continue;
+    }
+    if (normalizedTitle && previousNormalizedTitle && normalizedTitle === previousNormalizedTitle) {
+      continue;
+    }
+    if (trimmed) previousNormalizedTitle = normalizedTitle || '';
+    output.push(line);
+  }
+  return cleanSectionText(output.join('\n').replace(/\n{3,}/g, '\n\n'));
 }
 
 function normalizeRepeatedWords(text) {
@@ -2798,14 +2850,15 @@ function stripHealthContentOutsideHealth(section, text) {
 }
 
 function normalizeCustomerFacingReportText(promptPayload, section, text) {
-  let output = String(text || '');
+  let output = stripMarkdownHeadingArtifacts(String(text || ''));
   output = normalizeCustomerFacingLineBreaks(output);
   output = normalizeSajuTerminology(output);
   output = normalizeAgeReferenceText(promptPayload, section, output);
   output = stripHealthContentOutsideHealth(section, output);
   output = stripRepeatedAdvisoryDisclaimers(section, output);
   output = naturalizeRepeatedAdvisories(section, output);
-  return cleanSectionText(output);
+  output = stripSectionTitleEchoes(section, output);
+  return cleanSectionText(stripMarkdownHeadingArtifacts(output));
 }
 
 function sanitizeHealthSectionWithoutAppend(text) {
@@ -3894,11 +3947,17 @@ function isGeneralAdvisoryDisclaimerParagraph(paragraph) {
   if (!text) return false;
   const score = [
     /(?:전문의 상담|의료 전문가|검진|전문가 상담)/.test(text),
-    /(?:의학적 진단|참고용 해석|생활 습관)/.test(text),
-    /(?:중요한 결정|현실 조건|단정하지 말고)/.test(text),
-    /(?:건강|투자|법률|결혼|임신|수명|재무 결정)/.test(text)
+    /(?:의학적 진단|참고용 해석|생활 습관|자기이해)/.test(text),
+    /(?:중요한 결정|현실 조건|단정하지 말고|확정적 예언)/.test(text),
+    /(?:건강|투자|법률|결혼|임신|수명|재무 결정|계약)/.test(text)
   ].filter(Boolean).length;
   return score >= 2;
+}
+
+function isGlobalFooterDisclaimerParagraph(paragraph) {
+  const text = String(paragraph || '').replace(/\s+/g, ' ').trim();
+  if (!text) return false;
+  return /(?:자기이해를 돕는 참고용 해석|건강 내용은 생활 리듬 점검용|불편한 증상은 검진이나 전문의 상담|투자[·,\s/]*법률[·,\s/]*(?:계약|결혼|임신|수명)?|현실 조건과 전문가 의견|확정적 예언이 아니라|엔터테인먼트 목적의 참고 자료)/.test(text);
 }
 
 function stripRepeatedAdvisoryDisclaimers(section, text) {
@@ -3910,6 +3969,7 @@ function stripRepeatedAdvisoryDisclaimers(section, text) {
     if (!cleaned) return false;
     if (section !== '건강운' && isHealthDisclaimerLikeParagraph(cleaned)) return false;
     if (isGeneralAdvisoryDisclaimerParagraph(cleaned)) return false;
+    if (isGlobalFooterDisclaimerParagraph(cleaned)) return false;
     return true;
   });
   return cleanSectionText(filtered.join('\n\n'));
@@ -3928,6 +3988,8 @@ function naturalizeRepeatedAdvisories(section, text) {
       .replace(/투자와 법률 판단은 단정하지 마세요\.?/g, '판단을 서두르지 말고 조건을 다시 확인해 보세요.')
       .replace(/건강,?\s*투자,?\s*법률(?:,?\s*결혼)?\s*(?:같은\s*)?중요한 결정은 단정하지 마세요\.?/g, '중요한 선택일수록 한 번 더 검토해 보세요.')
       .replace(/(?:건강|법률|투자) 결정은 전문가 상담을 함께 고려하세요\.?/g, '결정 전에는 조건을 문서로 다시 확인해 보세요.')
+      .replace(/이 콘텐츠는 확정적 예언이 아니라 자기이해와 생활 점검을 돕는 참고용 해석입니다\.?/g, '')
+      .replace(/이 리포트는 자기이해와 엔터테인먼트 목적의 참고 자료이며 실제 [^.?!]+[.?!]/g, '')
       .replace(/전문의 상담|의료 전문가|검진/g, '');
   }
   output = output
