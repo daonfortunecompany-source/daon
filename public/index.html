@@ -1523,7 +1523,8 @@
       z-index: 50;
     }
 
-    .bottom-cta button {
+    .bottom-cta button,
+    .bottom-cta .btn {
       width: 100%;
       min-height: 54px;
       border: 0;
@@ -1533,6 +1534,10 @@
       font-weight: 900;
       color: white;
       background: linear-gradient(135deg, #544b45, #7a675f);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
     }
 
     .hidden { display: none !important; }
@@ -1584,7 +1589,8 @@
       .time-calendar-row.inline-2 { grid-template-columns: 1fr; }
       .pillars { grid-template-columns: 1fr 1fr; }
       .feature-scroll { grid-auto-columns: 84%; }
-      .bottom-cta button { font-size: 14px; }
+      .bottom-cta button,
+    .bottom-cta .btn { font-size: 14px; }
     }
 
     @media (min-width: 480px) {
@@ -2139,20 +2145,20 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         <form class="form-grid" id="fortuneForm">
           <div>
             <label for="name">이름 또는 닉네임</label>
-            <input id="name" placeholder="예: 수연" value="수연" />
+            <input id="name" placeholder="예: 수연" />
           </div>
           <div class="inline-3">
             <div>
               <label for="year">출생 연도</label>
-              <input id="year" inputmode="numeric" placeholder="1994" value="1994" />
+              <input id="year" inputmode="numeric" placeholder="1994" />
             </div>
             <div>
               <label for="month">월</label>
-              <input id="month" inputmode="numeric" placeholder="08" value="08" />
+              <input id="month" inputmode="numeric" placeholder="08" />
             </div>
             <div>
               <label for="day">일</label>
-              <input id="day" inputmode="numeric" placeholder="21" value="21" />
+              <input id="day" inputmode="numeric" placeholder="21" />
             </div>
           </div>
           <div class="inline-2 time-calendar-row">
@@ -2377,7 +2383,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
           </div>
           <div class="result-cta-wrap">
             <p class="result-cta-copy" id="premiumHint"></p>
-            <button class="btn btn-pay" id="resultPremiumButton" type="button">상세 사주풀이 신청하기</button>
+            <a class="btn btn-pay" id="resultPremiumButton" href="http://pf.kakao.com/_dhIxfX/chat" target="_blank" rel="noopener noreferrer">상세 사주풀이 신청하기</a>
           </div>
         </section>
       </div>
@@ -2387,15 +2393,15 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
 
     <section class="section review-section" id="premium-reviews">
       <div class="card">
-        <h2>많은 사람들이 만족한 프리미엄 리포트</h2>
+        <h2>먼저 받아보신 분들의 후기</h2>
         <div class="review-slider-shell" data-review-slider>
           <div class="review-slider-viewport">
             <div class="review-slider-track" id="reviewSliderTrack">
-              <article class="review-slide"><img src="./reviews/review-1.jpg" alt="프리미엄 리포트 후기 1" loading="lazy" /></article>
-              <article class="review-slide"><img src="./reviews/review-2.jpg" alt="프리미엄 리포트 후기 2" loading="lazy" /></article>
-              <article class="review-slide"><img src="./reviews/review-3.jpg" alt="프리미엄 리포트 후기 3" loading="lazy" /></article>
-              <article class="review-slide"><img src="./reviews/review-4.jpg" alt="프리미엄 리포트 후기 4" loading="lazy" /></article>
-              <article class="review-slide"><img src="./reviews/review-5.jpg" alt="프리미엄 리포트 후기 5" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-1.jpg" alt="상세 사주풀이 후기 1" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-2.jpg" alt="상세 사주풀이 후기 2" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-3.jpg" alt="상세 사주풀이 후기 3" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-4.jpg" alt="상세 사주풀이 후기 4" loading="lazy" /></article>
+              <article class="review-slide"><img src="./reviews/review-5.jpg" alt="상세 사주풀이 후기 5" loading="lazy" /></article>
             </div>
           </div>
           <div class="review-slider-nav">
@@ -2489,12 +2495,11 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
 
     <section class="section" id="pricing">
       <div class="card">
-        <h2>상세 사주 보고서</h2>
-        <p class="sub premium-copy">타고난 재능과 성향, 인간관계의 특징, 재물과 직업의 흐름, 연애와 결혼운,대운,세운,월운, 좋은 부분뿐 아니라 조심해야 할 부분까지 객관적으로 정밀하게 분석해 드립니다</p>
+        <h2>상세 사주풀이 PDF</h2>
+        <p class="sub premium-copy">타고난 성향과 인간관계, 재물과 직업의 흐름,<br />연애와 결혼운, 대운·세운·월운,<br />조심하면 좋은 부분과 실천 조언까지<br />상담 내용을 바탕으로 차분히 풀어드립니다.</p>
         <div class="price-grid">
           <div class="price-card highlight">
-            <div class="ribbon">추천</div>
-            <h3>프리미엄 리포트</h3>
+                        <h3>프리미엄 상세 사주풀이</h3>
             <ul class="dash-list">
               <li>나의 타고난 성격과 기질</li>
               <li>대운,세운,월운</li>
@@ -2509,7 +2514,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
               <li>고민에 대한 조언</li>
               <li>평생 보관 가능한 40~50P 분량의 PDF 파일 제공</li>
             </ul>
-            <button class="btn btn-pay" id="payButton">상세 사주풀이 신청하기</button>
+            <a class="btn btn-pay" id="payButton" href="http://pf.kakao.com/_dhIxfX/chat" target="_blank" rel="noopener noreferrer">상세 사주풀이 신청하기</a>
           </div>
         </div>
       </div>
@@ -2522,13 +2527,13 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         <div class="faq-list" id="faqList">
           <article class="faq-item">
             <button type="button" class="faq-question" aria-expanded="false">
-              <span>프리미엄 리포트는 어떤 방식으로 나오나요?</span>
+              <span>상세 사주풀이 PDF는 어떤 방식으로 전달되나요?</span>
               <span>+</span>
             </button>
             <div class="faq-answer-wrap">
               <div class="faq-answer">
                 <p>상세 사주풀이 신청하기를 클릭하시면 카카오톡 채팅 상담으로 이어집니다.</p>
-                <p>사주풀이에 필요한 정보와 고민 등을 남겨주신 후 결제를 해주시면, 사주풀이 전문가께서 24시간 내에 사주풀이 해설지를 PDF 파일로 만들어 전달드립니다.</p>
+                <p>상담 내용을 남겨주시면 전문가가 직접 확인한 뒤 24시간 내에 상세 사주풀이 PDF를 전달드립니다.</p>
               </div>
             </div>
           </article>
@@ -2551,7 +2556,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
   </div>
 
   <div class="bottom-cta">
-    <button id="bottomApplyButton" type="button">상세 사주풀이 신청하기</button>
+    <a id="bottomApplyButton" class="btn" href="http://pf.kakao.com/_dhIxfX/chat" target="_blank" rel="noopener noreferrer">상세 사주풀이 신청하기</a>
   </div>
 
   <script>
@@ -2595,9 +2600,9 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     const birthTimeUnknown = document.getElementById('birthTimeUnknown');
     const timeHourSelect = document.getElementById('timeHour');
     const timeMinuteSelect = document.getElementById('timeMinute');
-    let latestSummary = null;
+    let summaryCache = null;
     window.__freeSummarySeed = null;
-    window.__getLatestSummaryState = () => ({ summary: latestSummary, seed: window.__freeSummarySeed || null });
+    window.__getSummaryState = () => ({ summary: summaryCache, seed: window.__freeSummarySeed || null });
 
     function isBirthTimeUnknown() {
       return Boolean(birthTimeUnknown?.checked);
@@ -2698,9 +2703,9 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       }
     }
 
-    function normalizePercent(rawValues) {
-      const total = rawValues.reduce((sum, value) => sum + value, 0) || 1;
-      let percents = rawValues.map((value) => Math.round((value / total) * 100));
+    function normalizePercent(sourceValues) {
+      const total = sourceValues.reduce((sum, value) => sum + value, 0) || 1;
+      let percents = sourceValues.map((value) => Math.round((value / total) * 100));
       const diff = 100 - percents.reduce((sum, value) => sum + value, 0);
       percents[0] += diff;
       return percents;
@@ -2788,7 +2793,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       const dayPillar = makePillar(base + 9);
       const hourPillar = makePillar(base + 13);
       return {
-        provider: 'demo-preview',
+        provider: 'local-guide',
         year: yearPillar,
         month: monthPillar,
         day: dayPillar,
@@ -2799,7 +2804,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         trait: '처음에는 신중하게 분위기를 살피지만, 한 번 방향을 정하면 꾸준히 밀고 가는 힘이 있습니다. 무리해서 맞추기보다 내 기준을 지킬 때 매력이 더 분명해집니다.',
         love: '관계에서는 편안함과 신뢰를 중요하게 보는 편입니다. 감정을 조금 더 자주 표현하면 상대와의 온도가 자연스럽게 맞춰지고 오해도 줄어드는 흐름입니다.',
         work: '일과 재물에서는 단기간에 크게 벌리기보다 잘하는 영역을 반복해서 쌓는 방식이 유리합니다. 장기적으로 갈수록 완성도와 신뢰가 강점이 됩니다.',
-        notice: '서버 연결 없이도 결과 화면을 확인할 수 있도록 데모 미리보기로 활성화했습니다.',
+        notice: '일시적으로 참고용 요약으로 안내드리고 있습니다.',
         ui: {
           sourceLabel: '',
           summaryTitle: `${primary[0]} 중심으로 보는 현재 흐름`,
@@ -2855,17 +2860,17 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       if (!sourceMap || typeof sourceMap !== 'object') return [];
       const rows = order.map((key) => {
         const matchedEntry = Object.entries(sourceMap).find(([sourceKey]) => sourceKey === key || sourceKey.includes(key));
-        const raw = Number(matchedEntry?.[1] || 0);
+        const amount = Number(matchedEntry?.[1] || 0);
         const label = formatter(key);
         return {
           key,
           label,
-          raw,
+          amount,
           color: palette[label] || palette[key] || '#d6c8bb'
         };
-      }).filter((item) => item.raw > 0);
-      const total = rows.reduce((sum, item) => sum + item.raw, 0) || 1;
-      return rows.map((item) => ({ ...item, value: Number(((item.raw / total) * 100).toFixed(1)) }));
+      }).filter((item) => item.amount > 0);
+      const total = rows.reduce((sum, item) => sum + item.amount, 0) || 1;
+      return rows.map((item) => ({ ...item, value: Number(((item.amount / total) * 100).toFixed(1)) }));
     }
 
     function buildAnalysisStats(result) {
@@ -2887,18 +2892,18 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       let elementStats = buildStatsFromMap(result.fiveElements, elementOrderRaw, elementPalette, (key) => elementDisplayMap[key]);
       if (!elementStats.length) {
         const fallbackElementStats = countBy(elementItems.map((item) => elementDisplayMap[item] || item), Object.values(elementDisplayMap), elementPalette);
-        elementStats = fallbackElementStats.filter((item) => item.count > 0).map((item) => ({ ...item, raw: item.count }));
+        elementStats = fallbackElementStats.filter((item) => item.count > 0).map((item) => ({ ...item, amount: item.count }));
       }
 
       const tenGodOrder = ['비견', '겁재', '식신', '상관', '편재', '정재', '편관', '정관', '편인', '정인', '일간'];
       let tenGodStats = buildStatsFromMap(result.tenGods, tenGodOrder, tenGodPalette);
       if (!tenGodStats.length) {
         const fallbackTenGodStats = countBy(tenGodItems, tenGodOrder, tenGodPalette).filter((item) => item.count > 0);
-        tenGodStats = fallbackTenGodStats.map((item) => ({ ...item, raw: item.count }));
+        tenGodStats = fallbackTenGodStats.map((item) => ({ ...item, amount: item.count }));
       }
 
-      const elementCore = elementStats.slice().sort((a, b) => b.raw - a.raw)[0] || { label: '-', raw: 0, value: 0 };
-      const starCore = tenGodStats.slice().sort((a, b) => b.raw - a.raw)[0] || { label: '-', raw: 0, value: 0 };
+      const elementCore = elementStats.slice().sort((a, b) => b.amount - a.amount)[0] || { label: '-', amount: 0, value: 0 };
+      const starCore = tenGodStats.slice().sort((a, b) => b.amount - a.amount)[0] || { label: '-', amount: 0, value: 0 };
       return { elementStats, tenGodStats, elementCore, starCore, details };
     }
 
@@ -3006,7 +3011,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
     function renderSummary(name, payload, result) {
       const ui = result.ui || {};
       const analysis = buildAnalysisStats(result);
-      const isFallback = result.source === 'local' || result.source === 'mock' || result.usingFallback;
+      const isFallback = Boolean(result.usingFallback);
       const distributionGuide = getDistributionGuide(result, isFallback);
 
       if (pillarMatrix) pillarMatrix.innerHTML = buildPillarMatrixHtml(result);
@@ -3035,7 +3040,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         elementDistributionHint.textContent = distributionGuide.elementHint || '';
         elementDistributionHint.classList.toggle('hidden', !distributionGuide.elementHint);
       }
-      premiumHint.textContent = '무료 요약에서 다 담기 어려운 흐름과 조언이 궁금하시다면 상세 사주풀이를 신청해 보세요.';
+      premiumHint.textContent = '무료 요약에서 다 담기 어려운 흐름과 조언이 궁금하시다면 카카오톡 상담으로 이어서 받아보실 수 있어요.';
 
       if (coreSummaryTitle) coreSummaryTitle.textContent = '사주의 중심 흐름';
       if (coreSummaryText) coreSummaryText.textContent = result.summary || ui.summaryBody || '';
@@ -3075,20 +3080,20 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        latestSummary = data.result;
+        summaryCache = data.result;
         window.__freeSummarySeed = { ...payload };
         if (data.result.notice) {
           console.info('[FREE SUMMARY NOTICE]', data.result.notice);
         }
         renderSummary(payload.name, payload, data.result);
       } catch (error) {
-        latestSummary = null;
+        summaryCache = null;
         window.__freeSummarySeed = null;
         resultCard.classList.add('hidden');
-        const rawMessage = error?.message || '';
-        const userMessage = payload.birthTimeUnknown && /생시주|출생\s*생시주|hour\s*pillar/i.test(rawMessage)
+        const errorMessage = error?.message || '';
+        const userMessage = payload.birthTimeUnknown && Boolean(String(errorMessage || '').match(/생시주|출생\s*생시주|hour\s*pillar/i))
           ? '출생정보를 확인하는 중 일시적인 문제가 발생했습니다. 입력값을 확인한 뒤 다시 시도해 주세요.'
-          : (rawMessage || '무료 분석 결과를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+          : (errorMessage || '무료 분석 결과를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
         alert(userMessage);
       } finally {
         submitButton.disabled = false;
@@ -3102,153 +3107,10 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       birthTimeUnknown?.addEventListener('change', syncBirthTimeState);
       timeHourSelect?.addEventListener('change', syncBirthTimeState);
       timeMinuteSelect?.addEventListener('change', syncBirthTimeState);
-      latestSummary = null;
+      summaryCache = null;
     });
   </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
-
-
-  <div class="modal-overlay" id="premiumModal" aria-hidden="true">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="premiumModalTitle">
-      <div class="modal-head">
-        <div>
-          <h3 id="premiumModalTitle">상세 사주풀이 신청</h3>
-          <p>필요한 정보를 입력한 뒤 결제를 진행하면 결제 완료 확인 후 리포트 생성이 시작됩니다.</p>
-        </div>
-        <button type="button" class="modal-close" id="premiumModalClose" aria-label="닫기">×</button>
-      </div>
-
-      <form id="premiumRequestForm" class="premium-form" novalidate>
-        <div class="order-summary">
-          <div class="order-summary-row"><span>기본 상품</span><strong id="orderProductName">프리미엄 사주 리포트</strong></div>
-          <div class="order-summary-row"><span>결제 금액</span><strong id="orderProductPrice">18,900원</strong></div>
-          <div class="helper-text">1인 18,900원 / 2인 36,000원</div>
-        </div>
-
-        <div>
-          <div class="section-title-mini">신청자 정보</div>
-          <div class="form-grid">
-            <div>
-              <label for="premiumName">이름</label>
-              <input id="premiumName" name="name" required placeholder="예: 김다온" />
-            </div>
-            <div>
-              <label for="premiumPhone">휴대폰 번호</label>
-              <input id="premiumPhone" name="phone" type="tel" inputmode="numeric" autocomplete="tel-national" required placeholder="01012345678" />
-            </div>
-            <div class="inline-2">
-              <div>
-                <label>성별</label>
-                <div class="gender-choice" role="radiogroup" aria-label="프리미엄 성별 선택">
-                  <label class="gender-option"><input type="radio" name="premiumGender" value="female" required /><span>여성</span></label>
-                  <label class="gender-option"><input type="radio" name="premiumGender" value="male" required /><span>남성</span></label>
-                </div>
-              </div>
-              <div>
-                <label for="premiumCalendarType">양력 / 음력</label>
-                <select id="premiumCalendarType" name="calendarType">
-                  <option value="solar">양력</option>
-                  <option value="lunar">음력</option>
-                </select>
-              </div>
-            </div>
-            <div class="inline-3">
-              <div>
-                <label for="premiumYear">생년</label>
-                <input id="premiumYear" name="year" inputmode="numeric" required placeholder="1994" />
-              </div>
-              <div>
-                <label for="premiumMonth">월</label>
-                <input id="premiumMonth" name="month" inputmode="numeric" required placeholder="08" />
-              </div>
-              <div>
-                <label for="premiumDay">일</label>
-                <input id="premiumDay" name="day" inputmode="numeric" required placeholder="21" />
-              </div>
-            </div>
-            <div class="inline-2">
-              <div>
-                <label for="premiumTime">태어난 시간</label>
-                <input id="premiumTime" name="birthTime" placeholder="예: 09:30" />
-                <div class="helper-text">시간을 모르면 비워둘 수 있습니다.</div>
-              </div>
-              <div>
-                <label for="premiumLeapMonth">윤달 여부</label>
-                <select id="premiumLeapMonth" name="isLeapMonth">
-                  <option value="false">아니오</option>
-                  <option value="true">예</option>
-                  <option value="unknown">모름</option>
-                </select>
-              </div>
-            </div>
-            <div>
-              <label for="premiumConcern">현재 고민 또는 상담받고 싶은 내용</label>
-              <textarea id="premiumConcern" name="concern" placeholder="예: 이직 시기와 재물 흐름, 연애 방향이 궁금해요."></textarea>
-            </div>
-          </div>
-        </div>
-
-        <div class="toggle-box">
-          <div class="toggle-line">
-            <div>
-              <div class="toggle-chip">2인 사주(궁합 무료 진행)</div>
-              <div class="helper-text">1인 18,900원 / 2인 36,000원</div>
-            </div>
-            <button type="button" class="switch" id="compatibilityToggle" aria-pressed="false" aria-label="2인 사주(궁합 무료 진행) 전환"></button>
-          </div>
-          <div class="collapsible-fields" id="compatibilityFields">
-            <div class="inline-2">
-              <div>
-                <label for="partnerName">상대방 이름</label>
-                <input id="partnerName" name="partnerName" placeholder="예: 박도윤" />
-              </div>
-              <div>
-                <label>상대방 성별</label>
-                <div class="gender-choice" role="radiogroup" aria-label="상대방 성별 선택">
-                  <label class="gender-option"><input type="radio" name="partnerGender" value="female" /><span>여성</span></label>
-                  <label class="gender-option"><input type="radio" name="partnerGender" value="male" /><span>남성</span></label>
-                </div>
-              </div>
-            </div>
-            <div class="inline-3">
-              <div>
-                <label for="partnerYear">상대방 생년</label>
-                <input id="partnerYear" name="partnerYear" inputmode="numeric" placeholder="1993" />
-              </div>
-              <div>
-                <label for="partnerMonth">월</label>
-                <input id="partnerMonth" name="partnerMonth" inputmode="numeric" placeholder="06" />
-              </div>
-              <div>
-                <label for="partnerDay">일</label>
-                <input id="partnerDay" name="partnerDay" inputmode="numeric" placeholder="05" />
-              </div>
-            </div>
-            <div class="inline-2">
-              <div>
-                <label for="partnerCalendarType">상대방 양력 / 음력</label>
-                <select id="partnerCalendarType" name="partnerCalendarType">
-                  <option value="solar">양력</option>
-                  <option value="lunar">음력</option>
-                </select>
-              </div>
-              <div>
-                <label for="partnerTime">상대방 태어난 시간</label>
-                <input id="partnerTime" name="partnerTime" placeholder="예: 18:30" />
-              </div>
-            </div>
-            <div>
-              <label for="partnerMemo">궁합 관련 메모</label>
-              <textarea id="partnerMemo" name="partnerMemo" placeholder="예: 결혼 시기, 가치관 차이, 관계 흐름이 궁금해요."></textarea>
-            </div>
-          </div>
-        </div>
-
-        <div class="status-inline" id="premiumStatusInline"></div>
-        <button type="submit" class="btn btn-pay">결제하고 리포트 신청하기</button>
-      </form>
-    </div>
-  </div>
 
   <script src="./premium-flow.js"></script>
 </body>
