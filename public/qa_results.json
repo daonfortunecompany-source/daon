@@ -1,16 +1,76 @@
 {
-  "url": "http://127.0.0.1:3100/",
+  "url": "http://127.0.0.1:3102/",
   "checks": {
     "pageLoaded": true,
     "freeFormVisible": true,
     "faqVisible": true,
-    "refundQuestionExists": true,
-    "premiumQuestionExists": true,
-    "refundContainsRequired": true,
-    "premiumContainsRequired": true,
-    "noMarkdownArtifactsInFaq": true,
-    "noDevOrTempTextVisible": true,
-    "noOldFallbackTextVisible": true
+    "faqItemCount": 3,
+    "closedStateFullyHidden": true,
+    "openStateFullyVisible": true,
+    "iconsSwitchCorrectly": true,
+    "noDevTempTextVisible": true
   },
+  "perItem": [
+    {
+      "title": "상세 사주풀이 PDF는 어떤 방식으로 전달되나요?",
+      "closedState": {
+        "clientHeight": 0,
+        "scrollHeight": 161,
+        "text": "+",
+        "expanded": "false"
+      },
+      "openState": {
+        "clientHeight": 161,
+        "scrollHeight": 181,
+        "icon": "−",
+        "expanded": "true",
+        "answerHeight": 181
+      },
+      "heightGap": 20,
+      "closedOk": true,
+      "openOk": true,
+      "iconOk": true
+    },
+    {
+      "title": "환불이 가능한가요?",
+      "closedState": {
+        "clientHeight": 0,
+        "scrollHeight": 952,
+        "text": "+",
+        "expanded": "false"
+      },
+      "openState": {
+        "clientHeight": 952,
+        "scrollHeight": 972,
+        "icon": "−",
+        "expanded": "true",
+        "answerHeight": 972
+      },
+      "heightGap": 20,
+      "closedOk": true,
+      "openOk": true,
+      "iconOk": true
+    },
+    {
+      "title": "프리미엄 상세 사주풀이를 소개해 주세요",
+      "closedState": {
+        "clientHeight": 0,
+        "scrollHeight": 6941,
+        "text": "+",
+        "expanded": "false"
+      },
+      "openState": {
+        "clientHeight": 6941,
+        "scrollHeight": 6961,
+        "icon": "−",
+        "expanded": "true",
+        "answerHeight": 6961
+      },
+      "heightGap": 20,
+      "closedOk": true,
+      "openOk": true,
+      "iconOk": true
+    }
+  ],
   "errors": []
 }

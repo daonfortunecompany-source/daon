@@ -1886,37 +1886,46 @@
       min-width: 0;
     }
 
-    .faq-question span:last-child {
+    .faq-question .faq-toggle-icon {
       color: var(--primary-deep);
-      font-size: 18px;
+      font-size: 20px;
       line-height: 1;
       margin-top: 2px;
-      transition: transform .25s ease;
+      transition: transform .25s ease, opacity .2s ease;
       flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
     }
 
-    .faq-item.open .faq-question span:last-child {
-      transform: rotate(45deg);
+    .faq-item.open .faq-question .faq-toggle-icon {
+      transform: translateY(-1px);
     }
 
     .faq-answer-wrap {
-      display: grid;
-      grid-template-rows: 0fr;
-      transition: grid-template-rows .3s ease;
-    }
-
-    .faq-item.open .faq-answer-wrap {
-      grid-template-rows: 1fr;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height .38s ease;
     }
 
     .faq-answer {
       overflow: hidden;
-    }
-
-    .faq-answer {
-      padding: 0 20px 22px;
+      min-height: 0;
+      padding: 0 20px 0;
       display: grid;
       gap: 14px;
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: opacity .2s ease, transform .25s ease, padding .25s ease;
+      word-break: keep-all;
+      overflow-wrap: anywhere;
+    }
+
+    .faq-item.open .faq-answer {
+      padding: 0 20px 22px;
+      opacity: 1;
+      transform: translateY(0);
     }
 
     .faq-answer p {
@@ -1985,11 +1994,20 @@
       .faq-question {
         padding: 18px 16px;
         font-size: 15px;
+        gap: 12px;
+      }
+
+      .faq-question .faq-toggle-icon {
+        margin-top: 3px;
       }
 
       .faq-answer {
-        padding: 0 16px 20px;
+        padding: 0 16px 0;
         gap: 15px;
+      }
+
+      .faq-item.open .faq-answer {
+        padding: 0 16px 20px;
       }
 
       .faq-answer p,
@@ -2623,7 +2641,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
           <article class="faq-item">
             <button type="button" class="faq-question" aria-expanded="false">
               <span>상세 사주풀이 PDF는 어떤 방식으로 전달되나요?</span>
-              <span>+</span>
+              <span class="faq-toggle-icon" aria-hidden="true">+</span>
             </button>
             <div class="faq-answer-wrap">
               <div class="faq-answer">
@@ -2636,7 +2654,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
           <article class="faq-item">
             <button type="button" class="faq-question" aria-expanded="false">
               <span>환불이 가능한가요?</span>
-              <span>+</span>
+              <span class="faq-toggle-icon" aria-hidden="true">+</span>
             </button>
             <div class="faq-answer-wrap">
               <div class="faq-answer">
@@ -2683,7 +2701,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
           <article class="faq-item">
             <button type="button" class="faq-question" aria-expanded="false">
               <span>프리미엄 상세 사주풀이를 소개해 주세요</span>
-              <span>+</span>
+              <span class="faq-toggle-icon" aria-hidden="true">+</span>
             </button>
             <div class="faq-answer-wrap">
               <div class="faq-answer">

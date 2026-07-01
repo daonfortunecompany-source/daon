@@ -8,14 +8,48 @@
   let reviewIndex = 0;
   let reviewTimer = null;
 
+  function setFaqState(item, open) {
+    const button = item.querySelector('.faq-question');
+    const wrap = item.querySelector('.faq-answer-wrap');
+    const answer = item.querySelector('.faq-answer');
+    const icon = item.querySelector('.faq-toggle-icon');
+    if (!button || !wrap || !answer) return;
+
+    item.classList.toggle('open', open);
+    button.setAttribute('aria-expanded', String(open));
+    wrap.setAttribute('aria-hidden', String(!open));
+    icon.textContent = open ? '−' : '+';
+
+    if (open) {
+      wrap.style.maxHeight = answer.scrollHeight + 'px';
+    } else {
+      wrap.style.maxHeight = '0px';
+    }
+  }
+
+  function syncOpenFaqHeights() {
+    faqItems.forEach((item) => {
+      if (!item.classList.contains('open')) return;
+      const wrap = item.querySelector('.faq-answer-wrap');
+      const answer = item.querySelector('.faq-answer');
+      if (!wrap || !answer) return;
+      wrap.style.maxHeight = answer.scrollHeight + 'px';
+    });
+  }
+
   function initFaq() {
     faqItems.forEach((item) => {
       const button = item.querySelector('.faq-question');
-      button?.addEventListener('click', () => {
-        const open = item.classList.toggle('open');
-        button.setAttribute('aria-expanded', String(open));
+      if (!button) return;
+      setFaqState(item, false);
+      button.addEventListener('click', () => {
+        const open = !item.classList.contains('open');
+        setFaqState(item, open);
       });
     });
+
+    window.addEventListener('resize', syncOpenFaqHeights);
+    window.addEventListener('load', syncOpenFaqHeights);
   }
 
   function goToReview(index) {
