@@ -1852,10 +1852,9 @@
       color: var(--muted);
       line-height: 1.7;
     }
-
     .faq-list {
       display: grid;
-      gap: 10px;
+      gap: 12px;
     }
 
     .faq-item {
@@ -1873,18 +1872,27 @@
       font: inherit;
       font-weight: 800;
       text-align: left;
-      padding: 18px 18px;
+      padding: 19px 20px;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
-      gap: 12px;
+      gap: 14px;
       cursor: pointer;
+      line-height: 1.5;
+    }
+
+    .faq-question span:first-child {
+      flex: 1;
+      min-width: 0;
     }
 
     .faq-question span:last-child {
       color: var(--primary-deep);
       font-size: 18px;
+      line-height: 1;
+      margin-top: 2px;
       transition: transform .25s ease;
+      flex: 0 0 auto;
     }
 
     .faq-item.open .faq-question span:last-child {
@@ -1905,12 +1913,100 @@
       overflow: hidden;
     }
 
+    .faq-answer {
+      padding: 0 20px 22px;
+      display: grid;
+      gap: 14px;
+    }
+
     .faq-answer p {
       margin: 0;
-      padding: 0 18px 18px;
       color: var(--muted);
-      line-height: 1.75;
+      line-height: 1.88;
       font-size: 14px;
+      letter-spacing: -.01em;
+      word-break: keep-all;
+    }
+
+    .faq-answer h4 {
+      margin: 8px 0 0;
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.6;
+      letter-spacing: -.02em;
+    }
+
+    .faq-answer ul,
+    .faq-answer ol {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      display: grid;
+      gap: 9px;
+      line-height: 1.82;
+      font-size: 14px;
+    }
+
+    .faq-answer li::marker {
+      color: #8d7468;
+    }
+
+    .faq-answer strong {
+      color: var(--text);
+      font-weight: 800;
+    }
+
+    .faq-answer .faq-subsection {
+      display: grid;
+      gap: 10px;
+    }
+
+    .faq-answer .faq-note {
+      padding: 13px 14px;
+      border-radius: 14px;
+      background: #faf5ef;
+      border: 1px solid #efe2d6;
+      color: #6f625b;
+      font-size: 13px;
+      line-height: 1.8;
+    }
+
+    .faq-answer .faq-divider {
+      height: 1px;
+      background: linear-gradient(90deg, rgba(231, 215, 202, 0), rgba(231, 215, 202, 1), rgba(231, 215, 202, 0));
+      margin: 2px 0;
+    }
+
+    @media (max-width: 640px) {
+      .faq-list {
+        gap: 10px;
+      }
+
+      .faq-question {
+        padding: 18px 16px;
+        font-size: 15px;
+      }
+
+      .faq-answer {
+        padding: 0 16px 20px;
+        gap: 15px;
+      }
+
+      .faq-answer p,
+      .faq-answer ul,
+      .faq-answer ol {
+        font-size: 14px;
+        line-height: 1.92;
+      }
+
+      .faq-answer h4 {
+        margin-top: 10px;
+        font-size: 15px;
+      }
+
+      .faq-answer .faq-note {
+        padding: 13px;
+      }
     }
 
     .modal-overlay {
@@ -2519,7 +2615,6 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
         </div>
       </div>
     </section>
-
     <section class="section faq-section" id="faq">
       <div class="card">
         <h2>자주 묻는 질문</h2>
@@ -2537,6 +2632,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
               </div>
             </div>
           </article>
+
           <article class="faq-item">
             <button type="button" class="faq-question" aria-expanded="false">
               <span>환불이 가능한가요?</span>
@@ -2544,7 +2640,220 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
             </button>
             <div class="faq-answer-wrap">
               <div class="faq-answer">
-                <p>콘텐츠 서비스의 특성상 결과를 받아보신 후 환불은 어렵습니다. 오류로 인해 결과물을 받아보지 못하셨다면 daon.fortune.company@gmail.com 으로 문의해주세요.</p>
+                <div class="faq-subsection">
+                  <h4>환불 가능 조건</h4>
+                  <ul>
+                    <li>결제 완료 후 분석 결과를 받지 않은 경우: 전액 환불</li>
+                    <li>서비스 제공이 불가능한 경우</li>
+                    <li>동일 서비스에 대한 이중 결제가 발생한 경우</li>
+                    <li>표시된 가격과 다른 금액이 결제된 경우</li>
+                  </ul>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>환불 불가 조건</h4>
+                  <p>다음 각 호에 해당하는 경우 환불이 불가능합니다.</p>
+                  <ul>
+                    <li>사주 분석 결과를 받은 경우<br>콘텐츠 특성상 복제 가능성이 있어 환불이 불가능합니다.</li>
+                    <li>회원의 단순 변심</li>
+                    <li>회원의 입력 정보 오류<br>예: 생년월일, 출생시간, 성별 등</li>
+                    <li>분석 결과 또는 해석 내용에 대한 주관적 불만족</li>
+                  </ul>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>환불 접수 방법</h4>
+                  <p>환불 가능 조건에 해당하시는 경우, 아래 정보를 작성해 카카오톡 채널을 통해 문의해 주세요.</p>
+                  <ol>
+                    <li>결제일시</li>
+                    <li>결제금액</li>
+                    <li>입금자명</li>
+                    <li>환불사유</li>
+                  </ol>
+                  <p class="faq-note">접수 내용을 검토한 뒤 <strong>2~3영업일 내로 환불이 진행됩니다.</strong></p>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="faq-item">
+            <button type="button" class="faq-question" aria-expanded="false">
+              <span>프리미엄 상세 사주풀이를 소개해 주세요</span>
+              <span>+</span>
+            </button>
+            <div class="faq-answer-wrap">
+              <div class="faq-answer">
+                <div class="faq-subsection">
+                  <h4>열심히 살고 있는데, 왜 같은 고민이 반복될까요?</h4>
+                  <p>열심히 살아왔는데도 비슷한 고민이 반복되고, 중요한 결정을 앞두고도 확신이 서지 않을 때가 있습니다.</p>
+                  <p>“내가 지금 제대로 가고 있는 걸까?”</p>
+                  <p>이 질문이 머릿속에서 떠나지 않는 순간, 사주는 나를 다시 이해해보는 하나의 지도가 될 수 있습니다.</p>
+                  <p>사주는 단순히 미래를 맞히기 위한 도구가 아닙니다.</p>
+                  <p>내가 어떤 사람인지, 무엇에 강하고 무엇에 약한지, 왜 비슷한 문제를 반복하는지, 앞으로 어떤 흐름 속에서 살아가게 될 가능성이 높은지를 이해하기 위한 참고 자료에 가깝습니다.</p>
+                  <p>때로는 그 이해가 앞으로 나아가기 위한 작은 방향이 되어주기도 합니다.</p>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>이런 고민을 하고 계신가요?</h4>
+                  <ul>
+                    <li>열심히 노력하고 있는데 원하는 만큼 결과가 나오지 않는 분</li>
+                    <li>이직, 사업, 진로 등 중요한 선택을 앞두고 방향이 고민되는 분</li>
+                    <li>연애와 인간관계에서 비슷한 문제를 반복하는 분</li>
+                    <li>앞으로의 운의 흐름과 변화의 시기를 미리 알고 대비하고 싶은 분</li>
+                    <li>내 강점과 약점을 객관적으로 이해하고 싶은 분</li>
+                    <li>막연한 불안과 답답함 속에서 작은 방향성이라도 얻고 싶은 분</li>
+                    <li>지금의 고민을 누군가에게 차분히 정리받고 싶은 분</li>
+                  </ul>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>사주의 핵심은 ‘해석’에 있습니다.</h4>
+                  <p>만세력을 통해 누구나 자신의 사주팔자를 확인할 수 있습니다.</p>
+                  <p>하지만 사주풀이의 깊이는 그 사주를 어떻게 읽어내는지에 따라 달라집니다.</p>
+                  <p>같은 사주라도 해석하는 사람이 가진 경험, 사람을 바라보는 관점, 그리고 지금의 시대를 얼마나 이해하고 있느냐에 따라 전혀 다른 방향의 풀이가 나올 수 있습니다.</p>
+                  <p>예를 들어, 식신, 상관, 도화살, 홍염살을 단순히 예술적 기질이나 이성 관계로만 보지 않습니다.</p>
+                  <p>오늘날에는 사람들의 관심을 모으는 능력, 콘텐츠를 만드는 재능, 영향력을 발휘하는 힘, 표현력과 매력으로도 해석할 수 있습니다.</p>
+                  <p>역마살 역시 단순히 이직과 이동이 잦다는 의미를 넘어, 새로운 기회를 찾아 움직이는 힘, 변화 속에서 성장하는 능력으로 볼 수 있습니다.</p>
+                  <p>사주는 과거의 해석에만 머무는 것이 아니라, 오늘의 현실과 지금의 삶을 함께 읽어내는 과정이라고 생각합니다.</p>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>더 나은 풀이를 위해 계속 공부합니다.</h4>
+                  <p>단순히 오랜 시간 사주를 봤다고 해서 좋은 풀이가 나온다고 생각하지 않습니다.</p>
+                  <p>한 사람의 사주는 그 사람의 삶과 연결되어 있기에, 더 조심스럽고 깊이 있게 살펴야 한다고 생각합니다.</p>
+                  <p>맑은 마음을 유지하기 위한 기도와 마음공부는 물론, 빠르게 변화하는 사회와 사람들의 삶을 이해하기 위해 꾸준히 공부하고 배우고 있습니다.</p>
+                  <p>사주를 보는 일은 단순히 글자를 해석하는 일이 아니라, 한 사람의 흐름과 고민을 함께 살피는 일이라고 생각합니다.</p>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>제가 중요하게 생각하는 것은 ‘얼마나 잘 맞추는가’보다 ‘얼마나 도움이 되는가’입니다.</h4>
+                  <p>사주의 본질은 용함을 과시하는 데 있다고 생각하지 않습니다.</p>
+                  <p>고민으로 힘든 사람이 스스로를 더 깊이 이해하고, 앞으로의 선택을 조금 더 현명하게 해나갈 수 있도록 돕는 것.</p>
+                  <p>그것이 사주가 가진 가장 큰 의미라고 생각합니다.</p>
+                  <p>그래서 모든 풀이를 형식적으로 진행하지 않습니다.</p>
+                  <p>한 분, 한 분의 사주와 고민을 충분히 살피며, 개인에게 맞는 해석과 방향성을 전달하기 위해 시간을 들여 풀이서를 작성합니다.</p>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>절대적으로 좋기만 한 사주는 거의 없습니다.</h4>
+                  <p>모든 사주에는 장점과 단점이 함께 존재합니다.</p>
+                  <p>듣기 좋은 이야기만 전달하지 않습니다.</p>
+                  <p>타고난 강점은 강점대로, 보완해야 할 부분은 보완해야 할 부분대로, 앞으로 주의하면 좋은 점은 객관적으로 말씀드립니다.</p>
+                  <p>사주는 단점을 단정하기 위한 도구가 아닙니다.</p>
+                  <p>오히려 자신을 더 깊이 이해하고, 비슷한 실수를 줄이고, 더 나은 선택을 하기 위한 참고 자료에 가깝습니다.</p>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>상세 사주풀이를 통해 얻을 수 있는 것</h4>
+                  <ul>
+                    <li>타고난 기질과 성향</li>
+                    <li>내가 반복적으로 겪는 문제의 원인</li>
+                    <li>강점과 보완해야 할 부분</li>
+                    <li>직업·사업·재물에 대한 방향성</li>
+                    <li>연애와 인간관계에서 주의하면 좋은 점</li>
+                    <li>앞으로의 운의 흐름과 대비해야 할 시기</li>
+                    <li>현재 고민에 대해 참고할 수 있는 현실적인 조언</li>
+                    <li>내가 어떤 방식으로 움직일 때 더 편해지는지에 대한 이해</li>
+                  </ul>
+                  <p>사주는 미래를 단정하는 예언이 아닙니다.</p>
+                  <p>하지만 나를 깊이 이해하고, 앞으로의 선택을 조금 더 현명하게 해나가는 데 분명한 참고가 될 수 있습니다.</p>
+                  <p>감사하게도 많은 분들께서 상세 사주풀이를 받아보신 후 만족과 응원의 말씀을 남겨주셨습니다.</p>
+                  <p>앞으로도 한 분, 한 분의 고민에 진심으로 도움이 되는 풀이를 드릴 수 있도록 노력하겠습니다.</p>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>상세 사주풀이 안내</h4>
+                  <p><strong>1인 상세 사주풀이 – 49,800원</strong></p>
+                  <p>한 분의 사주와 현재 고민을 바탕으로 타고난 성향, 운의 흐름, 현실적인 방향성을 함께 살펴보는 풀이입니다.</p>
+                  <h4>포함 내용</h4>
+                  <ul>
+                    <li>타고난 성향과 기질 풀이</li>
+                    <li>강점과 보완해야 할 부분</li>
+                    <li>직업·사업·재물 흐름</li>
+                    <li>연애·인간관계 흐름</li>
+                    <li>앞으로의 운의 흐름과 변화 시기</li>
+                    <li>현재 고민에 대한 현실적인 조언</li>
+                    <li>개인 맞춤 PDF 풀이서 제공</li>
+                  </ul>
+                  <p class="faq-note">모든 풀이서는 신청자 한 분의 사주와 고민을 바탕으로 개별 작성됩니다. 단순한 자동 생성 결과가 아니라, 남겨주신 고민과 사주 흐름을 함께 살펴 작성됩니다.</p>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <p><strong>2인 상세 사주풀이 – 79,800원</strong></p>
+                  <p>2인 상세 사주풀이는 두 분 각각의 1인 상세 사주풀이 내용을 바탕으로 진행됩니다.</p>
+                  <p>즉, 단순히 궁합만 보는 구성이 아니라 두 분의 타고난 성향과 흐름을 각각 살펴본 뒤, 두 사람의 관계 흐름과 궁합까지 함께 정리해드립니다.</p>
+                  <p><strong>궁합 풀이는 별도 추가금 없이 함께 봐드립니다.</strong></p>
+                  <h4>포함 내용</h4>
+                  <ul>
+                    <li>두 분 각각의 타고난 성향과 기질 풀이</li>
+                    <li>두 분 각각의 강점과 보완해야 할 부분</li>
+                    <li>직업·재물·관계 흐름에 대한 기본 풀이</li>
+                    <li>두 사람의 관계 특징과 장단점</li>
+                    <li>서로에게 영향을 주는 부분</li>
+                    <li>관계에서 주의하면 좋은 점</li>
+                    <li>앞으로의 관계 흐름에 대한 참고 방향</li>
+                    <li>궁합 풀이 무료 포함</li>
+                    <li>개인 맞춤 PDF 풀이서 제공</li>
+                  </ul>
+                  <p class="faq-note">2인 상세 사주풀이는 두 분의 사주를 각각 살펴본 뒤, 관계 흐름과 궁합을 함께 정리해드리는 구성입니다.</p>
+                  <p class="faq-note">연인, 부부, 썸, 재회 고민, 결혼 고민, 가족 관계 등 두 사람의 관계 흐름이 궁금한 분들께 추천드립니다.</p>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>상담 진행 과정</h4>
+                  <ol>
+                    <li>상세 사주풀이 신청</li>
+                    <li>성함, 생년월일, 태어난 시간, 현재 고민 작성</li>
+                    <li>결제 확인</li>
+                    <li>사주와 고민을 바탕으로 맞춤 풀이 작성</li>
+                    <li>24시간 이내 PDF 풀이서 전달</li>
+                  </ol>
+                  <p class="faq-note">모든 풀이서는 충분한 시간을 들여 개별적으로 작성되므로 일정 시간이 소요되는 점 양해 부탁드립니다.</p>
+                  <p class="faq-note">신청이 몰리는 경우 전달 시간이 조금 지연될 수 있으며, 이 경우 카카오톡으로 미리 안내드립니다.</p>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>PDF 풀이서는 이렇게 전달됩니다.</h4>
+                  <p>상세 사주풀이는 상담 후 PDF 파일 형태로 전달됩니다.</p>
+                  <p>PDF 풀이서에는 사주 원국, 오행의 흐름, 대운·세운, 재물운, 직업운, 애정운, 실천 조언 등 신청자의 사주와 고민에 맞춘 내용이 정리됩니다.</p>
+                  <p>한 번 받아보신 풀이서는 언제든 다시 열어보며 참고하실 수 있습니다.</p>
+                </div>
+
+                <div class="faq-divider"></div>
+
+                <div class="faq-subsection">
+                  <h4>안내 및 감사의 말씀</h4>
+                  <p>모든 상세 사주풀이는 한 분의 사주와 고민을 바탕으로 개별 작성됩니다.</p>
+                  <p>정해진 문장을 그대로 전달하는 방식이 아니라, 타고난 성향과 현재의 흐름, 그리고 남겨주신 고민을 함께 살피며 풀이서를 작성합니다.</p>
+                  <p>그래서 신청 건수를 무리하게 늘리기보다, 한 분 한 분에게 충분한 시간을 쓰는 방식으로 진행하고 있습니다.</p>
+                  <p>찾아주시는 분들이 “그냥 좋은 말만 들었다”가 아니라 “내 상황을 조금 더 이해하게 됐다”, “앞으로 어떻게 움직이면 좋을지 감이 잡혔다”라고 느끼실 수 있도록 정성을 다하겠습니다.</p>
+                  <p>앞으로도 초심을 잃지 않고, 찾아주시는 모든 분들께 진심과 정성을 담아 풀이를 전달드리겠습니다.</p>
+                  <p><strong>감사합니다.</strong></p>
+                </div>
               </div>
             </div>
           </article>
@@ -2998,7 +3307,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       }
       if (isFallback) {
         return {
-          panelNote: '현재 화면은 대체 분포 기준으로 정리한 참고 비율입니다.',
+          panelNote: '현재 화면은 무료 분석 결과를 이해하기 쉽게 정리한 안내 비율입니다.',
           elementHint: '표시된 비율은 해석용 요약 기준으로 정리되었습니다.'
         };
       }
@@ -3022,7 +3331,7 @@ MBTI보다 깊게 나에 대해 알아보세요</p>
       resultIntro.textContent = ui.intro || `${name}님의 네 기둥을 중심으로 요약한 무료 결과입니다.`;
       summaryHeadline.textContent = ui.summaryTitle || '무료 요약 결과';
       summaryText.textContent = isFallback
-        ? '현재 화면은 대체 데이터로 구성되었을 수 있습니다. 아래 카드에서 실제 반환값 기준 요약을 먼저 확인해 주세요.'
+        ? '일시적인 연결 상황에 따라 요약 구성이 달라질 수 있습니다. 아래 카드의 핵심 내용을 먼저 확인해 주세요.'
         : '사주 원국, 오행·십성 경향, 핵심 해석을 아래 카드에서 확인해보세요.';
       if (distributionNote) {
         distributionNote.textContent = distributionGuide.panelNote || '';
