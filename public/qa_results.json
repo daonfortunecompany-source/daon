@@ -1,0 +1,46 @@
+{
+  "initial": {
+    "hasFreeForm": true,
+    "hasName": true,
+    "hasYear": true,
+    "hasMonth": true,
+    "hasDay": true,
+    "hasTimeHour": true,
+    "hasTimeMinute": true,
+    "hasBirthTimeUnknown": true,
+    "hasSubmit": true,
+    "hasReviewSection": true,
+    "reviewCount": 5,
+    "hasBookSection": true,
+    "bookImageCount": 16,
+    "hasPricingButton": true,
+    "hasBottomButton": true,
+    "hasResultButton": true,
+    "bodyScrollWidth": 430,
+    "viewportWidth": 430,
+    "hasFaqText": true,
+    "hasPdfPhrase": true,
+    "reviewUsesSixthImage": false,
+    "bookCtaHref": "http://pf.kakao.com/_dhIxfX/chat"
+  },
+  "freeResult": {
+    "resultCardVisible": true,
+    "sourceBadge": "분석 완료",
+    "premiumHint": "무료 요약에서 다 담기 어려운 흐름과 조언이 궁금하시다면 상세 사주풀이를 신청해 보세요.",
+    "resultTitle": "무료 분석 결과",
+    "noHorizontalScroll": true,
+    "summaryHeadline": "무료 요약 결과"
+  },
+  "linkAndFunction": {
+    "launchFunctionContainsKakao": false,
+    "bookCtaText": "상세 사주풀이 신청하기",
+    "payButtonText": "상세 사주풀이 신청하기",
+    "bottomButtonText": "상세 사주풀이 신청하기",
+    "resultButtonText": "상세 사주풀이 신청하기"
+  },
+  "screenshots": {
+    "freeSummaryShot": "/mnt/user-data/outputs/daon_restore_patch_20260701/free-summary-mobile.png",
+    "reviewsShot": "/mnt/user-data/outputs/daon_restore_patch_20260701/reviews-mobile.png",
+    "bookShot": "/mnt/user-data/outputs/daon_restore_patch_20260701/book-excerpt-mobile.png"
+  }
+}
